@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 
 #ifdef _WIN32
@@ -294,7 +295,48 @@ RenderRequest make_request(const Song &song, const std::vector<const Track *> &p
     return r;
 }
 
-Mixer::Mixer() { cache_dir_ = join_path(temp_dir(), "singing-voice-studio-cache"); }
+namespace {
+//: The most a run keeps. A minute of stereo is about ten megabytes, so this
+//: is a long afternoon of different renders; past it the ones played longest
+//: ago go first.
+const long long kCacheBytes = 256LL * 1024 * 1024;
+}  // namespace
+
+// The cache was one folder that nothing ever emptied, while its index was
+// only in memory -- so every render of every earlier run sat in the temporary
+// folder for good, unreachable: half a gigabyte, reported, from one person's
+// afternoon. Each run now keeps its own folder, named for its process, and
+// takes it away when it closes; a folder left by a run that did not close
+// (its process is gone) is cleared by the next one to start, and two copies
+// of the program running at once never touch each other's.
+Mixer::Mixer() {
+    std::string base = join_path(temp_dir(), "singing-voice-studio-cache");
+    for (const std::string &n : list_dir(base)) {
+        std::string p = join_path(base, n);
+        char *end = nullptr;
+        long pid = std::strtol(n.c_str(), &end, 10);
+        bool run_folder = dir_exists(p) && end && *end == 0;
+        if (!run_folder || !process_alive(pid)) remove_tree(p);   // the old loose files too
+    }
+    cache_dir_ = join_path(base, std::to_string(current_pid()));
+}
+
+Mixer::~Mixer() { remove_tree(cache_dir_); }
+
+void Mixer::remember(const std::string &key, const std::string &file, double seconds, double peak) {
+    long long bytes = std::max(0LL, file_size(file));
+    cache_[key] = {seconds, peak, bytes, ++clock_};
+    cache_bytes_ += bytes;
+    while (cache_bytes_ > kCacheBytes && cache_.size() > 1) {
+        auto oldest = cache_.end();
+        for (auto it = cache_.begin(); it != cache_.end(); ++it)
+            if (it->first != key && (oldest == cache_.end() || it->second.used < oldest->second.used)) oldest = it;
+        if (oldest == cache_.end()) break;
+        remove_file(join_path(cache_dir_, oldest->first + ".wav"));
+        cache_bytes_ -= oldest->second.bytes;
+        cache_.erase(oldest);
+    }
+}
 
 std::vector<float> Mixer::track(const PartRequest &t, double bpm, double consonants, double start,
                                 bool early, bool *stopped_short, std::string *error) {
@@ -419,8 +461,9 @@ RenderResult Mixer::render(const RenderRequest &req, const std::string &out_path
     if (hit != cache_.end() && file_exists(kept)) {
         res.ok = true;
         res.cached = true;
-        res.seconds = hit->second.first;
-        res.peak = hit->second.second;
+        res.seconds = hit->second.seconds;
+        res.peak = hit->second.peak;
+        hit->second.used = ++clock_;
         res.path = deliver(kept);
         return res;
     }
@@ -529,7 +572,7 @@ RenderResult Mixer::render(const RenderRequest &req, const std::string &out_path
     res.stopped_short = stopped;
     make_dirs(cache_dir_);
     if (write_wav(kept, out, channels)) {
-        cache_[key] = {res.seconds, res.peak};
+        remember(key, kept, res.seconds, res.peak);
         res.path = deliver(kept);
     } else {
         std::vector<float> y = out;

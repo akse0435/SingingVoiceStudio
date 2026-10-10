@@ -66,14 +66,25 @@ RenderRequest make_request(const Song &song, const std::vector<const Track *> &p
 class Mixer {
 public:
     Mixer();
+    //: Takes its cache with it: what it rendered is only ever reused by this
+    //: run, so nothing of it is worth leaving in the temporary folder.
+    ~Mixer();
     RenderResult render(const RenderRequest &req, const std::string &out);
 
 private:
     std::vector<float> track(const PartRequest &t, double bpm, double consonants, double start,
                              bool early, bool *stopped_short, std::string *error);
     std::mutex mu_;
-    std::map<std::string, std::pair<double, double>> cache_;
+    void remember(const std::string &key, const std::string &file, double seconds, double peak);
+    struct Kept {
+        double seconds, peak;
+        long long bytes;
+        unsigned long long used;    //: when it was last asked for, by count
+    };
+    std::map<std::string, Kept> cache_;
     std::string cache_dir_;
+    long long cache_bytes_ = 0;
+    unsigned long long clock_ = 0;
 };
 
 //: One tick of the metronome mixed in, accented at each bar line; `start` is

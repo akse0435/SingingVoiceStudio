@@ -9,8 +9,11 @@
 #include <windows.h>
 #include <shlobj.h>
 #else
+#include <dirent.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <cerrno>
 #endif
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
@@ -245,6 +248,83 @@ bool read_file(const std::string &path, std::vector<unsigned char> *out) {
     while ((n = fread(buf, 1, sizeof buf, f)) > 0) out->insert(out->end(), buf, buf + n);
     fclose(f);
     return true;
+}
+
+std::vector<std::string> list_dir(const std::string &dir) {
+    std::vector<std::string> out;
+#ifdef _WIN32
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW(widen(join_path(dir, "*")).c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return out;
+    do {
+        std::string n = narrow(fd.cFileName);
+        if (n != "." && n != "..") out.push_back(n);
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+#else
+    DIR *d = opendir(dir.c_str());
+    if (!d) return out;
+    while (struct dirent *e = readdir(d)) {
+        std::string n = e->d_name;
+        if (n != "." && n != "..") out.push_back(n);
+    }
+    closedir(d);
+#endif
+    return out;
+}
+
+bool remove_file(const std::string &path) {
+#ifdef _WIN32
+    return DeleteFileW(widen(path).c_str()) != 0;
+#else
+    return std::remove(path.c_str()) == 0;
+#endif
+}
+
+void remove_tree(const std::string &path) {
+    if (dir_exists(path)) {
+        for (const std::string &n : list_dir(path)) remove_tree(join_path(path, n));
+#ifdef _WIN32
+        RemoveDirectoryW(widen(path).c_str());
+#else
+        rmdir(path.c_str());
+#endif
+    } else {
+        remove_file(path);
+    }
+}
+
+long long file_size(const std::string &path) {
+#ifdef _WIN32
+    WIN32_FILE_ATTRIBUTE_DATA a;
+    if (!GetFileAttributesExW(widen(path).c_str(), GetFileExInfoStandard, &a)) return -1;
+    return (long long)a.nFileSizeHigh << 32 | a.nFileSizeLow;
+#else
+    struct stat st;
+    return stat(path.c_str(), &st) == 0 ? (long long)st.st_size : -1;
+#endif
+}
+
+long current_pid() {
+#ifdef _WIN32
+    return long(GetCurrentProcessId());
+#else
+    return long(getpid());
+#endif
+}
+
+bool process_alive(long pid) {
+    if (pid <= 0) return false;
+#ifdef _WIN32
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, DWORD(pid));
+    if (!h) return GetLastError() == ERROR_ACCESS_DENIED;   // there, but not ours to ask
+    DWORD code = 0;
+    bool alive = GetExitCodeProcess(h, &code) && code == STILL_ACTIVE;
+    CloseHandle(h);
+    return alive;
+#else
+    return kill(pid_t(pid), 0) == 0 || errno == EPERM;
+#endif
 }
 
 }  // namespace svs

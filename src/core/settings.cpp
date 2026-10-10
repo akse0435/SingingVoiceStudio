@@ -37,14 +37,6 @@ bool read_json(const std::string &path, json *out) {
     }
 }
 
-void remove_file(const std::string &path) {
-#ifdef _WIN32
-    _wremove(widen(path).c_str());
-#else
-    std::remove(path.c_str());
-#endif
-}
-
 const char *const kNotes = "recovery.vws";
 const char *const kMark = "recovery.json";
 

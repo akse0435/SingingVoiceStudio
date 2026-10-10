@@ -1816,6 +1816,9 @@ void Studio::on_close(wxCloseEvent &evt) {
     preview_timer_.Stop();
     recovery_timer_.Stop();
     worker_->close();
+    // the two files playing goes through; the cache goes with the mixer
+    remove_file(wav_);
+    remove_file(preview_wav_);
     // closing properly is what says the kept copy is not needed
     recovery_clear();
     Destroy();

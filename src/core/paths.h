@@ -44,6 +44,17 @@ std::string temp_dir();
 std::string settings_dir();
 bool read_file(const std::string &path, std::vector<unsigned char> *out);
 
+//: The names in a folder, without "." and "..".
+std::vector<std::string> list_dir(const std::string &dir);
+bool remove_file(const std::string &path);
+//: A file, or a folder and everything in it.
+void remove_tree(const std::string &path);
+//: -1 if there is no such file
+long long file_size(const std::string &path);
+long current_pid();
+//: Whether a process with that number is still running.
+bool process_alive(long pid);
+
 //: Windows wants wide strings for anything outside ASCII; everything in this
 //: program is UTF-8 until the moment it reaches the system.
 std::wstring widen(const std::string &utf8);
