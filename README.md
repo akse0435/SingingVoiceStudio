@@ -129,7 +129,7 @@ Settings live in `~/Library/Application Support/Singing Voice Studio`.
 
 ## The keys
 
-As VocalWriter Studio's. F1 lists them in Messages. On a Mac read Cmd for
+As VocalWriter Studio's, plus a few. F1 lists them all in a window. On a Mac read Cmd for
 Ctrl and Option for Alt, and Option+H to hear a note.
 
 | | |
@@ -140,12 +140,14 @@ Ctrl and Option for Alt, and Option+H to hear a note.
 | M / S on a track | mute / solo |
 | Delete on a track | remove it |
 | Ctrl+Up / Ctrl+Down | reorder the parts, or move a note |
-| Ctrl+W / Ctrl+N / Ctrl+R | add a word / a note / a rest |
+| Ctrl+W / Ctrl+N / Ctrl+R | add a word / a note / a rest, after the selected note |
 | Ctrl+Shift+R | a rest to the end of the bar |
 | Ctrl+E, or Enter on a note | edit it, including its pitch bend |
 | Ctrl+D, or Delete | remove it |
 | Alt+Up / Alt+Down | transpose a semitone |
 | Alt+Right / Alt+Left | a sixteenth note longer or shorter |
+| Alt+Shift+Up / Alt+Shift+Down | transpose an octave |
+| Alt+Shift+Right / Alt+Shift+Left | twice or half as long |
 | Ctrl+Z / Ctrl+Shift+Z | undo / redo |
 | Ctrl+C / Ctrl+X / Ctrl+V / Ctrl+A | copy, cut, paste, select all |
 | Ctrl+G | go to a bar |

@@ -186,6 +186,23 @@ void consonant_factors(double consonants, double *onset, double *coda) {
     *coda = 1.0 - (1.0 - o) * kCoda;
 }
 
+int held_phoneme(const std::vector<std::string> &syms) {
+    for (size_t i = 0; i < syms.size(); ++i)
+        if (is_nucleus(syms[i])) return int(i);
+    if (syms.empty()) return -1;
+    // no vowel -- a hummed m, a hissed s -- so the phoneme with the most room
+    // to stretch is the one the note is held on
+    auto room = [](const std::string &s) {
+        const PhonemeInfo *p = phoneme(s);
+        double mx = p && p->max_ms ? p->max_ms : 80.0, mn = p && p->min_ms ? p->min_ms : 40.0;
+        return mx - mn;
+    };
+    size_t best = 0;
+    for (size_t i = 1; i < syms.size(); ++i)
+        if (room(syms[i]) > room(syms[best])) best = i;
+    return int(best);
+}
+
 std::vector<double> syllable_lengths(const std::vector<std::string> &syms, double ms,
                                      double consonants) {
     size_t n = syms.size();
@@ -201,13 +218,7 @@ std::vector<double> syllable_lengths(const std::vector<std::string> &syms, doubl
     std::vector<size_t> nuclei;
     for (size_t i = 0; i < n; ++i)
         if (is_nucleus(syms[i])) nuclei.push_back(i);
-    if (nuclei.empty()) {
-        // no vowel: stretch the phoneme with the most room
-        size_t best = 0;
-        for (size_t i = 1; i < n; ++i)
-            if (mx[i] - mn[i] > mx[best] - mn[best]) best = i;
-        nuclei.push_back(best);
-    }
+    if (nuclei.empty()) nuclei.push_back(size_t(held_phoneme(syms)));   // no vowel
     auto in_nuclei = [&](size_t i) {
         return std::find(nuclei.begin(), nuclei.end(), i) != nuclei.end();
     };

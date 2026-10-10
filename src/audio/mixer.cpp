@@ -112,12 +112,13 @@ bool is_rest(const std::vector<std::string> &ph) {
 }
 
 //: How long a note's opening consonants last, in beats.
+//: Only what comes before the phoneme the note is held on counts. A note with
+//: no vowel used to count as all onset -- a hummed m was moved, whole, half a
+//: beat ahead of where it was written, its bend left behind at the beat.
 double onset_beats(const SungNote &note, double bpm) {
+    int held = held_phoneme(note.phonemes);
     double ms = 0;
-    for (size_t i = 0; i < note.phonemes.size() && i < note.durations_ms.size(); ++i) {
-        if (is_nucleus(note.phonemes[i])) break;
-        ms += note.durations_ms[i];
-    }
+    for (int i = 0; i < held && size_t(i) < note.durations_ms.size(); ++i) ms += note.durations_ms[size_t(i)];
     return ms * bpm / 60000.0;
 }
 

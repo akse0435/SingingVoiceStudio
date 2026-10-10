@@ -47,6 +47,11 @@ std::vector<std::vector<std::string>> regroup(const std::vector<std::string> &ph
 //: (opening, closing) scale on the consonant lengths for a setting.
 void consonant_factors(double consonants, double *onset, double *coda);
 
+//: Which phoneme a note is held on: its first vowel, or, in a note with no
+//: vowel at all, the phoneme with the most room to stretch -- the m of a hum.
+//: -1 for a note with no phonemes. What comes before it is the note's onset.
+int held_phoneme(const std::vector<std::string> &syms);
+
 //: Split a note's time over its phonemes the way singing does: the
 //: consonants short, the vowels holding the rest. See ppc/midi.py in the
 //: VocalWriter repository, which measured it against the original.

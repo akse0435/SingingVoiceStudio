@@ -40,6 +40,7 @@ std::string spoken_length(double beats, Sig sig);
 std::optional<double> stepped_length(double beats, bool up);
 
 constexpr int kSemitone = 1;
+constexpr int kOctave = 12;
 
 class Studio : public wxFrame {
 public:
@@ -111,6 +112,7 @@ private:
     void refresh_row(int i);
     void nudge_pitch(int by);
     void nudge_length(bool up);
+    void scale_length(double factor);
     void sync_lengths();
     const Note *last();
     void on_select_all(wxCommandEvent &);
@@ -120,6 +122,8 @@ private:
     void on_copy(wxCommandEvent &);
     void on_cut(wxCommandEvent &);
     void on_paste(wxCommandEvent &);
+    int insertion_point();
+    const Note *insertion_neighbour();
     void on_add_word(wxCommandEvent &);
     void on_add_note(wxCommandEvent &);
     void on_add_rest(wxCommandEvent &);

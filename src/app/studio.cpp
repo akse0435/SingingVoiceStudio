@@ -28,7 +28,7 @@ const char *const kAppName = "Singing Voice Studio";
 
 enum {
     ID_ADD_WORD = wxID_HIGHEST + 1, ID_ADD_NOTE, ID_EDIT, ID_REMOVE,
-    ID_UP, ID_DOWN, ID_LONGER, ID_SHORTER,
+    ID_UP, ID_DOWN, ID_LONGER, ID_SHORTER, ID_OCTAVE_UP, ID_OCTAVE_DOWN, ID_DOUBLE, ID_HALVE,
     ID_PLAY, ID_HEAR, ID_STOP, ID_KEYS,
     ID_ADD_REST, ID_IMPORT, ID_EXPORT, ID_AUTO_PREVIEW, ID_EXPORT_TRACKS,
     ID_BAR_REST, ID_GOTO_BAR, ID_METRONOME, ID_PLAY_PAUSE, ID_PANES,
@@ -240,6 +240,10 @@ void Studio::build_menu() {
     note->Append(ID_DOWN, K("Transpose &down (Alt+Down on a note)"), "Down one semitone");
     note->Append(ID_LONGER, K("&Longer\tAlt+Right"), "One sixteenth note longer");
     note->Append(ID_SHORTER, K("&Shorter\tAlt+Left"), "One sixteenth note shorter");
+    note->Append(ID_OCTAVE_UP, K("Up an &octave (Alt+Shift+Up on a note)"), "Up twelve semitones");
+    note->Append(ID_OCTAVE_DOWN, K("Down an octa&ve (Alt+Shift+Down on a note)"), "Down twelve semitones");
+    note->Append(ID_DOUBLE, K("Twice as lon&g\tAlt+Shift+Right"), "Double the length");
+    note->Append(ID_HALVE, K("&Half as long\tAlt+Shift+Left"), "Halve the length");
 
     wxMenu *track = new wxMenu();
     track->Append(ID_TRACK_NEW, K("&New track\tCtrl+T"), "Add another part, with its own voice");
@@ -289,7 +293,7 @@ void Studio::build_menu() {
     f->Append(wxID_EXIT, (is_mac() ? wxString("&Quit\tCtrl+Q") : K("E&xit\tAlt+F4")));
 
     wxMenu *help = new wxMenu();
-    help->Append(ID_KEYS, K("&Keys\tF1"), "List the shortcuts in Messages");
+    help->Append(ID_KEYS, K("&Keys\tF1"), "List every shortcut");
 
     wxMenu *edit = new wxMenu();
     mi_undo_ = edit->Append(wxID_UNDO, K("&Undo\tCtrl+Z"), "Undo the last song edit");
@@ -330,6 +334,10 @@ void Studio::build_menu() {
     Bind(wxEVT_MENU, [this](wxCommandEvent &) { nudge_pitch(-kSemitone); }, ID_DOWN);
     Bind(wxEVT_MENU, [this](wxCommandEvent &) { nudge_length(true); }, ID_LONGER);
     Bind(wxEVT_MENU, [this](wxCommandEvent &) { nudge_length(false); }, ID_SHORTER);
+    Bind(wxEVT_MENU, [this](wxCommandEvent &) { nudge_pitch(kOctave); }, ID_OCTAVE_UP);
+    Bind(wxEVT_MENU, [this](wxCommandEvent &) { nudge_pitch(-kOctave); }, ID_OCTAVE_DOWN);
+    Bind(wxEVT_MENU, [this](wxCommandEvent &) { scale_length(2.0); }, ID_DOUBLE);
+    Bind(wxEVT_MENU, [this](wxCommandEvent &) { scale_length(0.5); }, ID_HALVE);
     on(ID_METRONOME, &Studio::on_metronome);
     on(ID_TRACK_NEW, &Studio::on_track_new);
     on(ID_TRACK_EDIT, &Studio::on_track_edit);
@@ -441,8 +449,8 @@ void Studio::on_keys(wxCommandEvent &) {
         "M on a track  mute it, S  solo it",
         "Delete on a track  remove it",
         "Ctrl+Up or Ctrl+Down on a track  reorder the parts",
-        "Ctrl+W  add word",
-        "Ctrl+N  add note",
+        "Ctrl+W  add a word after the selected note, or at the end",
+        "Ctrl+N  add a note after the selected note, or at the end",
         "Ctrl+R  add a rest, a silent break",
         "Ctrl+Shift+R  rest to the end of the bar",
         "Ctrl+G  go to a bar",
@@ -457,6 +465,8 @@ void Studio::on_keys(wxCommandEvent &) {
         "Shift with the arrow keys selects more than one note",
         "Alt+Up or Alt+Down  transpose a semitone",
         "Alt+Right or Alt+Left  a sixteenth note longer or shorter",
+        "Alt+Shift+Up or Alt+Shift+Down  transpose an octave",
+        "Alt+Shift+Right or Alt+Shift+Left  twice or half as long",
         "Pitch bend and the mod wheel are set per note, in the note editor. The mod wheel deepens "
         "the vibrato",
         "Space  play from the note the cursor is on, or stop if it is playing",
@@ -470,7 +480,25 @@ void Studio::on_keys(wxCommandEvent &) {
         "Ctrl+Shift+T  export every track to its own WAV",
         "Enter on a note edits it",
     };
-    for (const char *line : lines) say(K(line));
+    // In a window of their own, where the focus goes, so they are read the
+    // moment F1 is pressed. They used to go into Messages alone, which left
+    // nothing to hear: the focus stayed in the list and F1 seemed to do
+    // nothing at all.
+    wxString text;
+    for (const char *line : lines) text += K(line) + "\n";
+    wxDialog dlg(this, wxID_ANY, "Keys", wxDefaultPosition, wxDefaultSize,
+                 wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER);
+    wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
+    wxTextCtrl *list = new wxTextCtrl(&dlg, wxID_ANY, text, wxDefaultPosition, wxSize(560, 360),
+                                      wxTE_MULTILINE | wxTE_READONLY | wxTE_DONTWRAP);
+    labelled(&dlg, outer, "Keys", list, 1);
+    wxButton *close = new wxButton(&dlg, wxID_CANCEL, "Close");
+    outer->Add(close, 0, wxALIGN_RIGHT | wxALL, 8);
+    dlg.SetEscapeId(wxID_CANCEL);
+    dlg.SetSizerAndFit(outer);
+    list->SetFocus();
+    list->SetInsertionPoint(0);
+    dlg.ShowModal();
 }
 
 void Studio::say(const wxString &text) {
@@ -835,7 +863,13 @@ void Studio::sync(int select) {
 void Studio::on_key(wxKeyEvent &evt) {
     int code = evt.GetKeyCode();
     wxCommandEvent e;
-    if (evt.AltDown() && (code == WXK_UP || code == WXK_DOWN || code == WXK_LEFT || code == WXK_RIGHT)) {
+    bool arrow = code == WXK_UP || code == WXK_DOWN || code == WXK_LEFT || code == WXK_RIGHT;
+    if (evt.AltDown() && evt.ShiftDown() && arrow) {
+        // the same keys, a bigger step: an octave, or twice and half the length
+        if (code == WXK_UP) nudge_pitch(kOctave);
+        else if (code == WXK_DOWN) nudge_pitch(-kOctave);
+        else scale_length(code == WXK_RIGHT ? 2.0 : 0.5);
+    } else if (evt.AltDown() && arrow) {
         if (code == WXK_UP) nudge_pitch(kSemitone);
         else if (code == WXK_DOWN) nudge_pitch(-kSemitone);
         else nudge_length(code == WXK_RIGHT);
@@ -889,7 +923,7 @@ void Studio::nudge_pitch(int by) {
         touch();
         std::string message = rows.size() == 1 ? pitch_name(notes()[size_t(rows[0])].pitch)
                                                : std::to_string(rows.size()) + " notes " +
-                                                     (by > 0 ? "up" : "down") + " a semitone";
+                                                     (by > 0 ? "up" : "down") + (std::abs(by) == kOctave ? " an octave" : " a semitone");
         announce_note(W(message), list_, rows[0]);
         preview_note(rows[0]);
     });
@@ -923,6 +957,40 @@ void Studio::nudge_length(bool up) {
         std::string message = rows.size() == 1 ? spoken_length(notes()[size_t(rows[0])].beats, signature())
                                                : std::to_string(moved) + " notes a sixteenth " +
                                                      (up ? "longer" : "shorter");
+        announce_note(W(message), list_, rows[0]);
+    });
+}
+
+//: Twice or half the length: Alt+Shift with Right and Left. A note that
+//: would come out shorter than a thirty-second note is left as it is, as a
+//: nudge leaves it, rather than being made as short as it can go.
+void Studio::scale_length(double factor) {
+    undoable("change note length", [&] {
+        std::vector<int> rows = selected();
+        if (rows.empty()) {
+            say("select a note first");
+            return;
+        }
+        int moved = 0;
+        for (int i : rows) {
+            Note &n = notes()[size_t(i)];
+            double want = std::nearbyint(n.beats * factor * 1e6) / 1e6;
+            if (want < kMinBeats - 1e-9) continue;
+            n.beats = want;
+            ++moved;
+        }
+        if (!moved) {
+            announce_note(W(spoken_length(notes()[size_t(rows[0])].beats, signature()) +
+                            ", and half of that is shorter than a nudge will go. Edit the note to go shorter."),
+                          list_, rows[0]);
+            return;
+        }
+        touch();
+        sync_lengths();
+        preview_note(rows[0]);
+        std::string message = rows.size() == 1 ? spoken_length(notes()[size_t(rows[0])].beats, signature())
+                                               : std::to_string(moved) + " notes " +
+                                                     (factor > 1 ? "twice as long" : "half as long");
         announce_note(W(message), list_, rows[0]);
     });
 }
@@ -1048,15 +1116,31 @@ void Studio::on_paste(wxCommandEvent &) {
     });
 }
 
+//: Where a new note goes, as everything else that adds goes: after the
+//: selected notes, or at the end when nothing is selected. It used to be the
+//: end always -- the original program's way -- so adding a word in the middle
+//: of a song meant adding it at the end and walking it back up note by note.
+int Studio::insertion_point() {
+    std::vector<int> rows = selected();
+    return rows.empty() ? int(notes().size()) : rows.back() + 1;
+}
+
+//: The note a new one takes its pitch and length from: the one it goes in
+//: after, or the last.
+const Note *Studio::insertion_neighbour() {
+    int at = insertion_point();
+    return at > 0 && at <= int(notes().size()) ? &notes()[size_t(at - 1)] : last();
+}
+
 void Studio::on_add_word(wxCommandEvent &) {
     undoable("add word", [&] {
-        const Note *l = last();
+        const Note *l = insertion_neighbour();
         AddWordDialog dlg(this, this, l ? l->pitch : kDefaultPitch, l ? l->beats : kDefaultBeats);
         if (dlg.ShowModal() != wxID_OK) return;
         std::vector<Note> added = dlg.result();
         if (added.empty()) return;
-        int at = int(notes().size());
-        notes().insert(notes().end(), added.begin(), added.end());
+        int at = insertion_point();
+        notes().insert(notes().begin() + at, added.begin(), added.end());
         touch();
         sync(at);
         std::string all;
@@ -1068,14 +1152,15 @@ void Studio::on_add_word(wxCommandEvent &) {
 
 void Studio::on_add_note(wxCommandEvent &) {
     undoable("add note", [&] {
-        const Note *l = last();
+        const Note *l = insertion_neighbour();
         Note seed({}, l ? l->pitch : kDefaultPitch, l ? l->beats : kDefaultBeats);
         NoteDialog dlg(this, this, nullptr, seed);
         if (dlg.ShowModal() != wxID_OK) return;
-        notes().push_back(dlg.result());
+        int at = insertion_point();
+        notes().insert(notes().begin() + at, dlg.result());
         touch();
-        sync(int(notes().size()) - 1);
-        std::string text = notes().back().text();
+        sync(at);
+        std::string text = notes()[size_t(at)].text();
         say(W("added a note: " + (text.empty() ? std::string("empty") : text)));
     });
 }
