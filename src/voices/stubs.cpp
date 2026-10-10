@@ -47,6 +47,12 @@ std::unique_ptr<Family> make_ssi263_family() {
 }
 #endif
 
+#ifndef SVS_HAVE_MACINTALK
+std::unique_ptr<Family> make_macintalk_family() {
+    return std::make_unique<Absent>("MacinTalk", std::vector<VoiceEntry>{});
+}
+#endif
+
 #ifndef SVS_HAVE_MICROSOFT
 std::unique_ptr<Family> make_microsoft_family() {
     const char *names[] = {"Sam", "Mike", "Mary"};

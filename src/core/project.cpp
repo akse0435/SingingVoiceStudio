@@ -363,6 +363,7 @@ json track_doc(const Track &t) {
     d["name"] = t.name;
     d["program"] = t.program;
     d["voice_id"] = t.voice_id ? json(*t.voice_id) : json(nullptr);
+    if (t.voice_name) d["voice_name"] = *t.voice_name;
     d["volume"] = t.volume;
     d["pan"] = t.pan;
     d["mute"] = t.mute;
@@ -450,6 +451,7 @@ Track read_track(const json &doc, size_t index) {
                  ? name->get<std::string>()
                  : "Voice " + std::to_string(index + 1);
     if (const json *v = get("voice_id"); v && !v->is_null()) t.voice_id = as_int(*v, 0);
+    if (const json *v = get("voice_name"); v && v->is_string()) t.voice_name = v->get<std::string>();
     if (const json *v = get("voice")) t.voice = read_voice(*v);
     if (const json *v = get("reverb")) t.reverb = read_reverb(*v);
     if (const json *v = get("consonants"); v && !v->is_null()) {

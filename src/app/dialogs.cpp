@@ -750,6 +750,7 @@ void TrackDialog::apply(Track &track) const {
     track.name = name.empty() ? "Voice" : U(name);
     int i = voice_->GetSelection();
     track.voice_id = ids_[size_t(std::max(0, std::min(i, int(ids_.size()) - 1)))];
+    track.voice_name = saved_voice_name(*track.voice_id, studio_->voice_list());
     track.volume = volume_->GetValue();
     track.pan = pan_->GetValue();
     // None when the part is following the song, which is not the same as

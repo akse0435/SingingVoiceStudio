@@ -9,6 +9,12 @@
 //   1000 - 1999   DECtalk
 //   2000 - 2999   the SSI-263
 //   3000 - 3999   Microsoft Sam, Mike and Mary, and the SAPI 4 voice modes
+//   4000 - 4999   MacinTalk: Apple's voices from Mac OS X 10.4 to 10.7, a
+//                 hundred numbers to each generation
+//
+// The number is not the only thing a song keeps: a voice outside
+// VocalWriter's bank is saved with its name as well (see Track::voice_name),
+// and the name wins if the two ever disagree.
 #pragma once
 
 #include <memory>
@@ -24,12 +30,21 @@ enum : int {
     kDectalkBase = 1000,
     kSsi263Base = 2000,
     kMicrosoftBase = 3000,
+    kMacinTalkBase = 4000,
     kFamilySpan = 1000,
 };
 
 struct VoiceEntry {
     int id = 0;
     std::string name;    //: as the voice list shows it, e.g. "DECtalk Betty"
+    //: The engine as the Engine box shows it, when one family is several
+    //: there -- "MacinTalk Leopard" -- or empty for the family's own name.
+    //: A voice's name starts with its group's, so the Voice box can leave
+    //: it off ("Fred" beside "MacinTalk Leopard").
+    std::string group;
+    //: false for a voice whose data is missing although its family's is not
+    //: (one Mac OS X generation extracted and not another)
+    bool installed = true;
 };
 
 class Family {
@@ -57,5 +72,6 @@ std::unique_ptr<Family> make_vocalwriter_family();
 std::unique_ptr<Family> make_dectalk_family();
 std::unique_ptr<Family> make_ssi263_family();
 std::unique_ptr<Family> make_microsoft_family();
+std::unique_ptr<Family> make_macintalk_family();
 
 }  // namespace svs

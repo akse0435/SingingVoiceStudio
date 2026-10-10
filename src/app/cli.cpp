@@ -329,6 +329,7 @@ int run_cli(const CliArgs &args) {
     } catch (const std::exception &e) {
         return fail("cannot open " + args.file + ": " + e.what());
     }
+    resolve_voice_names(song, Registry::get().voices());
     std::map<int, int> programs = program_map();
     if (args.list_tracks) {
         for (size_t i = 0; i < song.tracks.size(); ++i) {
@@ -362,7 +363,10 @@ int run_cli(const CliArgs &args) {
         } catch (const std::exception &e) {
             return fail(e.what());
         }
-        for (Track &t : song.tracks) t.voice_id = pick;
+        for (Track &t : song.tracks) {
+            t.voice_id = pick;
+            t.voice_name = saved_voice_name(pick, voices);
+        }
         say("every track is singing in " + Registry::get().voice_name(pick));
     }
     std::vector<const Track *> wanted;

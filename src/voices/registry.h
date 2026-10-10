@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "core/project.h"
 #include "voices/family.h"
 
 namespace svs {
@@ -38,5 +39,15 @@ private:
     std::vector<VoiceListing> cache_;
     bool listed_ = false;
 };
+
+//: A song's tracks put back on the voices their saved names say, where the
+//: numbers have moved since the song was written. A track whose name is not
+//: here at all keeps its number and says so when it is sung.
+//: True if any track moved. `voices` is Registry::voices(), or the copy of it
+//: the window keeps (the window never asks the engines anything itself).
+bool resolve_voice_names(Song &song, const std::vector<VoiceListing> &voices);
+//: The name a track should be saved with for this voice: none for
+//: VocalWriter's own, which stay just a number as VocalWriter Studio wrote them.
+std::optional<std::string> saved_voice_name(int voice_id, const std::vector<VoiceListing> &voices);
 
 }  // namespace svs

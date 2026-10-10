@@ -546,6 +546,8 @@ void Studio::set_program_map(const std::vector<int> &picks) {
 
 void Studio::set_voices(std::vector<VoiceListing> v) {
     voices_ = std::move(v);
+    // a song opened before the list arrived is put on its voices now
+    resolve_voice_names(song_, voices_);
     sync_tracks(current_);        // the Voice column can now say
 }
 
@@ -1617,6 +1619,7 @@ bool Studio::may_discard(const wxString &what) {
 //: Replace the song with what was loaded or imported.
 void Studio::take(const Song &song, const std::string &path) {
     song_ = song;
+    resolve_voice_names(song_, voices_);
     if (song_.tracks.empty()) {
         Track t;
         t.name = "Voice 1";

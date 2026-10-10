@@ -61,7 +61,7 @@ endif()
 # called svs_<name> holding src/voices/<name>.cpp and the engine's own
 # sources, and defines SVS_HAVE_<NAME> on it. An engine that is not there is
 # replaced by a stub that offers its voices and says it cannot sing them.
-set(SVS_ENGINES "dectalk;ssi263;microsoft" CACHE STRING "the engines to build in")
+set(SVS_ENGINES "dectalk;ssi263;microsoft;macintalk" CACHE STRING "the engines to build in")
 set(SVS_ENGINE_LIBS)
 set(SVS_ENGINE_DEFS)
 foreach(eng ${SVS_ENGINES})

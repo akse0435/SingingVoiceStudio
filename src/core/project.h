@@ -76,6 +76,10 @@ struct Track {
     //: which voice sings this part (see voices/family.h for the numbering);
     //: unset means the program above still decides
     std::optional<int> voice_id;
+    //: the voice's name too, for one outside VocalWriter's bank: numbers are
+    //: fixed per engine, but the name is what a person chose, and it wins if
+    //: the two ever disagree (see resolve_voice_names)
+    std::optional<std::string> voice_name;
     int volume = 100;   // per cent
     int pan = 0;        // -100 .. 100
     bool mute = false;
@@ -90,6 +94,7 @@ struct Track {
 
     bool operator==(const Track &o) const {
         return name == o.name && program == o.program && voice_id == o.voice_id &&
+               voice_name == o.voice_name &&
                volume == o.volume && pan == o.pan && mute == o.mute && solo == o.solo &&
                notes == o.notes && voice == o.voice && reverb == o.reverb &&
                consonants == o.consonants;
