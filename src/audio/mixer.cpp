@@ -215,19 +215,6 @@ std::vector<float> click(double hz, double level) {
     return out;
 }
 
-bool copy_file(const std::string &from, const std::string &to) {
-#ifdef _WIN32
-    return CopyFileW(widen(from).c_str(), widen(to).c_str(), FALSE) != 0;
-#else
-    std::vector<unsigned char> b;
-    if (!read_file(from, &b)) return false;
-    FILE *f = std::fopen(to.c_str(), "wb");
-    if (!f) return false;
-    bool ok = fwrite(b.data(), 1, b.size(), f) == b.size();
-    return fclose(f) == 0 && ok;
-#endif
-}
-
 }  // namespace
 
 void with_metronome(std::vector<float> &y, int channels, double bpm, double bar_beats,
@@ -296,47 +283,57 @@ RenderRequest make_request(const Song &song, const std::vector<const Track *> &p
 }
 
 namespace {
-//: The most a run keeps. A minute of stereo is about ten megabytes, so this
-//: is a long afternoon of different renders; past it the ones played longest
-//: ago go first.
-const long long kCacheBytes = 256LL * 1024 * 1024;
+
+//: The most the phrase store keeps. A phrase is mono floats, 176 KB a second,
+//: so this is three quarters of an hour of distinct singing; past it the
+//: phrases sung longest ago go first.
+const size_t kPhraseBytes = 512u * 1024 * 1024;
+
+//: Everything that decides how a phrase sounds, as text: the key it is kept
+//: under. Doubles are written in full, so two phrases that differ by a hair
+//: are two phrases.
+std::string phrase_key(int voice_id, const Phrase &p) {
+    std::string k;
+    char buf[64];
+    auto num = [&](double v) {
+        std::snprintf(buf, sizeof buf, "%.17g,", v);
+        k += buf;
+    };
+    num(voice_id);
+    num(p.bpm);
+    num(p.level);
+    num(p.any_bends);
+    for (int VoiceStyle::*f : {&VoiceStyle::color, &VoiceStyle::vibrato, &VoiceStyle::vibrato_rate,
+                               &VoiceStyle::chorus, &VoiceStyle::breath, &VoiceStyle::detune,
+                               &VoiceStyle::portamento})
+        num(p.style.*f);
+    for (const SungNote &n : p.notes) {
+        k += "N";
+        num(n.midi);
+        num(n.beats);
+        num(n.velocity);
+        for (const std::string &ph : n.phonemes) k += ph + " ";
+        for (double d : n.durations_ms) num(d);
+    }
+    for (const BendEvent &b : p.bends) {
+        k += "B";
+        num(b.seconds);
+        num(b.semitones);
+    }
+    for (const BendEvent &m : p.mods) {
+        k += "M";
+        num(m.seconds);
+        num(m.semitones);
+    }
+    return k;
+}
+
 }  // namespace
 
-// The cache was one folder that nothing ever emptied, while its index was
-// only in memory -- so every render of every earlier run sat in the temporary
-// folder for good, unreachable: half a gigabyte, reported, from one person's
-// afternoon. Each run now keeps its own folder, named for its process, and
-// takes it away when it closes; a folder left by a run that did not close
-// (its process is gone) is cleared by the next one to start, and two copies
-// of the program running at once never touch each other's.
-Mixer::Mixer() {
-    std::string base = join_path(temp_dir(), "singing-voice-studio-cache");
-    for (const std::string &n : list_dir(base)) {
-        std::string p = join_path(base, n);
-        char *end = nullptr;
-        long pid = std::strtol(n.c_str(), &end, 10);
-        bool run_folder = dir_exists(p) && end && *end == 0;
-        if (!run_folder || !process_alive(pid)) remove_tree(p);   // the old loose files too
-    }
-    cache_dir_ = join_path(base, std::to_string(current_pid()));
-}
-
-Mixer::~Mixer() { remove_tree(cache_dir_); }
-
-void Mixer::remember(const std::string &key, const std::string &file, double seconds, double peak) {
-    long long bytes = std::max(0LL, file_size(file));
-    cache_[key] = {seconds, peak, bytes, ++clock_};
-    cache_bytes_ += bytes;
-    while (cache_bytes_ > kCacheBytes && cache_.size() > 1) {
-        auto oldest = cache_.end();
-        for (auto it = cache_.begin(); it != cache_.end(); ++it)
-            if (it->first != key && (oldest == cache_.end() || it->second.used < oldest->second.used)) oldest = it;
-        if (oldest == cache_.end()) break;
-        remove_file(join_path(cache_dir_, oldest->first + ".wav"));
-        cache_bytes_ -= oldest->second.bytes;
-        cache_.erase(oldest);
-    }
-}
+// The renders used to be WAV files in a cache folder, which nothing emptied;
+// they are kept in memory now, so whatever an older copy of the program left
+// in the temporary folder is cleared away the first time this one starts.
+Mixer::Mixer() { remove_tree(join_path(temp_dir(), "singing-voice-studio-cache")); }
 
 std::vector<float> Mixer::track(const PartRequest &t, double bpm, double consonants, double start,
                                 bool early, bool *stopped_short, std::string *error) {
@@ -378,12 +375,9 @@ std::vector<float> Mixer::track(const PartRequest &t, double bpm, double consona
     double length = std::max(0.0, total - start) * spb + kTailSeconds;
     std::vector<float> out(size_t(round_half_even(length * kSampleRate)), 0.0f);
 
-    std::string err;
-    std::unique_ptr<Singer> singer = Registry::get().singer(t.voice_id, &err);
-    if (!singer) {
-        *error = "cannot sing " + Registry::get().voice_name(t.voice_id) + ": " + err;
-        return out;
-    }
+    // made the first time a phrase is not already in the store, so a song
+    // whose phrases are all there sings nothing and starts no engine
+    std::unique_ptr<Singer> singer;
     double was_over = 0.0;
     for (Run &run : runs) {
         Phrase phrase;
@@ -421,51 +415,99 @@ std::vector<float> Mixer::track(const PartRequest &t, double bpm, double consona
         std::vector<Pt> mod_secs;
         for (const Pt &p : mods) mod_secs.push_back({p.t * spb, p.v, p.slides});
         phrase.mods = bend_events(mod_secs, from * spb, (from + span) * spb, wheel_step);
-        Sung y = singer->sing(phrase);
-        if (y.stopped_short) *stopped_short = true;
+        std::string key = phrase_key(t.voice_id, phrase);
+        std::shared_ptr<const std::vector<float>> sung;
+        auto kept = phrases_.find(key);
+        if (kept != phrases_.end()) {
+            kept->second.used = ++clock_;
+            sung = kept->second.samples;
+            if (kept->second.stopped_short) *stopped_short = true;
+        } else {
+            if (!singer) {
+                std::string err;
+                singer = Registry::get().singer(t.voice_id, &err);
+                if (!singer) {
+                    *error = "cannot sing " + Registry::get().voice_name(t.voice_id) + ": " + err;
+                    return out;
+                }
+            }
+            Sung y = singer->sing(phrase);
+            if (y.stopped_short) *stopped_short = true;
+            sung = std::make_shared<const std::vector<float>>(std::move(y.samples));
+            phrases_[key] = {sung, y.stopped_short, ++clock_};
+            phrase_bytes_ += sung->size() * sizeof(float);
+            while (phrase_bytes_ > kPhraseBytes && phrases_.size() > 1) {
+                auto oldest = phrases_.end();
+                for (auto it = phrases_.begin(); it != phrases_.end(); ++it)
+                    if (it->first != key && (oldest == phrases_.end() || it->second.used < oldest->second.used))
+                        oldest = it;
+                if (oldest == phrases_.end()) break;
+                phrase_bytes_ -= oldest->second.samples->size() * sizeof(float);
+                phrases_.erase(oldest);
+            }
+        }
+        const std::vector<float> &ys = *sung;
         long i = round_half_even((from - start) * spb * kSampleRate);
         size_t skip = 0;
         if (i < 0) {                                  // began before the cursor
             skip = size_t(-i);
             i = 0;
         }
-        if (skip >= y.samples.size()) continue;
-        size_t len = y.samples.size() - skip;
+        if (skip >= ys.size()) continue;
+        size_t len = ys.size() - skip;
         if (size_t(i) + len > out.size()) out.resize(size_t(i) + len, 0.0f);
-        for (size_t k = 0; k < len; ++k) out[size_t(i) + k] += y.samples[skip + k];
+        for (size_t k = 0; k < len; ++k) out[size_t(i) + k] += ys[skip + k];
     }
     return out;
 }
 
-RenderResult Mixer::render(const RenderRequest &req, const std::string &out_path) {
+Mixed Mixer::mix(const RenderRequest &req) {
     std::lock_guard<std::mutex> lock(mu_);
+    Mixed res = mix_locked(req);
+    if (res.ok && req.metronome_bar) {
+        // on a copy: the song kept for next time is only ever the singing
+        auto ticked = std::make_shared<std::vector<float>>(*res.samples);
+        with_metronome(*ticked, res.channels, req.bpm, *req.metronome_bar, req.start);
+        res.samples = ticked;
+    }
+    return res;
+}
+
+RenderResult Mixer::render(const RenderRequest &req, const std::string &out_path) {
+    Mixed m;
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        m = mix_locked(req);
+    }
     RenderResult res;
-    std::string key = request_key(req);
-    std::string kept = join_path(cache_dir_, key + ".wav");
+    res.ok = m.ok;
+    res.error = m.error;
+    res.seconds = m.seconds;
+    res.peak = m.peak;
+    res.cached = m.cached;
+    res.stopped_short = m.stopped_short;
+    res.path = out_path;
+    if (!m.ok) return res;
+    std::vector<float> y = *m.samples;
+    if (req.metronome_bar) with_metronome(y, m.channels, req.bpm, *req.metronome_bar, req.start);
+    if (!write_wav(out_path, y, m.channels)) {
+        res.ok = false;
+        res.error = "could not write " + out_path;
+    }
+    return res;
+}
 
-    auto deliver = [&](const std::string &from) -> std::string {
-        // Windows will not let a file be written that the player still has
-        // open; the caller is then handed the cached copy, the same audio.
-        if (req.metronome_bar) {
-            std::vector<float> y;
-            int ch = 1, rate = kSampleRate;
-            if (!read_wav(from, &y, &ch, &rate)) return from;
-            with_metronome(y, ch, req.bpm, *req.metronome_bar, req.start);
-            return write_wav(out_path, y, ch) ? out_path : from;
-        }
-        if (from == out_path) return out_path;
-        return copy_file(from, out_path) ? out_path : from;
-    };
-
-    auto hit = cache_.find(key);
-    if (hit != cache_.end() && file_exists(kept)) {
-        res.ok = true;
-        res.cached = true;
-        res.seconds = hit->second.seconds;
-        res.peak = hit->second.peak;
-        hit->second.used = ++clock_;
-        res.path = deliver(kept);
-        return res;
+Mixed Mixer::mix_locked(const RenderRequest &req) {
+    Mixed res;
+    // the metronome is put on afterwards and is no part of the key, so
+    // switching it on and off never sings anything again
+    RenderRequest core = req;
+    core.metronome_bar.reset();
+    std::string key = request_key(core);
+    if (last_.ok && key == last_key_) {
+        Mixed again = last_;
+        again.cached = true;
+        return again;
     }
 
     bool any = false;
@@ -567,22 +609,13 @@ RenderResult Mixer::render(const RenderRequest &req, const std::string &out_path
     }
 
     res.ok = true;
+    res.channels = channels;
     res.seconds = double(out.size() / size_t(channels)) / kSampleRate;
     res.peak = peak;
     res.stopped_short = stopped;
-    make_dirs(cache_dir_);
-    if (write_wav(kept, out, channels)) {
-        remember(key, kept, res.seconds, res.peak);
-        res.path = deliver(kept);
-    } else {
-        std::vector<float> y = out;
-        if (req.metronome_bar) with_metronome(y, channels, req.bpm, *req.metronome_bar, req.start);
-        if (!write_wav(out_path, y, channels)) {
-            res.ok = false;
-            res.error = "could not write " + out_path;
-        }
-        res.path = out_path;
-    }
+    res.samples = std::make_shared<const std::vector<float>>(std::move(out));
+    last_key_ = key;
+    last_ = res;
     return res;
 }
 

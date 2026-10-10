@@ -9,6 +9,7 @@
 #pragma once
 
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -48,6 +49,20 @@ struct RenderRequest {
     std::optional<double> metronome_bar;
 };
 
+//: A song mixed in memory, ready to play.
+struct Mixed {
+    bool ok = false;
+    std::string error;
+    std::shared_ptr<const std::vector<float>> samples;   //: interleaved when stereo
+    int channels = 1;
+    double seconds = 0;
+    double peak = 0;
+    //: nothing was sung: the same song had just been mixed
+    bool cached = false;
+    bool stopped_short = false;
+};
+
+//: The same, written to a WAV file: an export.
 struct RenderResult {
     bool ok = false;
     std::string error;
@@ -66,25 +81,34 @@ RenderRequest make_request(const Song &song, const std::vector<const Track *> &p
 class Mixer {
 public:
     Mixer();
-    //: Takes its cache with it: what it rendered is only ever reused by this
-    //: run, so nothing of it is worth leaving in the temporary folder.
-    ~Mixer();
+    //: The song in memory, the metronome on it if the request asks for it.
+    //: Only phrases not sung before are sung: the rest come from memory.
+    Mixed mix(const RenderRequest &req);
+    //: The song written to `out`, as 16-bit PCM: what Export does.
     RenderResult render(const RenderRequest &req, const std::string &out);
 
 private:
+    Mixed mix_locked(const RenderRequest &req);
     std::vector<float> track(const PartRequest &t, double bpm, double consonants, double start,
                              bool early, bool *stopped_short, std::string *error);
     std::mutex mu_;
-    void remember(const std::string &key, const std::string &file, double seconds, double peak);
+
+    //: Every phrase sung, kept in memory under a key made of everything that
+    //: decides how it sounds -- the voice, its controls, its level, the notes,
+    //: their phonemes and lengths, the bends and the wheel -- so that changing
+    //: one note sings one phrase again, not the song. The phrases sung longest
+    //: ago go first when the store passes kPhraseBytes.
     struct Kept {
-        double seconds, peak;
-        long long bytes;
-        unsigned long long used;    //: when it was last asked for, by count
+        std::shared_ptr<const std::vector<float>> samples;
+        bool stopped_short;
+        unsigned long long used;
     };
-    std::map<std::string, Kept> cache_;
-    std::string cache_dir_;
-    long long cache_bytes_ = 0;
+    std::map<std::string, Kept> phrases_;
+    size_t phrase_bytes_ = 0;
     unsigned long long clock_ = 0;
+    //: and the last song mixed, so playing it again does nothing at all
+    std::string last_key_;
+    Mixed last_;
 };
 
 //: One tick of the metronome mixed in, accented at each bar line; `start` is

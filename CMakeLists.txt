@@ -162,19 +162,33 @@ set(CORE_SOURCES
   src/voices/vocalwriter.cpp
   src/voices/stubs.cpp
 )
-if(APPLE)
-  list(APPEND CORE_SOURCES src/audio/player_mac.mm)
-else()
-  list(APPEND CORE_SOURCES src/audio/player.cpp)
+# -- miniaudio --------------------------------------------------------------
+# Playback, straight from memory, the same on every system (WASAPI on
+# Windows, Core Audio on the Mac), as FastPlay does it: one header, compiled
+# once by src/audio/miniaudio.c.
+include(FetchContent)
+FetchContent_Declare(miniaudio
+    GIT_REPOSITORY https://github.com/mackron/miniaudio.git
+    GIT_TAG 0.11.25
+    GIT_SHALLOW TRUE
+)
+FetchContent_GetProperties(miniaudio)
+if(NOT miniaudio_POPULATED)
+  FetchContent_Populate(miniaudio)   # the header only; not its own build
 endif()
+list(APPEND CORE_SOURCES src/audio/player.cpp src/audio/miniaudio.c)
+
 add_library(svs_core STATIC ${CORE_SOURCES})
-target_include_directories(svs_core PUBLIC ${SVS_ROOT}/src ${SVS_ROOT}/third_party/nlohmann)
+target_include_directories(svs_core PUBLIC ${SVS_ROOT}/src ${SVS_ROOT}/third_party/nlohmann
+                           ${miniaudio_SOURCE_DIR})
 target_compile_definitions(svs_core PUBLIC SVS_SOURCE_DIR="${SVS_ROOT}" ${SVS_ENGINE_DEFS})
 target_link_libraries(svs_core PUBLIC vwengine ${SVS_ENGINE_LIBS})
+set_source_files_properties(src/audio/miniaudio.c PROPERTIES COMPILE_OPTIONS "-w")
 if(WIN32)
-  target_link_libraries(svs_core PUBLIC winmm)
+  target_link_libraries(svs_core PUBLIC winmm ole32)
 elseif(APPLE)
-  target_link_libraries(svs_core PUBLIC "-framework AVFoundation" "-framework Foundation")
+  target_link_libraries(svs_core PUBLIC "-framework CoreAudio" "-framework AudioToolbox"
+                        "-framework CoreFoundation" "-framework Foundation")
 endif()
 
 set(APP_SOURCES
@@ -190,6 +204,9 @@ if(APPLE)
   list(APPEND APP_SOURCES src/app/announce_mac.mm)
 else()
   list(APPEND APP_SOURCES src/app/announce.cpp)
+  # the manifest for the common controls (v6) and DPI awareness: see app.rc
+  enable_language(RC)
+  list(APPEND APP_SOURCES src/app/app.rc)
 endif()
 
 function(svs_executable name console)

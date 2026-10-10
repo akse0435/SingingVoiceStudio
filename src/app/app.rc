@@ -1,0 +1,11 @@
+// app.rc -- what Windows reads out of the executable before the program runs.
+//
+// wxWidgets' own resources, and with them the manifest that asks Windows for
+// version 6 of its common controls -- the list views, buttons and the rest as
+// they are today, which is what a screen reader expects to find -- rather than
+// the version 5 Windows hands a program that says nothing. wxWidgets 3.3
+// warns at every start when the manifest is missing, which it was.
+#define wxUSE_RC_MANIFEST 1
+// sharp at any display scaling, per monitor, rather than blurred by Windows
+#define wxUSE_DPI_AWARE_MANIFEST 2
+#include "wx/msw/wx.rc"

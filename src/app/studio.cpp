@@ -131,8 +131,6 @@ Studio::Studio(const std::string &path)
     Track first;
     first.name = "Voice 1";
     song_.tracks.push_back(first);
-    wav_ = join_path(temp_dir(), "svs_studio.wav");
-    preview_wav_ = join_path(temp_dir(), "svs_note.wav");
     settings_ = load_settings();
     mixer_ = std::make_shared<Mixer>();
     worker_ = std::make_unique<Worker>(this);
@@ -437,7 +435,7 @@ void Studio::preview_now(int i) {
     if (note.phonemes.empty()) return;          // a rest has nothing to hear
     stop_audio();
     rendering_ = true;
-    render(request(new std::vector<Note>{note}), preview_wav_, [this](RenderResult res) { heard(res); });
+    mix(request(new std::vector<Note>{note}), [this](Mixed res) { heard(res); });
 }
 
 void Studio::on_keys(wxCommandEvent &) {
@@ -857,8 +855,8 @@ void Studio::sync(int select) {
         list_->SetItem(long(i), 4, W(describe_bend(n.bend)));
         list_->SetItem(long(i), 5, W(describe_mod(n.mod)));
     }
-    auto where = bars();
-    for (size_t i = 0; i < where.size(); ++i) list_->SetItem(long(i), 6, W(where[i]));
+    bars_shown_.clear();
+    refresh_bars();
     if (!notes().empty()) select_only({std::min(std::max(select, 0), int(notes().size()) - 1)});
 }
 
@@ -905,9 +903,20 @@ void Studio::refresh_row(int i) {
     list_->SetItem(i, 3, W(n.word));
     list_->SetItem(i, 4, W(describe_bend(n.bend)));
     list_->SetItem(i, 5, W(describe_mod(n.mod)));
-    // a length change moves every note after this one to a different beat
-    auto where = bars();
-    for (size_t k = 0; k < where.size(); ++k) list_->SetItem(long(k), 6, W(where[k]));
+}
+
+//: The Bar column, worked out once and written only where it changed. It used
+//: to be worked out and written for every row each time any one row was
+//: refreshed -- and a length change refreshes every row -- so one nudge in a
+//: song of a few hundred notes was tens of thousands of updates to the list.
+void Studio::refresh_bars() {
+    std::vector<std::string> where = bars();
+    bars_shown_.resize(where.size());
+    for (size_t k = 0; k < where.size(); ++k) {
+        if (bars_shown_[k] == where[k]) continue;
+        list_->SetItem(long(k), 6, W(where[k]));
+        bars_shown_[k] = where[k];
+    }
 }
 
 void Studio::nudge_pitch(int by) {
@@ -954,7 +963,7 @@ void Studio::nudge_length(bool up) {
             return;
         }
         touch();
-        sync_lengths();
+        sync_lengths(rows);
         preview_note(rows[0]);
         std::string message = rows.size() == 1 ? spoken_length(notes()[size_t(rows[0])].beats, signature())
                                                : std::to_string(moved) + " notes a sixteenth " +
@@ -988,7 +997,7 @@ void Studio::scale_length(double factor) {
             return;
         }
         touch();
-        sync_lengths();
+        sync_lengths(rows);
         preview_note(rows[0]);
         std::string message = rows.size() == 1 ? spoken_length(notes()[size_t(rows[0])].beats, signature())
                                                : std::to_string(moved) + " notes " +
@@ -997,8 +1006,10 @@ void Studio::scale_length(double factor) {
     });
 }
 
-void Studio::sync_lengths() {
-    for (size_t i = 0; i < notes().size(); ++i) refresh_row(int(i));
+//: The notes whose lengths changed, and the bars after them.
+void Studio::sync_lengths(const std::vector<int> &rows) {
+    for (int i : rows) refresh_row(i);
+    refresh_bars();
 }
 
 const Note *Studio::last() { return notes().empty() ? nullptr : &notes().back(); }
@@ -1257,10 +1268,20 @@ void Studio::render(const RenderRequest &req, const std::string &out, std::funct
                                });
 }
 
+//: The song in memory, for playing: nothing is written to disk.
+void Studio::mix(const RenderRequest &req, std::function<void(Mixed)> done) {
+    std::shared_ptr<Mixer> mixer = mixer_;
+    worker_->ask<Mixed>([mixer, req] { return mixer->mix(req); },
+                        [this, done](Mixed res) {
+                            if (!res.ok && !res.error.empty()) say("engine error: " + W(res.error));
+                            done(res);
+                        });
+}
+
 void Studio::preview(const std::vector<Note> &rows, std::function<void()> done) {
-    render(request(new std::vector<Note>(rows)), preview_wav_, [this, done](RenderResult res) {
+    mix(request(new std::vector<Note>(rows)), [this, done](Mixed res) {
         if (done) done();
-        if (res.ok) play_file(res.path);
+        if (res.ok) play_audio(res, true);
     });
 }
 
@@ -1297,13 +1318,12 @@ void Studio::on_hear(wxCommandEvent &) {
     }
     stop_audio();
     rendering_ = true;
-    render(request(new std::vector<Note>{notes()[size_t(i)]}), preview_wav_,
-           [this](RenderResult res) { heard(res); });
+    mix(request(new std::vector<Note>{notes()[size_t(i)]}), [this](Mixed res) { heard(res); });
 }
 
-void Studio::heard(const RenderResult &res) {
+void Studio::heard(const Mixed &res) {
     rendering_ = false;
-    if (res.ok) play_file(res.path, true);
+    if (res.ok) play_audio(res, true);
     else say("render failed");
 }
 
@@ -1361,10 +1381,10 @@ void Studio::start_playing(double start, bool quiet) {
                        bb.first, fmt_g(std::nearbyint(bb.second * 100) / 100).c_str(),
                        (total - start) * 60.0 / song_.bpm)));
     }
-    render(playback(start), wav_, [this, quiet](RenderResult res) { played(res, quiet); });
+    mix(playback(start), [this, quiet](Mixed res) { played(res, quiet); });
 }
 
-void Studio::played(const RenderResult &res, bool quiet) {
+void Studio::played(const Mixed &res, bool quiet) {
     rendering_ = false;
     mi_play_->Enable(true);
     if (!res.ok) {
@@ -1382,21 +1402,17 @@ void Studio::played(const RenderResult &res, bool quiet) {
         say(W(printf_s("playing %.2f seconds%s%s", res.seconds, res.cached ? " from cache" : "", loud.c_str())));
     else if (!loud.empty())
         say(W(loud.substr(2)));
-    play_file(res.path, quiet);
+    play_audio(res, quiet);
 }
 
-void Studio::play_file(const std::string &path, bool quiet) {
-    if (!file_exists(path)) {
-        say("no audio file to play");
+//: Straight from memory to the sound card.
+void Studio::play_audio(const Mixed &res, bool quiet) {
+    (void)quiet;
+    if (!res.samples || res.samples->empty()) {
+        say("nothing to play");
         return;
     }
-    std::vector<unsigned char> b;
-    read_file(path, &b);
-    if (player_.play(path)) {
-        if (!quiet) say(W("playing " + base_name(path) + ", " + std::to_string(b.size() / 1024) + " KB"));
-        return;
-    }
-    say(W("cannot play it. The file is at " + path));
+    if (!player_.play(res.samples, res.channels)) say("cannot play: no sound device would open");
 }
 
 void Studio::stop_audio() { player_.stop(); }
@@ -1816,9 +1832,6 @@ void Studio::on_close(wxCloseEvent &evt) {
     preview_timer_.Stop();
     recovery_timer_.Stop();
     worker_->close();
-    // the two files playing goes through; the cache goes with the mixer
-    remove_file(wav_);
-    remove_file(preview_wav_);
     // closing properly is what says the kept copy is not needed
     recovery_clear();
     Destroy();

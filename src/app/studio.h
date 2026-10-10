@@ -64,7 +64,7 @@ public:
     void preview(const std::vector<Note> &notes, std::function<void()> done);
     void lookup(const std::vector<std::string> &words,
                 std::function<void(std::map<std::string, std::vector<std::string>>)> done);
-    void play_file(const std::string &path, bool quiet = false);
+    void play_audio(const Mixed &res, bool quiet = false);
 
 private:
     // -- the song -------------------------------------------------------------
@@ -110,10 +110,11 @@ private:
     void sync(int select = 0);
     void on_key(wxKeyEvent &evt);
     void refresh_row(int i);
+    void refresh_bars();
     void nudge_pitch(int by);
     void nudge_length(bool up);
     void scale_length(double factor);
-    void sync_lengths();
+    void sync_lengths(const std::vector<int> &rows);
     const Note *last();
     void on_select_all(wxCommandEvent &);
     void move_notes(int delta);
@@ -136,18 +137,19 @@ private:
     RenderRequest playback(double start);
     void on_metronome(wxCommandEvent &);
     void on_hear(wxCommandEvent &);
-    void heard(const RenderResult &res);
+    void heard(const Mixed &res);
     double start_beats();
     void on_play_stop(wxCommandEvent &);
     void on_play(wxCommandEvent &);
     void start_playing(double start, bool quiet = false);
-    void played(const RenderResult &res, bool quiet);
+    void played(const Mixed &res, bool quiet);
     void stop_audio();
     void on_stop(wxCommandEvent &);
     void on_export(wxCommandEvent &);
     void on_export_tracks(wxCommandEvent &);
     void export_track(std::shared_ptr<std::vector<std::pair<Track, std::string>>> jobs, size_t i,
                       int written);
+    void mix(const RenderRequest &req, std::function<void(Mixed)> done);
     void render(const RenderRequest &req, const std::string &out,
                 std::function<void(RenderResult)> done);
     void on_auto_preview(wxCommandEvent &);
@@ -208,9 +210,10 @@ private:
     int current_ = 0;
     bool switching_ = false;
     std::vector<VoiceListing> voices_;
+    //: what the Bar column says now, row by row, so only changes are written
+    std::vector<std::string> bars_shown_;
     std::vector<std::string> status_lines_;   // what each engine said at the start
     std::map<int, int> program_map_;
-    std::string wav_, preview_wav_;
     Player player_;
     bool rendering_ = false;
     std::string path_;
