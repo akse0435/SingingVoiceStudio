@@ -432,6 +432,11 @@ std::vector<float> Mixer::track(const PartRequest &t, double bpm, double consona
                 }
             }
             Sung y = singer->sing(phrase);
+            if (!y.error.empty()) {
+                // never kept: the next play asks the engine again
+                *error = Registry::get().voice_name(t.voice_id) + ": " + y.error;
+                return out;
+            }
             if (y.stopped_short) *stopped_short = true;
             sung = std::make_shared<const std::vector<float>>(std::move(y.samples));
             phrases_[key] = {sung, y.stopped_short, ++clock_};

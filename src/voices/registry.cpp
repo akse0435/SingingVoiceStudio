@@ -70,7 +70,10 @@ std::vector<std::string> Registry::status() {
     for (auto &f : families_) {
         std::string why;
         bool ok = f->available(&why);
-        size_t n = f->voices().size();
+        // only the voices that can sing: MacinTalk lists the ones that cannot
+        // as well, so the user can be told why
+        size_t n = 0;
+        for (const VoiceEntry &v : f->voices()) n += v.installed;
         out.push_back(f->name() + ": " +
                       (ok ? std::to_string(n) + " voices ready" : why));
     }

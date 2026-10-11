@@ -89,6 +89,9 @@ struct Phrase {
 struct Sung {
     std::vector<float> samples;
     bool stopped_short = false;
+    //: Set when the engine could not sing the phrase at all; the samples are
+    //: then nothing to keep.
+    std::string error;
 };
 
 //: The vibrato depth control (0-127) a part sings with when its own setting

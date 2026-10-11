@@ -4,7 +4,7 @@ VocalWriter Studio rebuilt in C++ and wxWidgets, with more singers in it, for
 Windows and macOS. The window, the menus, the keys, the dialogs, the messages
 and the project files are VocalWriter Studio's own (see
 `C:\stuff\VocalWriter\app`); what is new is that a track can be sung by any of
-four synthesisers:
+five synthesisers:
 
 | engine | voices | numbers | what it is |
 |---|---|---|---|
@@ -12,6 +12,7 @@ four synthesisers:
 | **DECtalk** | Paul, Betty, Harry, Frank, Dennis, Kit, Ursula, Rita, Wendy, Val | 1000 - 1009 | github.com/dectalk/dectalk, sung through its phoneme `<duration,pitch>` notation |
 | **SSI-263** | SSI-263, Deep, Bright, Child | 2000 - 2003 | the chip itself, driven at register level (github.com/tgeczy/ssi263-speech) |
 | **Microsoft** | Sam, Mike, Mary, each plain, in Hall, in Stadium, in Space, Whisper, RoboSoft One to Six | 3000 - 3050 | the SAPI 5 engine rebuilt in C, with the SAPI 4 voice modes (github.com/KamiKitsune420/ms-sam-mike-mary-decomp) |
+| **MacinTalk** | Agnes, Albert, Bad News, Bahh, Bells, Boing, Bruce, Bubbles, Cellos, Deranged, Fred, Good News, Hysterical, Junior, Kathy, Pipe Organ, Princess, Ralph, Trinoids, Vicki, Victoria, Whisper, Zarvox, from each of Mac OS X 10.4 Tiger, 10.5 Leopard, 10.6 Snow Leopard and 10.7 Lion | 4000 - 4022, 4100 - 4122, 4200 - 4222, 4300 - 4322 | Apple's own engines, run on Windows by Panthera's host (github.com/tgeczy/panthera-speech) and sung through Apple's TUNE notation; Windows only |
 
 A voice's number is what a song saves, and it is fixed per engine, so a song
 written with DECtalk Betty still says Betty on a machine without DECtalk and
@@ -57,6 +58,35 @@ voices\microsoft\           Sam.spd, Mike.spd, Mary.spd (any of them). Without t
                             (the SAPI 5 voice package) or Common Files\Microsoft Shared\Speech\1033
                             (Windows XP)
 ```
+
+MacinTalk is Apple's, run by Panthera: install Panthera's NVDA add-on
+(github.com/tgeczy/panthera-speech), which brings its host, `panthera_host.exe`,
+and extracts the speech files from your own Mac OS X install discs into NVDA's
+configuration folder. That is where they are looked for:
+
+```
+%APPDATA%\nvda\addons\pantheraspeech\synthDrivers\_panthera\panthera_host.exe
+%APPDATA%\nvda\macintalk\tiger\         each with Speech\Voices, Speech\Synthesizers and
+%APPDATA%\nvda\macintalk\leopard\       SpeechDictionary.framework; Leopard with libstdc++.6.0.4.dylib,
+%APPDATA%\nvda\macintalk\snowleopard\   Snow Leopard with libstdc++.6.0.9.dylib, Lion with
+%APPDATA%\nvda\macintalk\lion\          libstdc++.6.0.9.dylib and libc++abi.dylib
+```
+
+Also found as the add-on finds them: its older folders and pointer files
+(`leopardspeech-data.txt` and the like, holding a folder's path) and `%TIGER_TREE%`,
+`%LEOPARD_TREE%`, `%SNOWLEOPARD_TREE%`, `%LION_TREE%`; and besides, a running portable
+NVDA's `userConfig`, `%NVDA_CONFIG%` for a copy started with `-c`, and
+`voices\macintalk\` under the data roots (`panthera_host.exe`, the generation folders,
+or `leopard.txt` and the like naming them). One host is started for each generation
+the first time it sings, and stays until the program ends.
+
+Fred, Junior, Kathy, Princess, Ralph, Zarvox, Trinoids and Boing (MacinTalk 3),
+Agnes, Bruce and Victoria (MacinTalk Pro) and Vicki sing on Tiger, Leopard and Snow
+Leopard; Albert, Bahh, Bubbles, Deranged and Whisper sing in time, on a pitch of their
+own. Bad News, Bells, Cellos, Good News, Hysterical and Pipe Organ play their own
+tune whatever they are given, and Lion's MacinTalk ignores a TUNE's lengths and
+pitches, so those are listed and cannot sing. Tiger from 10.4.5 on (MacinTalk 3.4)
+cannot run off Apple's hardware. Alex is not offered.
 
 On macOS DECtalk is `libtts.dylib`, built here with clang
 (`scripts/build_dectalk_mac.sh`) and kept in the bundle's `Contents/Frameworks`.
