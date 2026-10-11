@@ -14,7 +14,7 @@
 #   dist/Singing Voice Studio.app                 the editor; svs inside it
 #                                                 (Contents/MacOS/svs) is the
 #                                                 same program on the command line
-#   dist/SingingVoiceStudio-<date>-macos-<arch>.dmg   the same, on a disk image,
+#   dist/SingingVoiceStudio-<version>-macos-<arch>.dmg   the same, on a disk image,
 #                                                 signed, notarized and stapled
 #
 # Inside the bundle:
@@ -273,7 +273,9 @@ fi
 
 # -- 8. the disk image --------------------------------------------------------------
 if [ "$DMG" = 1 ]; then
-    IMAGE="$DIST/SingingVoiceStudio-$(date +%Y-%m-%d)-macos-$ARCH.dmg"
+    # named by version, as the Windows zip is; the date if CMakeLists has none
+    VERSION=$(sed -n 's/^set(SVS_VERSION "\(.*\)")$/\1/p' CMakeLists.txt | head -1)
+    IMAGE="$DIST/SingingVoiceStudio-${VERSION:-$(date +%Y-%m-%d)}-macos-$ARCH.dmg"
     say "making $(basename "$IMAGE")"
     STAGE=$(mktemp -d)
     cp -R "$APP" "$STAGE/"

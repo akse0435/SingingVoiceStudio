@@ -171,7 +171,7 @@ with clang, then the program, and gathers every engine's data into
 VocalWriter Studio checkout beside this one, Microsoft's from
 `voices/microsoft`), checks that each engine sings from inside the bundle,
 signs it with the Developer ID in the keychain, puts it on
-`dist/SingingVoiceStudio-<date>-macos-<arch>.dmg`, and has Apple notarize
+`dist/SingingVoiceStudio-<version>-macos-<arch>.dmg`, and has Apple notarize
 both. `--no-sign` gives a bundle to run here; `--no-notarize` skips Apple; see
 the top of the script for the credentials it looks for. `cmake --build build`
 alone gives `build/SingingVoiceStudio.app` and `build/svs`, which find the
