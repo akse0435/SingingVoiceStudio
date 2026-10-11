@@ -12,7 +12,8 @@
 #
 # The voice data is not in the repository: scripts/voice_data.py gathers it
 # (VocalWriter's files from its own repository, Microsoft's voices from the
-# newest release that has them). DECtalk is built from source on each side.
+# newest release that has them). DECtalk is built from source on each side,
+# its dictionary on Windows, which the Mac build then takes.
 #
 # The Mac disk image is signed and notarized when the repository has these
 # secrets, and is otherwise unsigned:
@@ -119,10 +120,18 @@ jobs:
             dist/SingingVoiceStudio-${{ needs.data.outputs.version }}.zip
             dist/linker-maps-${{ needs.data.outputs.version }}-windows.zip
           if-no-files-found: error
+      # DECtalk's dictionary, compiled from its word list here (the Mac
+      # build has no compiler for it), so both sides pronounce alike
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dectalk-dictionary
+          path: voices/dectalk/dtalk_us.dic
+          if-no-files-found: error
+          retention-days: 1
 
   macos:
     name: macOS
-    needs: data
+    needs: [data, windows]
     runs-on: macos-14
     outputs:
       signed: ${{ steps.signing.outputs.signed }}
@@ -136,6 +145,10 @@ jobs:
         with:
           name: voice-data
           path: voice-data
+      - uses: actions/download-artifact@v4
+        with:
+          name: dectalk-dictionary
+          path: voices/dectalk
       - name: Put the voice data where the build looks
         run: cp -R voice-data/. .
       - name: Signing
@@ -170,6 +183,10 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "signed=true" >> "$GITHUB_OUTPUT"
       - name: Build, gather, sign and make the disk image
+        env:
+          # MacinTalk sings with the system's voices, which answer only in a
+          # desktop session: a runner has none, so Fred is not tried here
+          SVS_CHECK_VOICES: Robert|DECtalk Betty|SSI-263|Microsoft Sam
         run: |
           if [ "${{ steps.signing.outputs.signed }}" = true ]; then
             sh scripts/build_mac.sh --strict

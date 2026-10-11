@@ -205,7 +205,13 @@ cat > "$TMP/check.vws" <<'EOF'
 {"format": "vocalwriter-studio", "version": 2, "bpm": 100, "tracks": [{"name": "Voice 1", "notes": [
  {"phonemes": ["d", "EY"], "pitch": 67, "beats": 1.0}, {"phonemes": ["z", "IY"], "pitch": 65, "beats": 1.0}]}]}
 EOF
-for voice in Robert "DECtalk Betty" SSI-263 "Microsoft Sam" "MacinTalk Fred"; do
+# The voices tried, separated by |. MacinTalk sings with the system's own
+# voices, which answer only in a desktop session, so the release workflow
+# (on a machine that has none) leaves Fred out with SVS_CHECK_VOICES.
+OLDIFS=$IFS
+IFS='|'
+for voice in ${SVS_CHECK_VOICES:-Robert|DECtalk Betty|SSI-263|Microsoft Sam|MacinTalk Fred}; do
+    IFS=$OLDIFS
     if SVS_ONLY_BESIDE=1 "$APP/Contents/MacOS/svs" "$TMP/check.vws" -o "$TMP/check.wav" --voice "$voice" > "$TMP/render.log" 2>&1 \
        && [ "$(stat -f %z "$TMP/check.wav")" -gt 40000 ]; then
         echo "   $voice sings ($(stat -f %z "$TMP/check.wav") bytes)"
@@ -214,6 +220,7 @@ for voice in Robert "DECtalk Betty" SSI-263 "Microsoft Sam" "MacinTalk Fred"; do
     fi
     rm -f "$TMP/check.wav"
 done
+IFS=$OLDIFS
 rm -rf "$TMP"
 
 if [ "$STRICT" = 1 ] && [ -n "$MISSING" ]; then die "missing:$MISSING"; fi
