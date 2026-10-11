@@ -194,6 +194,9 @@ foreach ($line in $status) {
     if ($line -match "^(VocalWriter|DECtalk|SSI-263|Microsoft): " -and $line -notmatch "voices ready") {
         Warn "engine not ready: $line"
     }
+    # MacinTalk's data is the user's own (Panthera's), never in the zip, so it
+    # may well not be ready here; but it has to be in the program
+    if ($line -match "was not built into this copy") { Warn "engine missing from the build: $line" }
 }
 
 if ($Strict -and $missing.Count) { throw "missing: $($missing -join '; ')" }

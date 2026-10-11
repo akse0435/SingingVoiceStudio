@@ -62,6 +62,11 @@ endif()
 # sources, and defines SVS_HAVE_<NAME> on it. An engine that is not there is
 # replaced by a stub that offers its voices and says it cannot sing them.
 set(SVS_ENGINES "dectalk;ssi263;microsoft;macintalk" CACHE STRING "the engines to build in")
+# A build folder made before MacinTalk keeps the list it was made with, as a
+# cache does; that list was only ever the default, so it is brought up to date.
+if(SVS_ENGINES STREQUAL "dectalk;ssi263;microsoft")
+  set(SVS_ENGINES "dectalk;ssi263;microsoft;macintalk" CACHE STRING "the engines to build in" FORCE)
+endif()
 set(SVS_ENGINE_LIBS)
 set(SVS_ENGINE_DEFS)
 foreach(eng ${SVS_ENGINES})
