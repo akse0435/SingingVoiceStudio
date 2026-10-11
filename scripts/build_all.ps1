@@ -12,7 +12,8 @@
 #       voices\dectalk\                    DECtalk.dll and its dictionary
 #       voices\microsoft\                  Sam, Mike and Mary
 #       licenses\                          each engine's licence
-#   dist\SingingVoiceStudio-<date>.zip     the same folder, zipped
+#   dist\SingingVoiceStudio-<version>.zip  the same folder, zipped (the version
+#                                          is SVS_VERSION in CMakeLists.txt)
 #
 # Where the data comes from:
 #
@@ -41,6 +42,11 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 $Dist = Join-Path $Root "dist"
 $Out = Join-Path $Dist "SingingVoiceStudio"
+# named by version, as the macOS disk image is; the date if CMakeLists has none
+$Version = ""
+$m = Select-String -Path (Join-Path $Root "CMakeLists.txt") -Pattern '^set\(SVS_VERSION "(.*)"\)' | Select-Object -First 1
+if ($m) { $Version = $m.Matches[0].Groups[1].Value }
+if (-not $Version) { $Version = Get-Date -Format "yyyy-MM-dd" }
 $missing = @()
 
 function Say($text) { Write-Host "== $text" -ForegroundColor Cyan }
@@ -203,7 +209,7 @@ if ($Strict -and $missing.Count) { throw "missing: $($missing -join '; ')" }
 
 # -- 5. the zip ---------------------------------------------------------------------
 if (-not $NoZip) {
-    $zip = Join-Path $Dist ("SingingVoiceStudio-" + (Get-Date -Format "yyyy-MM-dd") + ".zip")
+    $zip = Join-Path $Dist ("SingingVoiceStudio-" + $Version + ".zip")
     if (Test-Path $zip) { Remove-Item -Force $zip }
     Say "zipping"
     # An executable that has just been run is often still held for a moment by the virus
@@ -227,8 +233,8 @@ if (-not $NoZip) {
 
 # The linker maps of this very build, kept beside the zip (not in it): a crash
 # report names addresses, and only these maps turn them into functions.
-#   python scripts\resolve_crash.py crash-....txt dist\maps-<date>\SingingVoiceStudio.map
-$maps = Join-Path $Dist ("maps-" + (Get-Date -Format "yyyy-MM-dd"))
+#   python scripts\resolve_crash.py crash-....txt dist\maps-<version>\SingingVoiceStudio.map
+$maps = Join-Path $Dist ("maps-" + $Version)
 New-Item -ItemType Directory -Force $maps | Out-Null
 foreach ($m in @("SingingVoiceStudio.map", "svs.map")) {
     $src = Join-Path $Root "build\$m"

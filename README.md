@@ -199,6 +199,26 @@ through VoiceOver. On the command line the program is
 `Singing Voice Studio.app/Contents/MacOS/svs`, the same `svs` as on Windows.
 Settings live in `~/Library/Application Support/Singing Voice Studio`.
 
+### Releases
+
+Pushing a tag cuts a release: GitHub Actions (`.github/workflows/release.yml`)
+builds the Windows zip and the Mac disk image, each with every voice's data in
+it as before, checks that each engine sings from it, and puts both on the
+release for the tag, with the tag's message as its notes.
+
+```
+git tag -a v1.4 -m "what is new"
+git push origin v1.4
+```
+
+The tag must match `SVS_VERSION` in CMakeLists.txt. The voice data is not in
+the repository: `scripts/voice_data.py` fetches VocalWriter's files from the
+VocalWriter Studio repository and Microsoft's voices from the newest release
+that has them; DECtalk is built from source. The disk image is signed and
+notarized when the repository has the signing secrets listed at the top of the
+workflow, and is otherwise signed ad hoc. Run by hand, from the Actions tab, the
+workflow builds both and keeps them as the run's artifacts without releasing.
+
 ## The keys
 
 As VocalWriter Studio's, plus a few. F1 lists them all in a window. On a Mac read Cmd for

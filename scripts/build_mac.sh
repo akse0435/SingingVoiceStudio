@@ -231,6 +231,13 @@ if [ "$SIGN" = 1 ]; then
     codesign --force --timestamp --options runtime --sign "$IDENTITY" "$APP/Contents/MacOS/svs"
     codesign --force --timestamp --options runtime --sign "$IDENTITY" "$APP"
     codesign --verify --strict --deep -v "$APP" 2>&1 | sed 's/^/   /'
+else
+    # Unsigned, the bundle still has to be sealed again: svs and DECtalk were
+    # put into it after the linker signed it, and on Apple silicon a bundle
+    # whose seal is broken will not open at all. Signed ad hoc, a copy from
+    # the internet opens once it is allowed to (Open Anyway).
+    say "signing ad hoc"
+    codesign --force --deep --sign - "$APP"
 fi
 
 # -- 7. notarization credentials ---------------------------------------------------

@@ -1,0 +1,226 @@
+# Build Singing Voice Studio for Windows and macOS, with every voice's data
+# in it as the releases have always carried it, and publish the two on the
+# release for the tag.
+#
+#   git tag -a v1.4 -m "what is new"     (the message becomes the release notes)
+#   git push origin v1.4
+#
+# The tag must agree with SVS_VERSION in CMakeLists.txt. If the release has
+# already been written by hand, the files are added to it and its notes are
+# left alone. Run by hand (Actions > Release > Run workflow), it builds both
+# and keeps them as the run's artifacts without releasing anything.
+#
+# The voice data is not in the repository: scripts/voice_data.py gathers it
+# (VocalWriter's files from its own repository, Microsoft's voices from the
+# newest release that has them). DECtalk is built from source on each side.
+#
+# The Mac disk image is signed and notarized when the repository has these
+# secrets, and is otherwise unsigned:
+#   MACOS_CERTIFICATE           the Developer ID Application certificate and
+#                               its key, as a .p12, base64
+#   MACOS_CERTIFICATE_PASSWORD  the .p12's password
+#   ASC_KEY                     an App Store Connect API key (.p8, as text)
+#   ASC_KEY_ID, ASC_ISSUER      its key ID and issuer ID
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  data:
+    name: Voice data
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: The version
+        id: version
+        run: |
+          version=$(sed -n 's/^set(SVS_VERSION "\(.*\)")$/\1/p' CMakeLists.txt | head -1)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::the tag is $GITHUB_REF_NAME but CMakeLists.txt says SVS_VERSION $version"
+            exit 1
+          fi
+      - name: Gather the voice data
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/voice_data.py voice-data
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voice-data
+          path: voice-data
+          retention-days: 1
+
+  windows:
+    name: Windows
+    needs: data
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            git
+      - uses: actions/download-artifact@v4
+        with:
+          name: voice-data
+          path: voice-data
+      - name: Put the voice data where the build looks
+        shell: pwsh
+        run: Copy-Item -Recurse -Force voice-data\* .
+      - name: Build, gather and zip
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build_all.ps1 -Strict -Msys "${{ steps.msys2.outputs.msys2-location }}"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Sing from the zip
+        shell: pwsh
+        run: |
+          $dir = "$env:RUNNER_TEMP\unzipped"
+          Expand-Archive "dist\SingingVoiceStudio-${{ needs.data.outputs.version }}.zip" $dir
+          $svs = "$dir\SingingVoiceStudio\svs.exe"
+          $env:SVS_ONLY_BESIDE = "1"
+          '{"format": "vocalwriter-studio", "version": 2, "bpm": 100, "tracks": [{"name": "Voice 1", "notes": [{"phonemes": ["d", "EY"], "pitch": 67, "beats": 1.0}, {"phonemes": ["z", "IY"], "pitch": 65, "beats": 1.0}]}]}' |
+            Set-Content -Encoding ascii "$env:RUNNER_TEMP\check.vws"
+          foreach ($voice in @("Robert", "DECtalk Betty", "SSI-263", "Microsoft Sam")) {
+            & $svs "$env:RUNNER_TEMP\check.vws" -o "$env:RUNNER_TEMP\check.wav" --voice $voice
+            if ($LASTEXITCODE -ne 0) { throw "$voice did not sing from the zip" }
+            $size = (Get-Item "$env:RUNNER_TEMP\check.wav").Length
+            if ($size -lt 40000) { throw "$voice sang only $size bytes" }
+            Write-Host "$voice sings ($size bytes)"
+            Remove-Item "$env:RUNNER_TEMP\check.wav"
+          }
+      - name: Keep the linker maps, for reading crash reports
+        shell: pwsh
+        run: Compress-Archive -Path "dist\maps-${{ needs.data.outputs.version }}\*" -DestinationPath "dist\linker-maps-${{ needs.data.outputs.version }}-windows.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/SingingVoiceStudio-${{ needs.data.outputs.version }}.zip
+            dist/linker-maps-${{ needs.data.outputs.version }}-windows.zip
+          if-no-files-found: error
+
+  macos:
+    name: macOS
+    needs: data
+    runs-on: macos-14
+    outputs:
+      signed: ${{ steps.signing.outputs.signed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Ninja
+        run: brew list ninja >/dev/null 2>&1 || brew install ninja
+      - uses: actions/download-artifact@v4
+        with:
+          name: voice-data
+          path: voice-data
+      - name: Put the voice data where the build looks
+        run: cp -R voice-data/. .
+      - name: Signing
+        id: signing
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          ASC_KEY: ${{ secrets.ASC_KEY }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER: ${{ secrets.ASC_ISSUER }}
+        run: |
+          if [ -z "$MACOS_CERTIFICATE" ] || [ -z "$ASC_KEY" ] || [ -z "$ASC_KEY_ID" ] || [ -z "$ASC_ISSUER" ]; then
+            echo "no signing secrets: the disk image will be unsigned"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          PASS=$(uuidgen)
+          echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$PASS" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$PASS" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          printf '%s\n' "$ASC_KEY" > "$RUNNER_TEMP/AuthKey.p8"
+          {
+            echo "ASC_KEY_PATH=$RUNNER_TEMP/AuthKey.p8"
+            echo "ASC_KEY_ID=$ASC_KEY_ID"
+            echo "ASC_ISSUER=$ASC_ISSUER"
+          } >> "$GITHUB_ENV"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+      - name: Build, gather, sign and make the disk image
+        run: |
+          if [ "${{ steps.signing.outputs.signed }}" = true ]; then
+            sh scripts/build_mac.sh --strict
+          else
+            sh scripts/build_mac.sh --strict --no-sign
+          fi
+      - name: Forget the signing keys
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/AuthKey.p8"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/SingingVoiceStudio-${{ needs.data.outputs.version }}-macos-*.dmg
+          if-no-files-found: error
+
+  release:
+    name: Release
+    if: github.ref_type == 'tag'
+    needs: [data, windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '{windows,macos}'
+          path: out
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.data.outputs.version }}
+          SIGNED: ${{ needs.macos.outputs.signed }}
+        run: |
+          ls -l out
+          git fetch -q --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" out/* --clobber
+          else
+            notes="$RUNNER_TEMP/notes.md"
+            if [ "$(git cat-file -t "$TAG")" = tag ]; then
+              git tag -l --format='%(contents)' "$TAG" | sed '/-----BEGIN PGP SIGNATURE-----/,$d' > "$notes"
+            else
+              git log -1 --format=%B "$TAG" > "$notes"
+            fi
+            if [ "$SIGNED" != true ]; then
+              printf '\n\nThe Mac disk image is not signed by a developer. The first time, Control-click the application and choose Open; on macOS 15 and later, open it once, then allow it under System Settings > Privacy & Security > Open Anyway.\n' >> "$notes"
+            fi
+            gh release create "$TAG" out/* --title "Singing Voice Studio $VERSION" --notes-file "$notes"
+          fi
