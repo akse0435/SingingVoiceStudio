@@ -152,6 +152,18 @@ private:
     std::vector<std::pair<const VoiceControl *, wxSpinCtrl *>> voice_ctrls_;
 };
 
+//: Where Panthera is, for the MacinTalk voices: a folder typed in or browsed
+//: to, or nothing, to look where Panthera's NVDA add-on puts it.
+class PantheraDialog : public wxDialog {
+public:
+    PantheraDialog(wxWindow *parent, const std::string &folder);
+    std::string folder() const;
+
+private:
+    void on_browse(wxCommandEvent &);
+    wxTextCtrl *path_;
+};
+
 //: A track's name, voice, volume and pan, and how that voice is set up.
 class TrackDialog : public wxDialog {
 public:

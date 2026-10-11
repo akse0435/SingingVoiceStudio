@@ -51,6 +51,7 @@ std::unique_ptr<Family> make_ssi263_family() {
 std::unique_ptr<Family> make_macintalk_family() {
     return std::make_unique<Absent>("MacinTalk", std::vector<VoiceEntry>{});
 }
+void set_macintalk_folder(const std::string &) {}
 #endif
 
 #ifndef SVS_HAVE_MICROSOFT

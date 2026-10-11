@@ -268,7 +268,7 @@ void calibrate(Family &fam, const VoiceEntry &v, const std::string &display, int
     // reading that differs from both neighbours by more than a quarter tone
     // (Trinoids, three voices at once, and Zarvox's buzz can fool the
     // correlation on the odd note).
-    bool mtk3 = display != "Agnes" && display != "Bruce" && display != "Victoria" && display != "Vicki";
+    bool mtk3 = display != "Agnes" && display != "Bruce" && display != "Victoria" && display != "Vicki" && display != "Alex";
     bool keep[17];
     for (int i = 0; i < 17; ++i) {
         double ask = PitchCurve::midi_to_hz(36 + 3 * i);
@@ -336,9 +336,9 @@ int main(int argc, char **argv) {
     bool ok = fam->available(&why);
     std::printf("%s: %s\n", fam->name().c_str(), ok ? "available" : why.c_str());
     std::vector<VoiceEntry> voices = fam->voices();
-    // the list is fixed: 23 voices in each of four generations
-    if (voices.size() != 92) {
-        std::printf("FAIL: %zu voices listed, not 92\n", voices.size());
+    // the list is fixed: 24 voices in each of four generations (Alex is listed in Tiger too, and is not there)
+    if (voices.size() != 96) {
+        std::printf("FAIL: %zu voices listed, not 96\n", voices.size());
         ++failures;
     }
     std::string group;
@@ -428,11 +428,12 @@ int main(int argc, char **argv) {
             double peak = peak_of(s.samples);
             long want = long(std::llround(curve.total() * kSampleRate));
             write_wav(join_path(o.out, "mt_" + tag + "_" + job.name + ".wav"), s.samples, 1);
-            bool fine = long(s.samples.size()) == want && peak > 0.02 && peak < 0.99 && !s.stopped_short;
+            bool fine = long(s.samples.size()) == want && peak > 0.02 && peak < 0.99 && !s.stopped_short &&
+                        s.error.empty();
             if (!fine) ++failures;
-            std::printf("%-30s %-6s %6.3f s (curve %6.3f s)  peak %.3f  %s%s\n", v.name.c_str(), job.name,
+            std::printf("%-30s %-6s %6.3f s (curve %6.3f s)  peak %.3f  %s%s%s\n", v.name.c_str(), job.name,
                         s.samples.size() / double(kSampleRate), curve.total(), peak, fine ? "ok" : "FAIL",
-                        s.stopped_short ? " stopped short" : "");
+                        s.stopped_short ? " stopped short" : "", s.error.empty() ? "" : (": " + s.error).c_str());
             if (job.phrase == &daisy) first_daisy = s.samples;
             if (job.phrase == &pitch && pitched) {
                 double worst = 0;
@@ -523,9 +524,9 @@ int main(int argc, char **argv) {
         if (o.only.empty() || o.only == "daisy") {
             Sung again = singer->sing(daisy);
             bool same = again.samples == first_daisy;
-            // Snow Leopard's concatenative engine (Vicki) runs on threads of
+            // Snow Leopard's concatenative engine (Vicki, Alex) runs on threads of
             // its own and does not sing a phrase the same way twice
-            bool restless = gen == 2 && display == "Vicki";
+            bool restless = gen == 2 && (display == "Vicki" || display == "Alex");
             if (!same && !restless) ++failures;
             std::printf("    daisy again: %s\n", same ? "the same samples"
                                                        : restless ? "different (the engine's own; not counted)"

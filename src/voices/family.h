@@ -74,4 +74,11 @@ std::unique_ptr<Family> make_ssi263_family();
 std::unique_ptr<Family> make_microsoft_family();
 std::unique_ptr<Family> make_macintalk_family();
 
+//: Where Panthera is, as the user has named it in the settings: NVDA's
+//: configuration folder (with Panthera's add-on and its macintalk folder in
+//: it), or a folder holding panthera_host.exe and the tiger, leopard,
+//: snowleopard and lion folders. It is looked in before anywhere else; empty
+//: is only the usual places. MacinTalk looks again the next time it is asked.
+void set_macintalk_folder(const std::string &folder);
+
 }  // namespace svs

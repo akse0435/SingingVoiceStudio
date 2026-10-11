@@ -41,9 +41,13 @@
 //
 //   Mac OS X 10.7 accepts TUNE and then ignores every length and pitch in it
 //   (Panthera's driver says the same, panthera-speech#6), so Lion's voices are
-//   listed and cannot sing. Alex, in every generation, is left out: he is a
-//   concatenative voice, takes his own pitch on anything but a held vowel and
-//   came back silent from Snow Leopard. Six of the novelty voices -- Bad News,
+//   listed and cannot sing. That is very likely Panthera's host rather than
+//   Lion: 10.7 moved TUNE's reading into SpeechDictionary, which hands the
+//   notes to MacinTalk as CFArrays of CFDictionaries, and the host's stand-in
+//   for CoreFoundation has no CFArrayCreate, CFDictionaryCreate,
+//   CFArrayGetCount or CFArrayGetValueAtIndex. Alex, from 10.5 on, follows
+//   the notes as Vicki does (an earlier reading here, that he kept a pitch of
+//   his own and came back silent from 10.6, did not hold up). Six of the novelty voices -- Bad News,
 //   Bells, Cellos, Good News, Hysterical and Pipe Organ -- read TUNE exactly as
 //   they read text, one note of their own song to each syllable at their own
 //   speed, whatever the lines say; they are listed and cannot sing either.
@@ -51,12 +55,15 @@
 //   their own pitch (a breath, a bleat, bubbles, a wander, a whisper): they
 //   sing the words in time.
 //
-//   A line takes at most eleven pitch points; from the twelfth on, the engine
-//   drops back to its own speaking intonation. So a long sound is sent as
-//   several lines of the same phoneme, none longer than kMaxLine, which
-//   MacinTalk 3 joins sample for sample as if it were one. A diphthong is
-//   never cut (each half would glide), nor one of MacinTalk Pro's lax vowels
-//   (see below): those keep one line and the ten points that best draw the
+//   A line takes at most eleven pitch points; from the twelfth on, the
+//   engine drops back to its own speaking intonation. A line's points are
+//   only the ones its curve needs -- two for a held note, the turns of a
+//   vibrato or a bend -- and a sound is cut into several lines of itself
+//   only when it needs more than eleven, into as few as will do. Every cut
+//   is heard: the engines start the vowel again, MacinTalk Pro loudly, and a
+//   UW glides into itself each time ("oow oow"). A diphthong is never cut
+//   (each half would glide), nor one of MacinTalk Pro's lax vowels (see
+//   below): those keep one line and the eleven points that best draw the
 //   curve.
 //
 //   Pitch comes out on a grid: MacinTalk Pro (Agnes, Bruce, Victoria) and the
@@ -157,7 +164,7 @@ namespace {
 enum Engine {
     kMtk3,   // MacinTalk 3: Fred, Kathy and the novelty voices
     kPro,    // MacinTalk Pro: Agnes, Bruce, Victoria
-    kMeow,   // the concatenative engine: Vicki (and Alex, who is not offered)
+    kMeow,   // the concatenative engine: Vicki and Alex
 };
 
 enum Gift {
@@ -173,8 +180,9 @@ struct VoiceDef {
     Gift gift;
 };
 
-// The twenty-three voices every generation from 10.4 to 10.7 has, in a fixed
-// order: a voice's number is 4000 + 100 * generation + its place here.
+// The voices of 10.4 to 10.7 -- every one of them has the first twenty-three
+// -- in a fixed order: a voice's number is 4000 + 100 * generation + its
+// place here.
 const VoiceDef kVoices[] = {
     {"Agnes", "Agnes", kPro, kSings},
     {"Albert", "Albert", kMtk3, kInTime},
@@ -199,6 +207,9 @@ const VoiceDef kVoices[] = {
     {"Victoria", "Victoria", kPro, kSings},
     {"Whisper", "Whisper", kMtk3, kInTime},
     {"Zarvox", "Zarvox", kMtk3, kSings},
+    // added after the rest, so that their numbers stay as they were; not in
+    // Tiger, which came before him
+    {"Alex", "Alex", kMeow, kSings},
 };
 constexpr int kVoiceCount = int(sizeof kVoices / sizeof kVoices[0]);
 constexpr int kGenStride = 100;
@@ -306,7 +317,10 @@ const Tuning kTuning[] = {
     {2, "Vicki", 0.250, 3.268, {2.6, 2.9, 3.0, 3.9, 4.5, 5.4, 7.2, 8.1, 9.7, 11.6, 13.3, 17.0, 20.7, 25.6, 30.1, 39.1, 58.6}},
     {2, "Victoria", 0.250, 2.193, {3.0, 3.1, 3.9, 5.0, 5.8, 7.0, 8.7, 8.8, 11.0, 11.8, 13.7, 16.8, 20.1, 25.1, 29.0, 34.9, 16.0}},
     {2, "Whisper", 0.250, 6.835, {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}},
-    {2, "Zarvox", 0.250, 3.734, {-5.6, -11.2, -9.8, -9.6, -6.4, -9.9, -10.6, -7.8, -9.4, -9.3, -9.8, -10.8, -9.7, -8.6, -7.7, -7.7, -7.7}},
+    {2, "Zarvox", 0.250, 3.734, {-5.6, -11.2, -9.8, -9.6, -6.4, -9.9, -10.6, -7.8, -9.4, -9.3, -9.8, -10.8, -9.7, -8.6, -7.7, -7.7, -7.7}},    // Alex: his loudness; his pitch is measured as he sings and put right
+    // (true_pitch), so no offsets
+    {1, "Alex", 0.250, 4.876, {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}},
+    {2, "Alex", 0.250, 3.563, {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}},
 };
 
 #ifdef _WIN32
@@ -471,11 +485,18 @@ const double kWholeDiphthong = 0.200;
 constexpr double kEngineRate = 22050.0;
 //: MacinTalk 3's frame, in samples, and what a D of 5 ms asks for
 constexpr int kMtkFrame = 112;
-//: the longest line, so that its points are no more than kPointGap apart
-//: and no more than kMaxPoints of them
-constexpr double kMaxLine = 0.225;
-constexpr double kPointGap = 0.025;
-constexpr int kMaxPoints = 10;
+//: the most pitch points a line is followed for: from the twelfth on, the
+//: engine goes back to its own speaking intonation, however long the line
+//: (measured: eleven points across two seconds are followed to the end)
+constexpr int kMaxPoints = 11;
+//: how near the straight lines between a line's points come to the curve
+constexpr double kTraceCents = 10.0;
+//: and how close two of them may be: Snow Leopard's Vicki takes the host
+//: down now and then when a short line is crowded with points
+constexpr double kMinGap = 0.020;
+//: the longest line Vicki is sent: a longer one takes Snow Leopard's host
+//: down about one time in three (none in forty-four up to 900 ms)
+constexpr double kMeowMaxLine = 0.8;
 //: the speaking rate sent: at 180 MacinTalk Pro and the concatenative engine
 //: give a silence exactly its D
 constexpr int kRate = 180;
@@ -485,17 +506,6 @@ constexpr int kMaxPasses = 5;
 constexpr double kGoodEnough = 0.0025;
 //: what a host may take over a phrase before it is taken for hung
 constexpr unsigned kReplyTimeoutMs = 60000;
-
-// The step between the pitches an engine can make at `hz`, in cents:
-// MacinTalk Pro and the concatenative engine make every pitch period a whole
-// number of samples at 22050 Hz, so their steps widen going up (17 cents at
-// A3, 35 at A4); MacinTalk 3's pitches are whole hertz, so its steps widen
-// going down (26 cents at C2, 4 at A4).
-#ifdef _WIN32
-double pitch_step_cents(Engine e, double hz) {
-    return e == kMtk3 ? 1731.2 / hz : 1731.2 * hz / kEngineRate;
-}
-#endif
 
 // -- small helpers ------------------------------------------------------------------
 
@@ -847,12 +857,31 @@ struct Install {
     bool aac = true;
 };
 
+// The folder named in the settings, and how many times it has been named:
+// the family looks again when that has changed.
+std::mutex g_folder_mu;
+std::string g_folder;
+unsigned g_folder_version = 0;
+
+std::string named_folder(unsigned *version) {
+    std::lock_guard<std::mutex> lock(g_folder_mu);
+    if (version) *version = g_folder_version;
+    return g_folder;
+}
+
 #ifdef _WIN32
 Install survey() {
     Install in;
     std::vector<std::string> configs = nvda_configs();
     std::vector<std::string> own;   // voices\macintalk under the data roots
     for (const std::string &r : data_roots()) own.push_back(join_path(r, "voices\\macintalk"));
+    // The folder in the settings first, taken as either: NVDA's configuration
+    // folder, or one laid out as voices\macintalk is.
+    std::string named = named_folder(nullptr);
+    if (!named.empty()) {
+        configs.insert(configs.begin(), named);
+        own.insert(own.begin(), named);
+    }
 
     // the host: in Panthera's NVDA add-on, or put beside the program
     std::vector<std::string> hosts;
@@ -950,6 +979,48 @@ struct Line {
 
 bool silent(const Line &l) { return l.ph == "%"; }
 
+// The engines follow a line's pitch points some milliseconds late (8 for
+// MacinTalk 3, 10 for the others, measured on a vibrato), so the curve is
+// read that much ahead -- inside the line: a new note's pitch still starts
+// with its line, which the engines do on time.
+double lead(Engine e) { return e == kMtk3 ? 0.008 : 0.010; }
+
+// Where the pitch points of a sound from t0 to t1 go, as fractions of it:
+// the ends, then wherever a straight line between those chosen so far is
+// furthest from the curve, until every straight line is within kTraceCents
+// of it or there are `most` of them -- and never two closer than kMinGap.
+std::vector<double> trace(double t0, double t1, const PitchCurve &curve, Engine engine, int most) {
+    double len = t1 - t0;
+    most = std::max(2, std::min(most, 1 + int(len / kMinGap)));
+    const int fine = std::max(2, int(len / 0.005) + 1);
+    std::vector<double> c(static_cast<size_t>(fine), 0.0);
+    for (int i = 0; i < fine; ++i) {
+        double t = std::min(t0 + len * i / (fine - 1) + lead(engine), t1 - std::min(0.001, 0.25 * len));
+        c[size_t(i)] = std::log2(curve.hz_at(t));
+    }
+    std::vector<int> pick = {0, fine - 1};
+    while (int(pick.size()) < most) {
+        double worst = -1;
+        int where = -1;
+        for (size_t p = 0; p + 1 < pick.size(); ++p) {
+            int a = pick[p], b = pick[p + 1];
+            for (int i = a + 1; i < b; ++i) {
+                double line = c[size_t(a)] + (c[size_t(b)] - c[size_t(a)]) * (i - a) / double(b - a);
+                double e = std::fabs(c[size_t(i)] - line);
+                if (e > worst) {
+                    worst = e;
+                    where = i;
+                }
+            }
+        }
+        if (where < 0 || worst * 1200.0 < kTraceCents) break;
+        pick.insert(std::upper_bound(pick.begin(), pick.end(), where), where);
+    }
+    std::vector<double> at;
+    for (int i : pick) at.push_back(double(i) / (fine - 1));
+    return at;
+}
+
 // Whether a sound can be sent as several lines of itself.
 bool can_split(const std::string &ph, Engine engine) {
     if (ph == "AY" || ph == "AW" || ph == "OY" || ph == "EY" || ph == "OW") return false;
@@ -1042,24 +1113,43 @@ std::vector<Line> plan_lines(const Phrase &phrase, const PitchCurve &curve, Engi
         out.swap(kept);
     }
 
-    // Long sounds as several lines, so that each has room for its points. A
-    // silence needs none; a diphthong cut in two would glide twice, and
-    // MacinTalk Pro would drop the second half of a lax vowel. Those keep
-    // one line, and the points that best draw the curve (line_points).
-    std::vector<Line> split;
+    // A sound whose curve needs more points than a line takes is cut into
+    // lines of itself, at its own points, ten stretches to a line. A silence
+    // needs none; a diphthong cut in two would glide twice, and MacinTalk Pro
+    // would drop the second half of a lax vowel. Those keep one line, and
+    // the points that best draw the curve.
+    std::vector<Line> whole;
     for (const Line &l : out) {
-        double len = l.t1 - l.t0;
-        if (silent(l) || len <= kMaxLine || !can_split(l.ph, engine)) {
+        int n = engine == kMeow && !silent(l) && can_split(l.ph, engine)
+                    ? int(std::ceil((l.t1 - l.t0) / kMeowMaxLine - 1e-9))
+                    : 1;
+        for (int k = 0; k < std::max(1, n); ++k) {
+            Line p = l;
+            if (n > 1) {
+                p.t0 = l.t0 + (l.t1 - l.t0) * k / n;
+                p.t1 = k + 1 == n ? l.t1 : l.t0 + (l.t1 - l.t0) * (k + 1) / n;
+                p.stress = l.stress && k == 0;
+            }
+            whole.push_back(p);
+        }
+    }
+    std::vector<Line> split;
+    for (const Line &l : whole) {
+        if (silent(l) || l.t1 <= l.t0 || !can_split(l.ph, engine)) {
             split.push_back(l);
             continue;
         }
-        int n = int(std::ceil(len / kMaxLine - 1e-9));
-        for (int k = 0; k < n; ++k) {
+        std::vector<double> at = trace(l.t0, l.t1, curve, engine, 1 << 20);
+        double len = l.t1 - l.t0;
+        size_t from = 0;
+        while (from + 1 < at.size()) {
+            size_t to = std::min(at.size() - 1, from + size_t(kMaxPoints - 1));
             Line p = l;
-            p.t0 = l.t0 + len * k / n;
-            p.t1 = k + 1 == n ? l.t1 : l.t0 + len * (k + 1) / n;
-            p.stress = l.stress && k == 0;
+            p.t0 = from == 0 ? l.t0 : l.t0 + len * at[from];
+            p.t1 = to + 1 == at.size() ? l.t1 : l.t0 + len * at[to];
+            p.stress = l.stress && from == 0;
             split.push_back(p);
+            from = to;
         }
     }
     return split;
@@ -1096,75 +1186,27 @@ double highest_hz(const VoiceDef &v) {
     return std::strcmp(v.bundle, "Boing") == 0 ? 500.0 : highest_hz(v.engine);
 }
 
-// Where a line's pitch points go, as fractions of it, and the pitch at each.
-// Every kPointGap or so, alternately a little above and below the curve so
-// that the steps the engine can sing average out to the pitch asked (a
-// voice that makes its own pitch is sent the curve as it is). A line too
-// long for that many points has the kMaxPoints that best draw the curve:
-// the ends, then wherever a straight line between those chosen so far is
-// furthest from it.
-void line_points(const Line &l, const PitchCurve &curve, const VoiceDef &voice, long *counter,
-                 std::vector<double> *at, std::vector<double> *hz) {
+// Where a line's pitch points go, as fractions of it, and the pitch at each:
+// the fewest that draw its curve (trace). The pitch is asked for as it is:
+// the engines round it to a step of their own (MacinTalk 3 to a whole hertz,
+// the others to a whole pitch period at 22050 Hz), which costs at most half
+// a step, and the tuning table takes out what they do on average.
+// Points dithered either side of the curve every 25 ms used to average the
+// steps out, but at eleven points to a line that cut every long note into
+// lines a fifth of a second long, and every cut was heard.
+void line_points(const Line &l, const PitchCurve &curve, const VoiceDef &voice, std::vector<double> *at,
+                 std::vector<double> *hz) {
     double len = l.t1 - l.t0;
-    // the curve inside the line: its last point is taken just before the
-    // next line, so that a new note's pitch is not drawn into this one
-    // The engines follow a line's pitch points some milliseconds late (8 for
-    // MacinTalk 3, 10 for the others, measured on a vibrato), so the curve
-    // is read that much ahead -- inside the line: a new note's pitch still
-    // starts with its line, which the engines do on time.
-    const double lead = voice.engine == kMtk3 ? 0.008 : 0.010;
-    auto curve_at = [&](double f) {
-        double t = std::min(l.t0 + len * f + lead, l.t1 - std::min(0.001, 0.25 * len));
-        return curve.hz_at(t);
-    };
-    at->clear();
+    *at = trace(l.t0, l.t1, curve, voice.engine, kMaxPoints);
     hz->clear();
-    int n = std::max(2, int(std::ceil(len / kPointGap - 1e-9)) + 1);
-    if (n <= kMaxPoints) {
-        for (int k = 0; k < n; ++k) {
-            double f = double(k) / (n - 1), h = curve_at(f);
-            if (voice.gift == kSings) {
-                double a = 0.5 * pitch_step_cents(voice.engine, h) + 1.5;
-                h *= std::pow(2.0, ((*counter & 1) ? a : -a) / 1200.0);
-            }
-            ++*counter;
-            at->push_back(f);
-            hz->push_back(h);
-        }
-        return;
-    }
-    const int fine = std::max(2, int(len / 0.005) + 1);
-    std::vector<double> c(static_cast<size_t>(fine), 0.0);
-    for (int i = 0; i < fine; ++i) c[size_t(i)] = std::log2(curve_at(double(i) / (fine - 1)));
-    std::vector<int> pick = {0, fine - 1};
-    while (int(pick.size()) < kMaxPoints) {
-        double worst = -1;
-        int where = -1;
-        for (size_t p = 0; p + 1 < pick.size(); ++p) {
-            int a = pick[p], b = pick[p + 1];
-            for (int i = a + 1; i < b; ++i) {
-                double line = c[size_t(a)] + (c[size_t(b)] - c[size_t(a)]) * (i - a) / double(b - a);
-                double e = std::fabs(c[size_t(i)] - line);
-                if (e > worst) {
-                    worst = e;
-                    where = i;
-                }
-            }
-        }
-        if (where < 0 || worst < 0.5 / 1200.0) break;
-        pick.insert(std::upper_bound(pick.begin(), pick.end(), where), where);
-    }
-    for (int i : pick) {
-        at->push_back(double(i) / (fine - 1));
-        hz->push_back(std::exp2(c[size_t(i)]));
-    }
+    for (double f : *at)
+        hz->push_back(curve.hz_at(std::min(l.t0 + len * f + lead(voice.engine), l.t1 - std::min(0.001, 0.25 * len))));
 }
 
 // The utterance.
 std::string tune_text(const std::vector<Line> &lines, const PitchCurve &curve, const VoiceDef &voice,
                       const Tuning *tuning, double volm) {
     std::string s = "[[volm " + fixed(volm, 3) + "]][[inpt TUNE]]\n";
-    long point = 0;
     std::vector<double> at, hz;
     // D is whole milliseconds; what each line's rounding leaves over is
     // carried to the next, so that the lengths add up to what was meant
@@ -1179,7 +1221,7 @@ std::string tune_text(const std::vector<Line> &lines, const PitchCurve &curve, c
             continue;
         }
         s += std::string(l.stress ? "1" : "") + l.ph + " {D " + std::to_string(d) + "; P";
-        line_points(l, curve, voice, &point, &at, &hz);
+        line_points(l, curve, voice, &at, &hz);
         for (size_t k = 0; k < at.size(); ++k) {
             double h = tuned_hz(tuning, hz[k]);
             h = std::max(lowest_hz(voice.engine), std::min(highest_hz(voice), h));
@@ -1224,6 +1266,265 @@ std::vector<float> to_float(const std::vector<int16_t> &pcm) {
     std::vector<float> out(pcm.size());
     for (size_t i = 0; i < pcm.size(); ++i) out[i] = pcm[i] / 32768.0f;
     return out;
+}
+
+// -- the last of the pitch, and the vibrato -----------------------------------------
+
+// The engines sing a pitch of their own near the one asked: MacinTalk 3 a
+// whole hertz, the others a pitch period of whole samples at 22050 Hz -- up
+// to half a step out, a quarter tone by the top of a soprano's range. And a
+// vibrato, eleven points to a line, would cut every long note into lines,
+// each heard. So the engines are asked for the notes without their vibrato,
+// a held vowel one line however long; then each vowel is measured as sung,
+// and moved, a period at a time and without its length changing, onto the
+// pitch it should have, vibrato and all.
+
+//: how long a held vowel must be steady to be measured, and what is left
+//: out at each end of it (the glide in from the sound before, and out)
+constexpr double kSteadyMin = 0.12;
+constexpr double kSteadyEdge = 0.03;
+//: What of a vowel is moved: none of its first 25 ms or its last 15, where
+//: the engine is still on its way from the sound before (it follows a new
+//: pitch some 10 ms late) or already on its way to the next -- moving that
+//: would move where the note is heard to change. The move comes in over
+//: kMoveIn and goes over kMoveOut, so that its ends are as sung.
+constexpr double kMoveFrom = 0.025;
+constexpr double kMoveTo = 0.015;
+constexpr double kMoveIn = 0.015;
+constexpr double kMoveOut = 0.010;
+
+// How well x from a for n samples repeats `lag` samples on.
+double nac(const std::vector<float> &x, long a, long n, double lag) {
+    long L = long(lag);
+    double fr = lag - double(L), s = 0, e0 = 0, e1 = 0;
+    if (a < 0 || a + n + L + 1 >= long(x.size())) return 0.0;
+    for (long i = a; i < a + n; ++i) {
+        double u = x[size_t(i)];
+        double v = (1 - fr) * x[size_t(i + L)] + fr * x[size_t(i + L + 1)];
+        s += u * v;
+        e0 += u * u;
+        e1 += v * v;
+    }
+    return e0 > 0 && e1 > 0 ? s / std::sqrt(e0 * e1) : 0.0;
+}
+
+// The pitch of x from a to b, near `guess` (within a semitone), or 0 when it
+// is not periodic there. The period is found where it repeats best, then
+// over as many periods as fit, which is what makes it exact.
+double measure_hz(const std::vector<float> &x, long a, long b, double guess) {
+    long n = b - a;
+    double lag0 = kEngineRate / guess;
+    double best = -1, at = lag0;
+    for (double c = -100; c <= 100; c += 2) {
+        double lag = lag0 * std::pow(2.0, c / 1200.0);
+        double r = nac(x, a, n / 2, lag);
+        if (r > best) {
+            best = r;
+            at = lag;
+        }
+    }
+    if (best < 0.8) return 0.0;
+    int k = std::max(1, int(0.5 * n / at));
+    long m = n - long(std::ceil(k * at)) - 2;
+    if (m < long(at)) return kEngineRate / at;
+    // k periods on, within the 2 cents the first search went by, and closer
+    // each round (compared over this window only: the first one was shorter)
+    double span = k * at, step = span * 0.0012 / 10;
+    best = nac(x, a, m, span);
+    for (int round = 0; round < 3; ++round, step /= 10) {
+        double centre = span;
+        for (double d = -10 * step; d <= 10 * step; d += step) {
+            double r = nac(x, a, m, centre + d);
+            if (r > best) {
+                best = r;
+                span = centre + d;
+            }
+        }
+    }
+    return kEngineRate * k / span;
+}
+
+// x from a to b, sung at the pitch `from` gives (in hertz, at each sample
+// from a), moved to the pitch `to` gives: two of its periods at a time,
+// windowed, each taken from where it was sung (so the vowel goes on as it
+// went) and laid down a new period on from the last. Blended in and out at
+// the ends.
+template <class From, class To>
+void repitch(std::vector<float> &x, long a, long b, From from, To to) {
+    long n = b - a;
+    if (n < 8) return;
+    // where each period begins as sung
+    std::vector<double> marks;
+    for (double t = 0; t < n + 1; t += kEngineRate / from(std::min(double(n - 1), t))) marks.push_back(t);
+    if (marks.size() < 3) return;
+    std::vector<double> y(size_t(n), 0.0), w(size_t(n), 0.0);
+    auto at = [&](double t) {
+        long i = long(std::floor(t));
+        double f = t - double(i);
+        if (i < 0 || i + 1 >= long(x.size())) return 0.0;
+        return (1 - f) * x[size_t(i)] + f * x[size_t(i + 1)];
+    };
+    size_t closest = 0;
+    for (double m = 0; m < n + 1;) {
+        while (closest + 1 < marks.size() && std::fabs(marks[closest + 1] - m) <= std::fabs(marks[closest] - m)) ++closest;
+        double src = marks[closest];
+        double ps = closest + 1 < marks.size() ? marks[closest + 1] - marks[closest] : marks[closest] - marks[closest - 1];
+        long lo = long(std::ceil(m - ps)), hi = long(std::floor(m + ps));
+        for (long j = std::max(0L, lo); j <= std::min(n - 1, hi); ++j) {
+            double u = (j - m) / ps;   // -1 .. 1
+            double win = 0.5 + 0.5 * std::cos(M_PI * u);
+            y[size_t(j)] += win * at(a + src + (j - m));
+            w[size_t(j)] += win;
+        }
+        m += kEngineRate / to(std::min(double(n - 1), m));
+    }
+    const long fade = std::min(n / 4, long(0.010 * kEngineRate));
+    for (long j = 0; j < n; ++j) {
+        double v = w[size_t(j)] > 1e-6 ? y[size_t(j)] / w[size_t(j)] : x[size_t(a + j)];
+        double k = 1.0;
+        if (j < fade) k = double(j) / fade;
+        else if (j >= n - fade) k = double(n - 1 - j) / fade;
+        x[size_t(a + j)] = float(k * v + (1 - k) * x[size_t(a + j)]);
+    }
+}
+
+// Every vowel of a phrase moved from the pitch it was sung at (the curve
+// without vibrato, `sung`, and what the engine made of it) onto the pitch it
+// should have (`want`, the curve itself). A vowel's pitch is measured where
+// it was asked to hold still; where it was asked to move (a bend, a glide
+// from note to note), the engine is taken to have followed.
+void true_pitch(std::vector<float> &x, const std::vector<Line> &lines, const PitchCurve &sung,
+                const PitchCurve &want) {
+    // a vowel at a time, of one note: a vowel sung on through the next
+    // note is the next vowel
+    for (size_t i = 0; i < lines.size();) {
+        size_t j = i + 1;
+        while (j < lines.size() && lines[j].ph == lines[i].ph && lines[j].note == lines[i].note) ++j;
+        double t0 = lines[i].t0, t1 = lines[j - 1].t1;
+        bool vowel = apple_vowel(lines[i].ph);
+        i = j;
+        if (!vowel || t1 - t0 < kMoveFrom + kMoveTo + kMoveIn + kMoveOut) continue;
+        // what the engine was asked, and how far from it it sang where that
+        // held still
+        double ratio = 1.0;
+        double s0 = t0 + kSteadyEdge, s1 = t1 - kSteadyEdge;
+        if (s1 - s0 >= kSteadyMin - 2 * kSteadyEdge) {
+            double lo = 1e9, hi = 0;
+            for (double t = s0; t <= s1; t += 0.005) {
+                double h = sung.hz_at(t);
+                lo = std::min(lo, h);
+                hi = std::max(hi, h);
+            }
+            if (1200.0 * std::log2(hi / lo) <= 2.0) {
+                double asked = std::sqrt(lo * hi);
+                long a = long(s0 * kEngineRate), b = std::min(long(x.size()), long(s1 * kEngineRate));
+                double got = b - a >= long(0.05 * kEngineRate) ? measure_hz(x, a, b, asked) : 0.0;
+                double off = got > 0 ? 1200.0 * std::log2(got / asked) : 0.0;
+                // past a semitone it is not this voice's step that is out but
+                // the reading
+                if (std::fabs(off) <= 100.0) ratio = got > 0 ? got / asked : 1.0;
+            }
+        }
+        double m0 = t0 + kMoveFrom, m1 = t1 - kMoveTo;
+        long a = long(m0 * kEngineRate), b = std::min(long(x.size()), long(m1 * kEngineRate));
+        if (b - a < 8) continue;
+        auto when = [&](double k) { return (a + k) / kEngineRate; };
+        // Where the pitch moves, what the engine made of it is read every
+        // 10 ms (over 30): MacinTalk Pro climbs a bend a step of a period at
+        // a time, and the periods are cut from where they really are.
+        const long step = long(0.010 * kEngineRate), span = long(0.030 * kEngineRate);
+        std::vector<double> track;
+        for (long k = 0; k <= b - a; k += step) {
+            long c = a + k - span / 2;
+            double guess = sung.hz_at(when(double(k))) * ratio;
+            double got = c >= 0 && c + span < long(x.size()) ? measure_hz(x, c, c + span, guess) : 0.0;
+            track.push_back(got > 0 && std::fabs(1200.0 * std::log2(got / guess)) < 60.0 ? got : guess);
+        }
+        auto from = [&](double k) {
+            double f = k / step;
+            size_t i = std::min(track.size() - 1, size_t(std::max(0.0, std::floor(f))));
+            if (i + 1 >= track.size()) return track.back();
+            return track[i] + (track[i + 1] - track[i]) * (f - double(i));
+        };
+        auto to = [&](double k) {
+            double t = when(k);
+            double v = std::min(1.0, std::min((t - m0) / kMoveIn, (m1 - t) / kMoveOut));
+            v = std::max(0.0, v);
+            double f = from(k);
+            return f * std::pow(want.hz_at(t) / f, v);
+        };
+        // nothing to do where it is already within a cent all through
+        double most = 0;
+        for (long k = 0; k < b - a; k += long(0.005 * kEngineRate))
+            most = std::max(most, std::fabs(1200.0 * std::log2(to(double(k)) / from(double(k)))));
+        if (most < 1.0) continue;
+        repitch(x, a, b, from, to);
+    }
+}
+
+// MacinTalk Pro and Vicki let a vowel die away the longer it is held --
+// Agnes to a tenth of where she started in a second -- and start it again
+// loud at the next line of it. A held vowel is kept at the loudness it has
+// once it has begun, until it is let go: its loudness measured over 30 ms
+// every 5, and made up, smoothly, to where it was at the start.
+void level_held(std::vector<float> &x, const std::vector<Line> &lines) {
+    const long win = long(0.030 * kEngineRate), hop = long(0.005 * kEngineRate);
+    for (size_t i = 0; i < lines.size();) {
+        size_t j = i + 1;
+        while (j < lines.size() && lines[j].ph == lines[i].ph) ++j;
+        double t0 = lines[i].t0, t1 = lines[j - 1].t1;
+        bool vowel = apple_vowel(lines[i].ph);
+        i = j;
+        if (!vowel || t1 - t0 < 0.25) continue;
+        long a = long((t0 + 0.04) * kEngineRate), b = std::min(long(x.size()), long((t1 - 0.03) * kEngineRate));
+        if (b - a < 4 * win) continue;
+        // the loudness every hop, from a
+        std::vector<double> env;
+        for (long k = a; k + win <= b; k += hop) {
+            double e = 0;
+            for (long m = k; m < k + win; ++m) e += double(x[size_t(m)]) * x[size_t(m)];
+            env.push_back(std::sqrt(e / win));
+        }
+        // where it stands once begun: the loudest of its first 80 ms
+        size_t settle = std::min(env.size(), size_t(0.08 * kEngineRate / hop));
+        double ref = 0;
+        for (size_t k = 0; k < settle; ++k) ref = std::max(ref, env[k]);
+        if (ref <= 1e-4) continue;
+        std::vector<double> gain(env.size(), 1.0);
+        for (size_t k = 0; k < env.size(); ++k)
+            gain[k] = std::max(0.5, std::min(12.0, ref / std::max(env[k], 1e-6)));
+        // smoothed over 20 ms, and only ever up from the start: the attack
+        // is the engine's own
+        std::vector<double> smooth(gain.size(), 1.0);
+        const int half = 2;
+        for (size_t k = 0; k < gain.size(); ++k) {
+            double sum = 0;
+            int n = 0;
+            for (int d = -half; d <= half; ++d) {
+                long q = long(k) + d;
+                if (q < 0 || q >= long(gain.size())) continue;
+                sum += gain[size_t(q)];
+                ++n;
+            }
+            smooth[k] = sum / n;
+        }
+        for (size_t k = 0; k < settle && k < smooth.size(); ++k) smooth[k] = 1.0 + (smooth[k] - 1.0) * k / settle;
+        // let go over its last 20 ms, as the engine does
+        size_t tail = std::min(smooth.size(), size_t(0.02 * kEngineRate / hop));
+        for (size_t k = 0; k < tail; ++k) {
+            size_t q = smooth.size() - 1 - k;
+            smooth[q] = 1.0 + (smooth[q] - 1.0) * k / tail;
+        }
+        for (long m = a; m < b; ++m) {
+            double f = double(m - a - win / 2) / hop;
+            long k = long(std::floor(f));
+            double g;
+            if (k < 0) g = smooth.front();
+            else if (k + 1 >= long(smooth.size())) g = smooth.back();
+            else g = smooth[size_t(k)] + (smooth[size_t(k + 1)] - smooth[size_t(k)]) * (f - k);
+            x[size_t(m)] = float(x[size_t(m)] * g);
+        }
+    }
 }
 
 // -- finding where MacinTalk Pro put each line -------------------------------------------
@@ -1455,7 +1756,19 @@ public:
     Sung sing(const Phrase &phrase) override {
         Sung sung;
         if (phrase.notes.empty()) return sung;
-        PitchCurve curve(phrase);
+        // Where the vowels can be measured and moved afterwards, the engine
+        // is asked for the phrase without its vibrato (or the mod wheel's):
+        // the vibrato is put in afterwards, exactly as deep as it should be.
+        // Not Trinoids, three voices whose pitch cannot be read as one, nor
+        // Boing, who sings three eighths of what he is asked.
+        bool measurable = std::strcmp(voice_.bundle, "Trinoids") != 0 && std::strcmp(voice_.bundle, "Boing") != 0;
+        bool move = voice_.gift == kSings && measurable && !g_raw;
+        Phrase flat = phrase;
+        if (move) {
+            flat.style.vibrato = 0;
+            flat.mods.clear();
+        }
+        PitchCurve want(phrase), curve(flat);
         long total = long(std::llround(curve.total() * kSampleRate));
         if (total <= 0) return sung;
         std::vector<Line> lines = plan_lines(phrase, curve, voice_.engine);
@@ -1475,7 +1788,10 @@ public:
             return silence(total, &sung);
         }
 
-        std::vector<float> out = resample_to_output(to_float(pcm), kEngineRate);
+        std::vector<float> sung_at = to_float(pcm);
+        if (move) true_pitch(sung_at, lines, curve, want);
+        if (voice_.engine != kMtk3 && !g_raw) level_held(sung_at, lines);
+        std::vector<float> out = resample_to_output(sung_at, kEngineRate);
         out.resize(size_t(total), 0.0f);
         apply_level(phrase, curve, gain, &out);
         sung.samples = std::move(out);
@@ -2057,17 +2373,24 @@ private:
 
     const Install &install() {
         std::lock_guard<std::mutex> lock(mu_);
-        if (!surveyed_) {
+        unsigned version = 0;
+        named_folder(&version);
+        if (!surveyed_ || version != surveyed_version_) {
 #ifdef _WIN32
             install_ = survey();
+            // a singer already made keeps the host it has; new ones get new
+            // hosts, from wherever MacinTalk is now
+            for (auto &h : hosts_) h.reset();
 #endif
             surveyed_ = true;
+            surveyed_version_ = version;
         }
         return install_;
     }
 
     std::mutex mu_;
     bool surveyed_ = false;
+    unsigned surveyed_version_ = 0;
     Install install_;
 #ifdef _WIN32
     std::shared_ptr<Host> hosts_[kGenCount];
@@ -2081,8 +2404,16 @@ private:
 
 std::unique_ptr<Family> make_macintalk_family() { return std::make_unique<MacinTalkFamily>(); }
 
-//: Not part of family.h: sing with no tuning at all -- no dither, no offsets,
-//: one [[volm]] for every voice -- for the test program's --calibrate.
+void set_macintalk_folder(const std::string &folder) {
+    std::lock_guard<std::mutex> lock(g_folder_mu);
+    if (folder == g_folder) return;
+    g_folder = folder;
+    ++g_folder_version;
+}
+
+//: Not part of family.h: sing with no tuning at all -- no offsets, nothing
+//: measured and moved, one [[volm]] for every voice -- for the test
+//: program's --calibrate.
 void macintalk_raw(bool raw) { g_raw = raw; }
 
 //: Not part of family.h: the self-check the test program runs without any

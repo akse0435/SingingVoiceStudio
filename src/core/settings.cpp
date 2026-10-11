@@ -48,6 +48,8 @@ Settings load_settings() {
     if (!read_json(in_folder("settings.json"), &doc) || !doc.is_object()) return s;
     if (doc.contains("auto_preview") && doc["auto_preview"].is_boolean())
         s.auto_preview = doc["auto_preview"].get<bool>();
+    if (doc.contains("panthera_folder") && doc["panthera_folder"].is_string())
+        s.panthera_folder = doc["panthera_folder"].get<std::string>();
     return s;
 }
 
@@ -55,6 +57,7 @@ bool save_settings(const Settings &s) {
     if (!make_dirs(settings_dir())) return false;
     json doc;
     doc["auto_preview"] = s.auto_preview;
+    if (!s.panthera_folder.empty()) doc["panthera_folder"] = s.panthera_folder;
     return write_text(in_folder("settings.json"), doc.dump(1) + "\n");
 }
 

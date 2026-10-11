@@ -153,6 +153,7 @@ private:
     void render(const RenderRequest &req, const std::string &out,
                 std::function<void(RenderResult)> done);
     void on_auto_preview(wxCommandEvent &);
+    void on_panthera(wxCommandEvent &);
     void preview_note(int i);
     void preview_now(int i);
 

@@ -12,6 +12,7 @@
 #include "audio/mixer.h"
 #include "core/paths.h"
 #include "core/project.h"
+#include "core/settings.h"
 #include "voices/registry.h"
 #include "voices/vocalwriter.h"
 
@@ -282,6 +283,8 @@ bool wants_console(const CliArgs &a) {
 
 int run_cli(const CliArgs &args) {
     g_quiet = args.quiet;
+    // Panthera where the window was told it is
+    set_macintalk_folder(load_settings().panthera_folder);
     if (args.help) {
         out(usage());
         return 0;

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include <wx/dirdlg.h>
 #include <wx/tokenzr.h>
 
 #include "app/studio.h"
@@ -565,6 +566,40 @@ wxSpinCtrl *spin(wxWindow *parent, int lo, int hi, int value, int width) {
                           hi, value);
 }
 }  // namespace
+
+// -- PantheraDialog --------------------------------------------------------------
+
+PantheraDialog::PantheraDialog(wxWindow *parent, const std::string &folder)
+    : wxDialog(parent, wxID_ANY, "Panthera folder") {
+    wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
+    wxStaticText *about = new wxStaticText(
+        this, wxID_ANY,
+        "The MacinTalk voices are Apple's, run by Panthera. Leave this empty to find them where "
+        "Panthera's NVDA add-on puts them. Otherwise name NVDA's configuration folder, or a folder "
+        "holding panthera_host.exe and the tiger, leopard, snowleopard and lion folders.");
+    about->Wrap(420);
+    outer->Add(about, 0, wxALL, 8);
+    path_ = new wxTextCtrl(this, wxID_ANY, W(folder), wxDefaultPosition, wxSize(420, -1));
+    labelled(this, outer, "&Folder", path_, 1);
+    wxButton *browse = new wxButton(this, wxID_ANY, "&Browse...");
+    browse->Bind(wxEVT_BUTTON, &PantheraDialog::on_browse, this);
+    outer->Add(browse, 0, wxALL, 6);
+    outer->Add(buttons(this), 0, wxEXPAND | wxALL, 8);
+    SetSizerAndFit(outer);
+    path_->SetFocus();
+}
+
+void PantheraDialog::on_browse(wxCommandEvent &) {
+    wxDirDialog pick(this, "Panthera folder", path_->GetValue(), wxDD_DEFAULT_STYLE | wxDD_DIR_MUST_EXIST);
+    if (pick.ShowModal() == wxID_OK) path_->SetValue(pick.GetPath());
+    path_->SetFocus();
+}
+
+std::string PantheraDialog::folder() const {
+    wxString t = path_->GetValue();
+    t.Trim(true).Trim(false);
+    return U(t);
+}
 
 SongSettingsDialog::SongSettingsDialog(wxWindow *parent, const Song &song)
     : wxDialog(parent, wxID_ANY, "Song settings"), was_sig_(song.sig) {

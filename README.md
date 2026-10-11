@@ -12,7 +12,7 @@ five synthesisers:
 | **DECtalk** | Paul, Betty, Harry, Frank, Dennis, Kit, Ursula, Rita, Wendy, Val | 1000 - 1009 | github.com/dectalk/dectalk, sung through its phoneme `<duration,pitch>` notation |
 | **SSI-263** | SSI-263, Deep, Bright, Child | 2000 - 2003 | the chip itself, driven at register level (github.com/tgeczy/ssi263-speech) |
 | **Microsoft** | Sam, Mike, Mary, each plain, in Hall, in Stadium, in Space, Whisper, RoboSoft One to Six | 3000 - 3050 | the SAPI 5 engine rebuilt in C, with the SAPI 4 voice modes (github.com/KamiKitsune420/ms-sam-mike-mary-decomp) |
-| **MacinTalk** | Agnes, Albert, Bad News, Bahh, Bells, Boing, Bruce, Bubbles, Cellos, Deranged, Fred, Good News, Hysterical, Junior, Kathy, Pipe Organ, Princess, Ralph, Trinoids, Vicki, Victoria, Whisper, Zarvox, from each of Mac OS X 10.4 Tiger, 10.5 Leopard, 10.6 Snow Leopard and 10.7 Lion | 4000 - 4022, 4100 - 4122, 4200 - 4222, 4300 - 4322 | Apple's own engines: on Windows run by Panthera's host (github.com/tgeczy/panthera-speech) and sung through Apple's TUNE notation; on a Mac the system's own voices, spoken from phonemes and retuned to the score (see below) |
+| **MacinTalk** | Agnes, Albert, Bad News, Bahh, Bells, Boing, Bruce, Bubbles, Cellos, Deranged, Fred, Good News, Hysterical, Junior, Kathy, Pipe Organ, Princess, Ralph, Trinoids, Vicki, Victoria, Whisper, Zarvox, from each of Mac OS X 10.4 Tiger, 10.5 Leopard, 10.6 Snow Leopard and 10.7 Lion, and Alex from 10.5 on | 4000 - 4023, 4100 - 4123, 4200 - 4223, 4300 - 4323 | Apple's own engines: on Windows run by Panthera's host (github.com/tgeczy/panthera-speech) and sung through Apple's TUNE notation; on a Mac the system's own voices, spoken from phonemes and retuned to the score (see below) |
 
 A voice's number is what a song saves, and it is fixed per engine, so a song
 written with DECtalk Betty still says Betty on a machine without DECtalk and
@@ -62,7 +62,9 @@ voices\microsoft\           Sam.spd, Mike.spd, Mary.spd (any of them). Without t
 MacinTalk is Apple's, run by Panthera: install Panthera's NVDA add-on
 (github.com/tgeczy/panthera-speech), which brings its host, `panthera_host.exe`,
 and extracts the speech files from your own Mac OS X install discs into NVDA's
-configuration folder. That is where they are looked for:
+configuration folder. That is where they are looked for, unless **Settings >
+Panthera folder** names somewhere else (NVDA's configuration folder, or a folder holding
+`panthera_host.exe` and the `tiger`, `leopard`, `snowleopard` and `lion` folders):
 
 ```
 %APPDATA%\nvda\addons\pantheraspeech\synthDrivers\_panthera\panthera_host.exe
@@ -81,12 +83,25 @@ or `leopard.txt` and the like naming them). One host is started for each generat
 the first time it sings, and stays until the program ends.
 
 Fred, Junior, Kathy, Princess, Ralph, Zarvox, Trinoids and Boing (MacinTalk 3),
-Agnes, Bruce and Victoria (MacinTalk Pro) and Vicki sing on Tiger, Leopard and Snow
-Leopard; Albert, Bahh, Bubbles, Deranged and Whisper sing in time, on a pitch of their
-own. Bad News, Bells, Cellos, Good News, Hysterical and Pipe Organ play their own
-tune whatever they are given, and Lion's MacinTalk ignores a TUNE's lengths and
-pitches, so those are listed and cannot sing. Tiger from 10.4.5 on (MacinTalk 3.4)
-cannot run off Apple's hardware. Alex is not offered.
+Agnes, Bruce and Victoria (MacinTalk Pro), Vicki, and Alex (Leopard and Snow Leopard)
+sing on Tiger, Leopard and Snow Leopard; Albert, Bahh, Bubbles, Deranged and Whisper
+sing in time, on a pitch of their own. Bad News, Bells, Cellos, Good News, Hysterical
+and Pipe Organ play their own tune whatever they are given, so they are listed and
+cannot sing. Tiger from 10.4.5 on (MacinTalk 3.4) cannot run off Apple's hardware.
+
+Lion's voices are listed and cannot sing either: through Panthera, 10.7 takes a TUNE
+and ignores its lengths and pitches. That looks like Panthera's host rather than Lion.
+10.7 moved the reading of TUNE into SpeechDictionary, which hands the notes to
+MacinTalk as CoreFoundation arrays of dictionaries, and the host's stand-in for
+CoreFoundation has no `CFArrayCreate`, `CFDictionaryCreate`, `CFArrayGetCount` or
+`CFArrayGetValueAtIndex`.
+
+The engines are asked for each note without its vibrato, so that a held note is one
+line of TUNE: a line follows eleven pitch points and no more, and a note cut into
+several lines is heard starting again at every cut. Each vowel is then measured as
+sung and moved, a period at a time, onto its exact pitch with the vibrato in; and
+MacinTalk Pro's and Vicki's held vowels, which die away the longer they are held, are
+kept at the loudness they began at.
 
 On a Mac MacinTalk needs nothing supplied: the voices are the system's own
 (System Settings, Accessibility, Spoken Content, System Voice, Manage Voices,

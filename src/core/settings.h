@@ -17,6 +17,9 @@ namespace svs {
 struct Settings {
     //: preview a note as it is nudged, so pitch and length can be heard
     bool auto_preview = false;
+    //: where Panthera is, for the MacinTalk voices, when it is not where its
+    //: NVDA add-on puts it; empty to look only there (set_macintalk_folder)
+    std::string panthera_folder;
 };
 
 Settings load_settings();

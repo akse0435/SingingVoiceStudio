@@ -30,7 +30,7 @@ enum {
     ID_ADD_WORD = wxID_HIGHEST + 1, ID_ADD_NOTE, ID_EDIT, ID_REMOVE,
     ID_UP, ID_DOWN, ID_LONGER, ID_SHORTER, ID_OCTAVE_UP, ID_OCTAVE_DOWN, ID_DOUBLE, ID_HALVE,
     ID_PLAY, ID_HEAR, ID_STOP, ID_KEYS,
-    ID_ADD_REST, ID_IMPORT, ID_EXPORT, ID_AUTO_PREVIEW, ID_EXPORT_TRACKS,
+    ID_ADD_REST, ID_IMPORT, ID_EXPORT, ID_AUTO_PREVIEW, ID_PANTHERA, ID_EXPORT_TRACKS,
     ID_BAR_REST, ID_GOTO_BAR, ID_METRONOME, ID_PLAY_PAUSE, ID_PANES,
     ID_TRACK_NEW, ID_TRACK_EDIT, ID_TRACK_REMOVE, ID_TRACK_MUTE, ID_TRACK_SOLO,
     ID_TRACK_UP, ID_TRACK_DOWN, ID_PREVIEW_TIMER, ID_RECOVERY_TIMER,
@@ -132,6 +132,8 @@ Studio::Studio(const std::string &path)
     first.name = "Voice 1";
     song_.tracks.push_back(first);
     settings_ = load_settings();
+    // before anything asks the engines for their voices
+    set_macintalk_folder(settings_.panthera_folder);
     mixer_ = std::make_shared<Mixer>();
     worker_ = std::make_unique<Worker>(this);
     worker_->on_error = [this](const std::string &msg) { say("engine error: " + W(msg)); };
@@ -311,6 +313,7 @@ void Studio::build_menu() {
     mi_auto_preview_ = prefs->AppendCheckItem(ID_AUTO_PREVIEW, K("&Preview notes as they change\tCtrl+Shift+P"),
                                               "Hear a note whenever its pitch or length is nudged");
     mi_auto_preview_->Check(settings_.auto_preview);
+    prefs->Append(ID_PANTHERA, K("Panthera &folder..."), "Where to find Panthera, for the MacinTalk voices");
     bar->Append(prefs, "&Settings");
     bar->Append(help, "&Help");
     SetMenuBar(bar);
@@ -359,6 +362,7 @@ void Studio::build_menu() {
     on(ID_EXPORT_TRACKS, &Studio::on_export_tracks);
     on(wxID_PREFERENCES, &Studio::on_song_settings);
     on(ID_AUTO_PREVIEW, &Studio::on_auto_preview);
+    on(ID_PANTHERA, &Studio::on_panthera);
     Bind(wxEVT_MENU, [this](wxCommandEvent &) { Close(); }, wxID_EXIT);
 }
 
@@ -419,6 +423,34 @@ void Studio::on_auto_preview(wxCommandEvent &) {
     bool kept = save_settings(settings_);
     say(wxString("previewing notes as they change is ") + (on ? "on" : "off") +
         (kept ? "" : ", for this sitting only: the settings file could not be written"));
+}
+
+//: Where Panthera is. MacinTalk looks again at once, and what it finds is
+//: said: the voices it has now, or why it has none.
+void Studio::on_panthera(wxCommandEvent &) {
+    PantheraDialog dlg(this, settings_.panthera_folder);
+    if (dlg.ShowModal() != wxID_OK) return;
+    std::string folder = dlg.folder();
+    if (folder == settings_.panthera_folder) return;
+    if (!folder.empty() && !dir_exists(folder)) {
+        say(W("there is no folder called " + folder));
+        return;
+    }
+    settings_.panthera_folder = folder;
+    bool kept = save_settings(settings_);
+    set_macintalk_folder(folder);
+    // phrases already sung by MacinTalk may have been sung by another copy
+    mixer_ = std::make_shared<Mixer>();
+    worker_->ask<std::vector<VoiceListing>>([] { return Registry::get().voices(); },
+                                            [this](std::vector<VoiceListing> v) { set_voices(v); });
+    worker_->ask<std::vector<std::string>>([] { return Registry::get().status(); },
+                                           [this, kept](std::vector<std::string> lines) {
+                                               status_lines_ = lines;
+                                               for (const std::string &line : lines)
+                                                   if (line.rfind("MacinTalk", 0) == 0) say(W(line));
+                                               if (!kept)
+                                                   say("for this sitting only: the settings file could not be written");
+                                           });
 }
 
 //: Hear one note once the nudging has stopped: a held arrow key would
