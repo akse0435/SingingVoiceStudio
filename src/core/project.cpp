@@ -274,7 +274,8 @@ std::vector<std::pair<const Track *, std::string>> export_jobs(const std::vector
     std::vector<std::pair<const Track *, std::string>> jobs;
     std::set<std::string> taken;
     for (const Track &t : tracks) {
-        if (t.notes.empty()) continue;
+        // a backing track is a file already: there is nothing to write
+        if (t.notes.empty() || t.is_backing()) continue;
         std::string stem = file_name(base, "song") + " - " + file_name(t.name);
         std::string name = stem;
         int k = 1;
@@ -376,6 +377,12 @@ json track_doc(const Track &t) {
     if (t.voice) d["voice"] = voice_doc(*t.voice);
     if (t.reverb) d["reverb"] = {{"room", t.reverb->first}, {"wet", t.reverb->second}};
     if (t.consonants) d["consonants"] = *t.consonants;
+    // a backing track's file, which VocalWriter Studio knows nothing of: it
+    // reads the track as a part with no notes
+    if (t.is_backing()) {
+        d["audio"] = t.audio;
+        if (t.audio_start != 0) d["audio_start"] = round_to(t.audio_start, 3);
+    }
     return d;
 }
 
@@ -464,6 +471,8 @@ Track read_track(const json &doc, size_t index) {
     t.mute = get("mute") && truthy(*get("mute"));
     t.solo = get("solo") && truthy(*get("solo"));
     if (const json *n = get("notes")) t.notes = read_notes(*n);
+    if (const json *v = get("audio"); v && v->is_string()) t.audio = v->get<std::string>();
+    if (const json *v = get("audio_start")) t.audio_start = as_double(*v, 0);
     return t;
 }
 
@@ -558,6 +567,13 @@ Song load_project(const std::string &path) {
         Track t;
         t.name = "Voice 1";
         song.tracks.push_back(t);
+    }
+    // A backing track's file that is not where it was, but is beside the
+    // project: the two were moved, or sent to someone, together.
+    for (Track &t : song.tracks) {
+        if (!t.is_backing() || file_exists(t.audio)) continue;
+        std::string beside = join_path(dir_name(path), base_name(t.audio));
+        if (file_exists(beside)) t.audio = beside;
     }
     return song;
 }

@@ -83,6 +83,8 @@ static std::string parent(const std::string &path) {
     return i == std::string::npos ? std::string() : path.substr(0, i);
 }
 
+std::string dir_name(const std::string &path) { return parent(path); }
+
 std::string strip_extension(const std::string &path) {
     std::string b = base_name(path);
     size_t dot = b.find_last_of('.');
@@ -302,6 +304,17 @@ long long file_size(const std::string &path) {
 #else
     struct stat st;
     return stat(path.c_str(), &st) == 0 ? (long long)st.st_size : -1;
+#endif
+}
+
+long long file_time(const std::string &path) {
+#ifdef _WIN32
+    WIN32_FILE_ATTRIBUTE_DATA a;
+    if (!GetFileAttributesExW(widen(path).c_str(), GetFileExInfoStandard, &a)) return -1;
+    return (long long)a.ftLastWriteTime.dwHighDateTime << 32 | a.ftLastWriteTime.dwLowDateTime;
+#else
+    struct stat st;
+    return stat(path.c_str(), &st) == 0 ? (long long)st.st_mtime : -1;
 #endif
 }
 

@@ -35,6 +35,8 @@ std::string join_path(const std::string &a, const std::string &b);
 //: A relative data path as this platform writes it, for a message.
 std::string data_name(const std::string &relative);
 std::string base_name(const std::string &path);
+//: the folder a path is in, or empty for a bare name
+std::string dir_name(const std::string &path);
 std::string strip_extension(const std::string &path);
 std::string extension_lower(const std::string &path);
 bool file_exists(const std::string &path);
@@ -51,6 +53,9 @@ bool remove_file(const std::string &path);
 void remove_tree(const std::string &path);
 //: -1 if there is no such file
 long long file_size(const std::string &path);
+//: when a file was last written, in the system's own units; -1 if there is
+//: no such file. Only for telling whether it has changed.
+long long file_time(const std::string &path);
 long current_pid();
 //: Whether a process with that number is still running.
 bool process_alive(long pid);

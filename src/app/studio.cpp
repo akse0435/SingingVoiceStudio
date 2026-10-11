@@ -15,6 +15,7 @@
 #include "app/announce.h"
 #include "app/crash.h"
 #include "app/dialogs.h"
+#include "audio/decode.h"
 #include "core/paths.h"
 #include "voices/controls.h"
 #include "voices/registry.h"
@@ -32,7 +33,7 @@ enum {
     ID_PLAY, ID_HEAR, ID_STOP, ID_KEYS,
     ID_ADD_REST, ID_IMPORT, ID_EXPORT, ID_AUTO_PREVIEW, ID_PANTHERA, ID_EXPORT_TRACKS,
     ID_BAR_REST, ID_GOTO_BAR, ID_METRONOME, ID_PLAY_PAUSE, ID_PANES,
-    ID_TRACK_NEW, ID_TRACK_EDIT, ID_TRACK_REMOVE, ID_TRACK_MUTE, ID_TRACK_SOLO,
+    ID_TRACK_NEW, ID_TRACK_BACKING, ID_TRACK_EDIT, ID_TRACK_REMOVE, ID_TRACK_MUTE, ID_TRACK_SOLO,
     ID_TRACK_UP, ID_TRACK_DOWN, ID_PREVIEW_TIMER, ID_RECOVERY_TIMER,
 };
 
@@ -247,6 +248,8 @@ void Studio::build_menu() {
 
     wxMenu *track = new wxMenu();
     track->Append(ID_TRACK_NEW, K("&New track\tCtrl+T"), "Add another part, with its own voice");
+    track->Append(ID_TRACK_BACKING, K("New &backing track...\tCtrl+Shift+B"),
+                  "A sound file played under the voices");
     track->Append(ID_TRACK_EDIT, K("&Track settings... (Enter on a track)"), "Name, voice, volume and pan");
     track->Append(ID_TRACK_REMOVE, K("&Remove track (Delete on a track)"),
                   "Remove the selected track and everything in it");
@@ -341,6 +344,7 @@ void Studio::build_menu() {
     Bind(wxEVT_MENU, [this](wxCommandEvent &) { scale_length(0.5); }, ID_HALVE);
     on(ID_METRONOME, &Studio::on_metronome);
     on(ID_TRACK_NEW, &Studio::on_track_new);
+    on(ID_TRACK_BACKING, &Studio::on_track_backing);
     on(ID_TRACK_EDIT, &Studio::on_track_edit);
     on(ID_TRACK_REMOVE, &Studio::on_track_remove);
     Bind(wxEVT_MENU, [this](wxCommandEvent &) { toggle_track(false); }, ID_TRACK_MUTE);
@@ -475,7 +479,8 @@ void Studio::on_keys(wxCommandEvent &) {
         "Ctrl+Z  undo, Ctrl+Shift+Z  redo",
         "F6  move between the tracks list and the notes list",
         "Ctrl+T  add a track. Each track has its own voice, volume, pan and notes",
-        "Enter on a track  its name, voice, volume and pan",
+        "Ctrl+Shift+B  add a backing track: a sound file played under the voices",
+        "Enter on a track  its name, voice, volume and pan, or a backing track's file and where it starts",
         "M on a track  mute it, S  solo it",
         "Delete on a track  remove it",
         "Ctrl+Up or Ctrl+Down on a track  reorder the parts",
@@ -618,7 +623,7 @@ std::string Studio::track_state(const Track &t) const {
 void Studio::refresh_track(int i) {
     const Track &t = song_.tracks[size_t(i)];
     tracks_list_->SetItem(i, 0, W(t.name));
-    tracks_list_->SetItem(i, 1, W(voice_name(track_voice_of(t))));
+    tracks_list_->SetItem(i, 1, W(track_sound(t)));
     tracks_list_->SetItem(i, 2, W(std::to_string(t.volume) + "%"));
     tracks_list_->SetItem(i, 3, W(pan_text(t.pan)));
     tracks_list_->SetItem(i, 4, W(track_state(t)));
@@ -648,8 +653,8 @@ void Studio::on_track_chosen() {
     const Track &t = track();
     relabel(list_, W("Notes in " + t.name));
     sync(t.cursor);
-    say(W(t.name + ", " + voice_name(track_voice_of(t)) + ", " + plural(t.notes.size(), "note") + ", " +
-          track_state(t)));
+    if (t.is_backing()) say(W(t.name + ", " + track_sound(t) + ", " + track_state(t)));
+    else say(W(t.name + ", " + track_sound(t) + ", " + plural(t.notes.size(), "note") + ", " + track_state(t)));
 }
 
 void Studio::on_track_key(wxKeyEvent &evt) {
@@ -718,7 +723,57 @@ void Studio::on_track_new(wxCommandEvent &) {
     });
 }
 
+//: Ctrl+Shift+B: a sound file played under the voices -- the band the song
+//: is sung over -- as a track of its own, with a volume, a pan, and mute and
+//: solo like any other.
+void Studio::on_track_backing(wxCommandEvent &) {
+    undoable("add backing track", [&] {
+        wxFileDialog pick(this, "Backing track", "", "", kAudioWildcard, wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+        if (pick.ShowModal() != wxID_OK) return;
+        Track t;
+        t.audio = U(pick.GetPath());
+        t.name = base_name(strip_extension(t.audio));
+        // a finished recording is far louder than a voice singing alone
+        t.volume = 50;
+        song_.tracks.insert(song_.tracks.begin() + current_ + 1, t);
+        touch();
+        sync_tracks(current_ + 1);
+        sync();
+        tracks_list_->SetFocus();
+        say(W("added the backing track " + t.name + ", at half volume, from the start of the song. Enter on it "
+              "sets its volume, pan and where it starts."));
+    });
+}
+
+std::string Studio::track_sound(const Track &t) const {
+    if (t.is_backing()) return "backing track, " + base_name(t.audio);
+    return voice_name(track_voice_of(t));
+}
+
+bool Studio::takes_notes() {
+    if (!track().is_backing()) return true;
+    say(W(track().name + " is a backing track, which plays its file and has no notes. Notes go on a track "
+          "that sings."));
+    return false;
+}
+
 void Studio::on_track_edit(wxCommandEvent &) {
+    if (song_.tracks[size_t(track_at())].is_backing()) {
+        undoable("track settings", [&] {
+            int i = track_at();
+            Track &t = song_.tracks[size_t(i)];
+            BackingDialog dlg(this, t);
+            if (dlg.ShowModal() != wxID_OK) return;
+            dlg.apply(t);
+            touch();
+            refresh_track(i);
+            if (i == current_) relabel(list_, W("Notes in " + t.name));
+            reannounce(tracks_list_, i);
+            say(W(t.name + ", " + base_name(t.audio) + ", starting at " + fmt_g(t.audio_start) + " seconds, volume " +
+                  std::to_string(t.volume) + "%, " + pan_text(t.pan)));
+        });
+        return;
+    }
     undoable("track settings", [&] {
         int i = track_at();
         Track &t = song_.tracks[size_t(i)];
@@ -847,6 +902,7 @@ void Studio::on_goto_bar(wxCommandEvent &) {
 //: Fill the rest of the bar with silence, which is what a time signature is
 //: for while a song is being written.
 void Studio::on_bar_rest(wxCommandEvent &) {
+    if (!takes_notes()) return;
     undoable("add bar rest", [&] {
         std::vector<int> rows = selected();
         int at = rows.empty() ? int(notes().size()) : rows.back() + 1;
@@ -1141,6 +1197,7 @@ void Studio::on_cut(wxCommandEvent &) {
 }
 
 void Studio::on_paste(wxCommandEvent &) {
+    if (!takes_notes()) return;
     undoable("paste notes", [&] {
         std::vector<Note> added = notes_from_clipboard(from_clipboard());
         if (added.empty()) {
@@ -1178,6 +1235,7 @@ const Note *Studio::insertion_neighbour() {
 }
 
 void Studio::on_add_word(wxCommandEvent &) {
+    if (!takes_notes()) return;
     undoable("add word", [&] {
         const Note *l = insertion_neighbour();
         AddWordDialog dlg(this, this, l ? l->pitch : kDefaultPitch, l ? l->beats : kDefaultBeats);
@@ -1196,6 +1254,7 @@ void Studio::on_add_word(wxCommandEvent &) {
 }
 
 void Studio::on_add_note(wxCommandEvent &) {
+    if (!takes_notes()) return;
     undoable("add note", [&] {
         const Note *l = insertion_neighbour();
         Note seed({}, l ? l->pitch : kDefaultPitch, l ? l->beats : kDefaultBeats);
@@ -1213,6 +1272,7 @@ void Studio::on_add_note(wxCommandEvent &) {
 //: A rest is a note nobody sings. It breaks the line into phrases, so the
 //: phrase before it is allowed to end instead of running into the next.
 void Studio::on_add_rest(wxCommandEvent &) {
+    if (!takes_notes()) return;
     undoable("add rest", [&] {
         int i = selection();
         const Note *nearby = i >= 0 ? &notes()[size_t(i)] : last();
@@ -1388,26 +1448,38 @@ void Studio::start_playing(double start, bool quiet) {
         return;
     }
     std::vector<const Track *> live;
+    bool backed = false;
     for (const Track *t : audible(song_.tracks))
-        if (!t->notes.empty()) live.push_back(t);
+        if (!t->notes.empty() || t->is_backing()) {
+            live.push_back(t);
+            backed = backed || t->is_backing();
+        }
     if (live.empty()) {
         bool any = false;
-        for (const Track &t : song_.tracks) any = any || !t.notes.empty();
+        for (const Track &t : song_.tracks) any = any || !t.notes.empty() || t.is_backing();
         say(any ? "every track with notes in it is silent. M unmutes a track, S turns solo off."
                 : "nothing to sing yet. Add a word or a note.");
         return;
     }
     double total = 0;
     for (const Track *t : live) {
+        if (t->is_backing()) continue;
         double s = 0;
         for (const Note &n : t->notes) s += n.beats;
         total = std::max(total, s);
     }
-    if (start >= total - 1e-9) start = 0.0;      // past the end: start again
+    // past the end: start again (a backing track runs on past the voices,
+    // but where the cursor is is where the notes are)
+    if (start >= total - 1e-9) start = 0.0;
     stop_audio();          // the file cannot be written while it plays
     rendering_ = true;
     mi_play_->Enable(false);
-    if (!quiet) {
+    if (!quiet && backed) {
+        // how long a backing track's file runs on is not known until it is read
+        auto bb = bar_and_beat(start, signature());
+        say(W(printf_s("rendering %s from bar %d beat %s", plural(live.size(), "track").c_str(), bb.first,
+                       fmt_g(std::nearbyint(bb.second * 100) / 100).c_str())));
+    } else if (!quiet) {
         auto bb = bar_and_beat(start, signature());
         say(W(printf_s("rendering %s from bar %d beat %s, about %.1f seconds", plural(live.size(), "track").c_str(),
                        bb.first, fmt_g(std::nearbyint(bb.second * 100) / 100).c_str(),
@@ -1456,7 +1528,7 @@ void Studio::on_stop(wxCommandEvent &) {
 
 void Studio::on_export(wxCommandEvent &) {
     bool any = false;
-    for (const Track *t : audible(song_.tracks)) any = any || !t->notes.empty();
+    for (const Track *t : audible(song_.tracks)) any = any || !t->notes.empty() || t->is_backing();
     if (!any) {
         say("nothing to export: no track that can be heard has any notes in it");
         return;

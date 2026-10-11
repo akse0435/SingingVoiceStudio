@@ -93,6 +93,11 @@ private:
     void toggle_track(bool solo);
     std::string track_name() const;
     void on_track_new(wxCommandEvent &);
+    void on_track_backing(wxCommandEvent &);
+    //: what a track sounds like: its voice, or the file a backing track plays
+    std::string track_sound(const Track &t) const;
+    //: false, said, when the track being worked on is a backing track
+    bool takes_notes();
     void on_track_edit(wxCommandEvent &);
     void on_track_remove(wxCommandEvent &);
     void move_tracks(int delta);

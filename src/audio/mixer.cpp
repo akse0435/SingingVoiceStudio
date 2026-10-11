@@ -10,6 +10,7 @@
 #include <windows.h>
 #endif
 
+#include "audio/decode.h"
 #include "audio/wav.h"
 #include "core/paths.h"
 #include "core/phonology.h"
@@ -202,6 +203,16 @@ std::string request_key(const RenderRequest &r) {
             num(b.slides);
         }
     }
+    // a backing track's file by what it is now: changed on disk, it is
+    // read again
+    for (const BackingRequest &b : r.backings) {
+        k += "|A" + b.path + "|";
+        num(double(file_size(b.path)));
+        num(double(file_time(b.path)));
+        num(b.volume);
+        num(b.pan);
+        num(b.start);
+    }
     return hash_key(k);
 }
 
@@ -256,6 +267,11 @@ RenderRequest make_request(const Song &song, const std::vector<const Track *> &p
     r.reverb = song.reverb;
     r.anticipate = song.anticipate;
     for (const Track *t : parts) {
+        if (t->is_backing()) {
+            r.backings.push_back({t->audio, t->volume / 100.0, t->pan / 100.0,
+                                  std::nearbyint(t->audio_start * 1e3) / 1e3, t->name});
+            continue;
+        }
         PartRequest p;
         p.voice_id = track_voice(*t, program_map);
         p.volume = t->volume / 100.0;
@@ -328,12 +344,35 @@ std::string phrase_key(int voice_id, const Phrase &p) {
     return k;
 }
 
+//: The most backing tracks' files kept read at once. A file is stereo floats,
+//: 21 MB a minute, and a song seldom has more than one or two.
+const size_t kFilesKept = 4;
+
 }  // namespace
 
 // The renders used to be WAV files in a cache folder, which nothing emptied;
 // they are kept in memory now, so whatever an older copy of the program left
 // in the temporary folder is cleared away the first time this one starts.
 Mixer::Mixer() { remove_tree(join_path(temp_dir(), "singing-voice-studio-cache")); }
+
+std::shared_ptr<const std::vector<float>> Mixer::backing(const std::string &path, std::string *error) {
+    long long size = file_size(path), time = file_time(path);
+    auto kept = files_.find(path);
+    if (kept != files_.end() && kept->second.size == size && kept->second.time == time) {
+        kept->second.used = ++clock_;
+        return kept->second.samples;
+    }
+    auto y = std::make_shared<std::vector<float>>();
+    if (!decode_audio(path, y.get(), error)) return nullptr;
+    files_[path] = {size, time, y, ++clock_};
+    while (files_.size() > kFilesKept) {
+        auto oldest = files_.begin();
+        for (auto it = files_.begin(); it != files_.end(); ++it)
+            if (it->second.used < oldest->second.used) oldest = it;
+        files_.erase(oldest);
+    }
+    return y;
+}
 
 std::vector<float> Mixer::track(const PartRequest &t, double bpm, double consonants, double start,
                                 bool early, bool *stopped_short, std::string *error) {
@@ -515,7 +554,7 @@ Mixed Mixer::mix_locked(const RenderRequest &req) {
         return again;
     }
 
-    bool any = false;
+    bool any = !req.backings.empty();
     for (const PartRequest &t : req.tracks) any = any || !t.notes.empty();
     if (!any) {
         res.error = "nothing to sing";
@@ -611,6 +650,46 @@ Mixed Mixer::mix_locked(const RenderRequest &req) {
         for (float v : out) peak = std::max(peak, double(std::fabs(v)));
         if (peak > 1.0)
             for (float &v : out) v = float(v / peak);
+    }
+
+    // The backing tracks, under the voices and after their reverb. The file
+    // is placed by the clock, not the beat: it is the same recording at any
+    // tempo, and the cursor's beat is only where in it playing begins.
+    if (!req.backings.empty()) {
+        if (channels == 1) {
+            std::vector<float> two(out.size() * 2);
+            for (size_t i = 0; i < out.size(); ++i) two[2 * i] = two[2 * i + 1] = out[i];
+            out.swap(two);
+            channels = 2;
+        }
+        double from = req.start * 60.0 / std::max(req.bpm, 1e-6);
+        for (const BackingRequest &b : req.backings) {
+            std::string err;
+            std::shared_ptr<const std::vector<float>> file = backing(b.path, &err);
+            if (!file) {
+                res.error = "the backing track " + b.name + " cannot be played: " + err;
+                return res;
+            }
+            const std::vector<float> &x = *file;
+            size_t frames = x.size() / 2;
+            long at = round_half_even((b.start - from) * kSampleRate);
+            size_t skip = at < 0 ? size_t(-at) : 0, to = at < 0 ? 0 : size_t(at);
+            if (skip >= frames) continue;               // over before the cursor
+            size_t need = (to + frames - skip) * 2;
+            if (out.size() < need) out.resize(need, 0.0f);
+            // a balance rather than a pan: the file is stereo already, and
+            // turning it to one side turns the other side down
+            double gl = b.volume * std::min(1.0, 1.0 - b.pan), gr = b.volume * std::min(1.0, 1.0 + b.pan);
+            for (size_t k = skip; k < frames; ++k) {
+                out[2 * (to + k - skip)] += float(x[2 * k] * gl);
+                out[2 * (to + k - skip) + 1] += float(x[2 * k + 1] * gr);
+            }
+        }
+        double all = 0;
+        for (float v : out) all = std::max(all, double(std::fabs(v)));
+        if (all > 1.0)
+            for (float &v : out) v = float(v / all);
+        peak = std::max(peak, all);
     }
 
     res.ok = true;

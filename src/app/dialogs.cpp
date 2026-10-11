@@ -7,6 +7,8 @@
 #include <wx/tokenzr.h>
 
 #include "app/studio.h"
+#include "audio/decode.h"
+#include "core/paths.h"
 #include "core/phonology.h"
 
 namespace svs {
@@ -802,6 +804,74 @@ void TrackDialog::apply(Track &track) const {
     else track.consonants.reset();
     if (own_reverb_->GetValue()) track.reverb = Reverb{room_->GetValue(), wet_->GetValue()};
     else track.reverb.reset();
+}
+
+// -- BackingDialog ------------------------------------------------------------------------
+
+BackingDialog::BackingDialog(wxWindow *parent, const Track &track)
+    : wxDialog(parent, wxID_ANY, "Backing track") {
+    wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
+    name_ = new wxTextCtrl(this, wxID_ANY, W(track.name), wxDefaultPosition, wxSize(220, -1));
+    labelled(this, outer, "Name", name_);
+    path_ = new wxTextCtrl(this, wxID_ANY, W(track.audio), wxDefaultPosition, wxSize(420, -1));
+    labelled(this, outer, "&File", path_, 1, "a WAV, MP3, FLAC or Ogg Vorbis file");
+    wxButton *browse = new wxButton(this, wxID_ANY, "&Browse...");
+    browse->Bind(wxEVT_BUTTON, &BackingDialog::on_browse, this);
+    outer->Add(browse, 0, wxALL, 6);
+    start_ = new wxTextCtrl(this, wxID_ANY, W(fmt_g(track.audio_start)), wxDefaultPosition, wxSize(80, -1));
+    labelled(this, outer, "Starts at", start_, 0,
+             "seconds into the song the file begins; below 0 leaves out that much of its opening");
+    volume_ = spin(this, 0, 100, track.volume, 80);
+    labelled(this, outer, "Volume", volume_, 0, "per cent");
+    pan_ = spin(this, -100, 100, track.pan, 80);
+    labelled(this, outer, "Pan", pan_, 0, "-100 far left to 100 far right");
+    outer->Add(buttons(this), 0, wxEXPAND | wxALL, 8);
+    Bind(wxEVT_BUTTON, &BackingDialog::on_ok, this, wxID_OK);
+    SetSizerAndFit(outer);
+    name_->SetFocus();
+    name_->SetInsertionPointEnd();
+}
+
+std::string BackingDialog::file() const {
+    wxString t = path_->GetValue();
+    t.Trim(true).Trim(false);
+    return U(t);
+}
+
+void BackingDialog::on_browse(wxCommandEvent &) {
+    std::string now = file();
+    wxFileDialog pick(this, "Backing track", W(dir_name(now)), W(base_name(now)), kAudioWildcard,
+                      wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+    if (pick.ShowModal() == wxID_OK) path_->SetValue(pick.GetPath());
+    path_->SetFocus();
+}
+
+//: A file that is not there is said now, while it can still be put right.
+void BackingDialog::on_ok(wxCommandEvent &evt) {
+    double v;
+    if (!file_exists(file())) {
+        wxMessageBox(file().empty() ? wxString("Choose the file the backing track plays.")
+                                    : W("There is no file " + file() + "."),
+                     "Backing track", wxOK | wxICON_ERROR, this);
+        path_->SetFocus();
+    } else if (!read_number(start_->GetValue(), &v)) {
+        wxMessageBox("Starts at is a number of seconds, such as 0, 2.5 or -1.", "Backing track",
+                     wxOK | wxICON_ERROR, this);
+        start_->SetFocus();
+    } else {
+        evt.Skip();
+    }
+}
+
+void BackingDialog::apply(Track &track) const {
+    wxString name = name_->GetValue();
+    name.Trim(true).Trim(false);
+    track.name = name.empty() ? "Backing" : U(name);
+    track.audio = file();
+    double v = 0;
+    if (read_number(start_->GetValue(), &v)) track.audio_start = std::nearbyint(v * 1000) / 1000;
+    track.volume = volume_->GetValue();
+    track.pan = pan_->GetValue();
 }
 
 }  // namespace svs

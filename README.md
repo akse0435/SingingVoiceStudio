@@ -38,6 +38,20 @@ rest the part sings with its own vibrato setting, and turning it up deepens it
 towards full. VocalWriter's voices get it as their own vibrato-depth control,
 the others through the shared pitch curve.
 
+**A backing track** (Track > New backing track, Ctrl+Shift+B) is a sound file
+-- WAV, MP3, FLAC or Ogg Vorbis -- played under the voices: the band the song
+is sung over. It sits in the tracks list like any part, with its own volume,
+pan, mute and solo, and Enter on it sets its file and where it starts, in
+seconds into the song (below 0 leaves out that much of the file's opening).
+It starts at half volume, as a finished recording is far louder than a voice
+alone. It is mixed in after the reverb, which is the voices' room alone, and
+is placed by the clock rather than the beat, so changing the tempo moves the
+voices but not the recording. Play from the cursor starts the file at the
+same moment; Export WAV includes it, Export tracks leaves it out (it is a file
+already). The project saves where the file is; a project sent along with its
+file in the same folder finds it there. VocalWriter Studio reads such a
+project too, the backing track as a part with no notes.
+
 Notes are written in VocalWriter's phoneme symbols whichever engine sings
 them; each engine translates (the tables are at the top of
 `src/voices/<engine>.cpp`). Add word uses VocalWriter's own dictionary.
@@ -194,7 +208,8 @@ Ctrl and Option for Alt, and Option+H to hear a note.
 |---|---|
 | F6 | between the tracks list and the notes list |
 | Ctrl+T | add a track |
-| Enter on a track | its name, voice, volume, pan and voice controls |
+| Ctrl+Shift+B | add a backing track, a sound file played under the voices |
+| Enter on a track | its name, voice, volume, pan and voice controls; a backing track's file and where it starts |
 | M / S on a track | mute / solo |
 | Delete on a track | remove it |
 | Ctrl+Up / Ctrl+Down | reorder the parts, or move a note |

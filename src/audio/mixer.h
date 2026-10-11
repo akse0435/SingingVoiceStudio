@@ -3,7 +3,8 @@
 // Each part is cut into phrases at its rests, each phrase sung by the part's
 // voice and placed at the time the score puts it; the parts are panned, the
 // ones sharing a reverb setting go through one reverberator together, and the
-// whole is turned down if it adds up past full scale. Finished renders are
+// whole is turned down if it adds up past full scale. A backing track's file
+// is laid under the voices after the reverb, which is the voices' room alone. Finished renders are
 // kept under a key made from the song, so playing the same thing twice
 // renders once.
 #pragma once
@@ -38,6 +39,15 @@ struct PartRequest {
     std::vector<BendPoint> mods;    // (beat, mod wheel 0-127, slides)
 };
 
+//: A backing track: a sound file played under the voices.
+struct BackingRequest {
+    std::string path;
+    double volume = 1.0;     // fraction
+    double pan = 0.0;        // -1 .. 1
+    double start = 0.0;      // seconds into the song the file begins
+    std::string name;        // the track's, for a message
+};
+
 struct RenderRequest {
     double bpm = 120;
     double consonants = 1.0;
@@ -45,6 +55,7 @@ struct RenderRequest {
     Reverb reverb{0, 0};
     bool anticipate = true;
     std::vector<PartRequest> tracks;
+    std::vector<BackingRequest> backings;
     //: beats to the bar, when the metronome is wanted (never in an export)
     std::optional<double> metronome_bar;
 };
@@ -91,7 +102,17 @@ private:
     Mixed mix_locked(const RenderRequest &req);
     std::vector<float> track(const PartRequest &t, double bpm, double consonants, double start,
                              bool early, bool *stopped_short, std::string *error);
+    //: a backing track's file, read the first time it is played and kept
+    //: until it changes on disk
+    std::shared_ptr<const std::vector<float>> backing(const std::string &path, std::string *error);
     std::mutex mu_;
+
+    struct Read {
+        long long size, time;
+        std::shared_ptr<const std::vector<float>> samples;
+        unsigned long long used;
+    };
+    std::map<std::string, Read> files_;
 
     //: Every phrase sung, kept in memory under a key made of everything that
     //: decides how it sounds -- the voice, its controls, its level, the notes,

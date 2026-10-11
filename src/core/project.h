@@ -89,15 +89,22 @@ struct Track {
     std::optional<VoiceStyle> voice;
     std::optional<Reverb> reverb;
     std::optional<double> consonants;
+    //: A backing track: the sound file it plays under the voices, at its
+    //: volume and pan, instead of singing. Empty for a part that sings.
+    std::string audio;
+    //: where in the song the file begins, in seconds: later than the first
+    //: beat when above 0, and below 0 its opening is left out
+    double audio_start = 0;
     //: which note was last selected here; not saved
     int cursor = 0;
 
+    bool is_backing() const { return !audio.empty(); }
     bool operator==(const Track &o) const {
         return name == o.name && program == o.program && voice_id == o.voice_id &&
                voice_name == o.voice_name &&
                volume == o.volume && pan == o.pan && mute == o.mute && solo == o.solo &&
                notes == o.notes && voice == o.voice && reverb == o.reverb &&
-               consonants == o.consonants;
+               consonants == o.consonants && audio == o.audio && audio_start == o.audio_start;
     }
 };
 

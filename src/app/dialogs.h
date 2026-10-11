@@ -192,4 +192,19 @@ private:
     std::vector<std::pair<const VoiceControl *, wxSpinCtrl *>> voice_ctrls_;
 };
 
+//: A backing track's name, its file, where in the song the file starts, and
+//: its volume and pan.
+class BackingDialog : public wxDialog {
+public:
+    BackingDialog(wxWindow *parent, const Track &track);
+    void apply(Track &track) const;
+
+private:
+    void on_browse(wxCommandEvent &);
+    void on_ok(wxCommandEvent &);
+    std::string file() const;
+    wxTextCtrl *name_, *path_, *start_;
+    wxSpinCtrl *volume_, *pan_;
+};
+
 }  // namespace svs

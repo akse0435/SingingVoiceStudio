@@ -170,7 +170,7 @@ set(CORE_SOURCES
 # -- miniaudio --------------------------------------------------------------
 # Playback, straight from memory, the same on every system (WASAPI on
 # Windows, Core Audio on the Mac), as FastPlay does it: one header, compiled
-# once by src/audio/miniaudio.c.
+# once by src/audio/miniaudio.c. Its decoders read a backing track's file.
 include(FetchContent)
 FetchContent_Declare(miniaudio
     GIT_REPOSITORY https://github.com/mackron/miniaudio.git
@@ -181,7 +181,7 @@ FetchContent_GetProperties(miniaudio)
 if(NOT miniaudio_POPULATED)
   FetchContent_Populate(miniaudio)   # the header only; not its own build
 endif()
-list(APPEND CORE_SOURCES src/audio/player.cpp src/audio/miniaudio.c)
+list(APPEND CORE_SOURCES src/audio/player.cpp src/audio/decode.cpp src/audio/miniaudio.c)
 
 add_library(svs_core STATIC ${CORE_SOURCES})
 target_include_directories(svs_core PUBLIC ${SVS_ROOT}/src ${SVS_ROOT}/third_party/nlohmann
