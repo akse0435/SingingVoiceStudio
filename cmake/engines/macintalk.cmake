@@ -3,12 +3,21 @@
 # Nothing of Apple's is built here, and nothing of Panthera's: the engines run
 # in Panthera's own host process (panthera_host.exe, from its NVDA add-on),
 # which src/voices/macintalk.cpp starts and talks to over pipes. This library
-# is only that file. On macOS it builds too, and says that Panthera is
-# Windows-only.
+# is only that file on Windows. On macOS the system's own voices sing
+# instead, through AVSpeechSynthesizer, retimed and retuned to the score.
 #
 # Included by the root CMakeLists.txt and by tests/engines/macintalk; both set
 # SVS_ROOT.
 add_library(svs_macintalk STATIC ${SVS_ROOT}/src/voices/macintalk.cpp)
+if(APPLE)
+  # On a Mac the system's own voices sing: spoken through AVSpeechSynthesizer
+  # (macintalk_mac.mm) and retimed and retuned to the score (macintalk_dsp.cpp).
+  target_sources(svs_macintalk PRIVATE ${SVS_ROOT}/src/voices/macintalk_mac.mm
+                                       ${SVS_ROOT}/src/voices/macintalk_dsp.cpp)
+  set_source_files_properties(${SVS_ROOT}/src/voices/macintalk_mac.mm PROPERTIES
+                              COMPILE_OPTIONS "-fobjc-arc")
+  target_link_libraries(svs_macintalk PUBLIC "-framework AVFoundation" "-framework Foundation")
+endif()
 target_include_directories(svs_macintalk PUBLIC ${SVS_ROOT}/src)
 set_target_properties(svs_macintalk PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_compile_options(svs_macintalk PRIVATE -O2)

@@ -105,9 +105,22 @@
 // afterwards (kTuning). A note's velocity and the part's level are applied to
 // the samples.
 //
-// On macOS none of this can run (Panthera is a Windows program, and a Mac
-// has its own voices, which are not built in yet); the voices are listed and
-// say so.
+// ON A MAC the voices are the system's own, still installed under English in
+// System Settings (Accessibility, Spoken Content, Manage Voices) and spoken
+// through AVSpeechSynthesizer (macintalk_mac.mm). Apple's engine there no
+// longer sings: the TUNE and PHON inputs are read out as text. So each
+// syllable is spoken from its phonemes, in the International Phonetic
+// Alphabet, which AVSpeech still accepts, with its intonation flattened
+// ([[pmod 0]]) and its baseline ([[pbas]]) put near the note -- what a
+// baseline number gives differs by voice, so each voice is measured once --
+// and the speech is then retimed and retuned to the score by
+// pitch-synchronous overlap-add (macintalk_dsp.h): the consonants kept to
+// their planned lengths, the vowel stretched to fill the note, and every
+// glottal period laid down again at the pitch the phrase's curve asks for,
+// vibrato, bends and glides included. One utterance sings a phrase, with a
+// silence between the syllables to cut it on. A Mac has one MacinTalk of
+// each name, so every generation's number sings with it, and the list shows
+// one set of voices, under the numbers Snow Leopard's have on Windows.
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -129,6 +142,10 @@
 #include <windows.h>
 #include <shlobj.h>
 #include <tlhelp32.h>
+#endif
+#ifdef __APPLE__
+#include "voices/macintalk_dsp.h"
+#include "voices/macintalk_mac.h"
 #endif
 
 namespace svs {
@@ -1594,6 +1611,276 @@ private:
 };
 #endif
 
+#ifdef __APPLE__   // on a Mac the system's own voices sing, retimed and retuned here
+
+// -- Apple's phonemes in the International Phonetic Alphabet -----------------------------
+
+struct Ipa {
+    const char *apple;
+    const char *ipa;
+};
+const Ipa kIpa[] = {
+    {"AE", "æ"}, {"EY", "eɪ"}, {"AO", "ɔ"}, {"AX", "ə"}, {"IY", "i"},  {"EH", "ɛ"},  {"IH", "ɪ"},  {"AY", "aɪ"},
+    {"IX", "ɪ"}, {"AA", "ɑ"},  {"UW", "u"}, {"UH", "ʊ"}, {"UX", "ʌ"},  {"OW", "oʊ"}, {"AW", "aʊ"}, {"OY", "ɔɪ"},
+    {"b", "b"},  {"C", "tʃ"},  {"d", "d"},  {"D", "ð"},  {"f", "f"},   {"g", "g"},   {"h", "h"},   {"J", "dʒ"},
+    {"k", "k"},  {"l", "l"},   {"m", "m"},  {"n", "n"},  {"N", "ŋ"},   {"p", "p"},   {"r", "ɹ"},   {"s", "s"},
+    {"S", "ʃ"},  {"t", "t"},   {"T", "θ"},  {"v", "v"},  {"w", "w"},   {"y", "j"},   {"z", "z"},   {"Z", "ʒ"},
+};
+
+std::string ipa_of(const char *apple) {
+    if (!apple) return "";
+    for (const Ipa &i : kIpa)
+        if (std::strcmp(i.apple, apple) == 0) return i.ipa;
+    return "";
+}
+
+//: One note's phonemes as a stressed syllable in IPA, or empty for a rest.
+//: The r-coloured vowels of "bird" and "butter" have symbols of their own;
+//: a diphthong is Apple's whole (its glide is retimed with the rest).
+std::string syllable_ipa(const SungNote &n) {
+    std::string s;
+    for (const std::string &sym : n.phonemes) {
+        if (sym == kRest) continue;
+        const Mapping *m = find_mapping(sym);
+        if (!m) continue;
+        std::string a = palette_alias(sym);
+        if (a == "ER") {
+            s += "ɝ";
+            continue;
+        }
+        if (a == "RX") {
+            s += "ɚ";
+            continue;
+        }
+        if (m->shape == kTail && m->second && apple_vowel(m->second)) {
+            s += ipa_of(m->second);
+        } else {
+            s += ipa_of(m->first);
+            if (m->second) s += ipa_of(m->second);
+        }
+    }
+    return s.empty() ? s : "ˈ" + s;
+}
+
+//: The planned lengths of the consonants before the first vowel and after
+//: the last, in seconds, from the note's own phoneme lengths.
+void consonant_lengths(const SungNote &n, double *head, double *tail) {
+    *head = *tail = 0.0;
+    int first = -1, last = -1;
+    for (size_t i = 0; i < n.phonemes.size(); ++i)
+        if (is_vowel(n.phonemes[i])) {
+            if (first < 0) first = int(i);
+            last = int(i);
+        }
+    if (first < 0) return;
+    for (int i = 0; i < first && i < int(n.durations_ms.size()); ++i) *head += n.durations_ms[size_t(i)] / 1000.0;
+    for (int i = last + 1; i < int(n.durations_ms.size()); ++i) *tail += n.durations_ms[size_t(i)] / 1000.0;
+}
+
+// -- how [[pbas]] maps to hertz, voice by voice --------------------------------------------
+//
+// Apple documents pbas as a baseline pitch, but what a number gives differs
+// from voice to voice and is not quite a semitone a step. So the first time
+// a voice sings, it is asked for one vowel at several baselines and the
+// pitch of each is measured; a note is then asked for at the nearest
+// baseline and the rest of the way is sung by the resynthesis, which keeps
+// the shift small and the voice its own.
+constexpr int kPbasMin = 20, kPbasMax = 95;
+constexpr double kSyllableRms = 0.22;   //: every voice's vowels brought to this
+
+class MacCalibration {
+public:
+    int pbas_for(const std::string &bundle, double hz) {
+        std::lock_guard<std::mutex> lock(mu_);
+        auto it = tables_.find(bundle);
+        if (it == tables_.end()) it = tables_.emplace(bundle, measure(bundle)).first;
+        const std::vector<Point> &table = it->second;
+        if (table.size() < 2) return clamp(int(std::lround(69 + 12 * std::log2(std::max(hz, 20.0) / 440.0))));
+        double want = std::log2(std::max(hz, 20.0));
+        size_t k = 1;
+        while (k + 1 < table.size() && want > table[k].second) ++k;
+        const Point &a = table[k - 1], &b = table[k];
+        double f = (want - a.second) / (b.second - a.second);
+        return clamp(int(std::lround(a.first + f * (b.first - a.first))));
+    }
+
+private:
+    using Point = std::pair<int, double>;   //: pbas, log2 of the hertz it gave
+    static int clamp(int p) { return std::max(kPbasMin, std::min(kPbasMax, p)); }
+
+    static std::vector<Point> measure(const std::string &bundle) {
+        const int steps[] = {30, 40, 50, 60, 70, 80};
+        std::vector<macspeech::Piece> pieces{{"[[pmod 0]]", ""}};
+        for (int p : steps) {
+            pieces.push_back({"[[pbas " + std::to_string(p) + "]]", ""});
+            pieces.push_back({"la", "ˈlɑ"});
+            pieces.push_back({"[[slnc 500]]", ""});
+        }
+        std::vector<float> x;
+        double rate = 0.0;
+        std::string err;
+        if (!macspeech::render(bundle, pieces, &x, &rate, &err)) return {};
+        std::vector<dsp::Segment> segs = dsp::split_on_silence(x, rate, 0.150);
+        if (segs.size() != sizeof steps / sizeof steps[0]) return {};
+        std::vector<Point> out;
+        for (size_t i = 0; i < segs.size(); ++i) {
+            std::vector<float> seg(x.begin() + long(segs[i].begin), x.begin() + long(segs[i].end));
+            dsp::F0Track f = dsp::track_f0(seg, rate);
+            std::vector<double> voiced;
+            for (double v : f.f0)
+                if (v > 0) voiced.push_back(v);
+            if (voiced.size() < 4) continue;
+            std::nth_element(voiced.begin(), voiced.begin() + long(voiced.size() / 2), voiced.end());
+            double median = voiced[voiced.size() / 2];
+            // only what rises with the number counts: a voice whose pitch is
+            // its own (Albert, Bahh) gives nothing usable here
+            if (out.empty() || std::log2(median) > out.back().second + 0.05) out.push_back({steps[i], std::log2(median)});
+        }
+        return out.size() >= 2 ? out : std::vector<Point>();
+    }
+
+    std::mutex mu_;
+    std::map<std::string, std::vector<Point>> tables_;
+};
+
+// -- the singer, on a Mac -------------------------------------------------------------------
+
+class MacSinger : public Singer {
+public:
+    MacSinger(const VoiceDef &voice, std::shared_ptr<MacCalibration> cal) : voice_(voice), cal_(std::move(cal)) {}
+
+    Sung sing(const Phrase &phrase) override {
+        Sung sung;
+        if (phrase.notes.empty()) return sung;
+        PitchCurve curve(phrase);
+        long total = long(std::llround(curve.total() * kSampleRate));
+        if (total <= 0) return sung;
+
+        // the syllables: every note with a sound in it
+        std::vector<size_t> which;
+        std::vector<std::string> ipas;
+        for (size_t i = 0; i < phrase.notes.size(); ++i) {
+            std::string ipa = syllable_ipa(phrase.notes[i]);
+            if (ipa.empty()) continue;
+            which.push_back(i);
+            ipas.push_back(ipa);
+        }
+        if (which.empty()) return silence(total, &sung);
+
+        // one utterance for the phrase, a silence between syllables to cut on
+        std::vector<macspeech::Piece> pieces{{"[[pmod 0]]", ""}};
+        std::vector<int> pbas;
+        for (size_t k = 0; k < which.size(); ++k) {
+            size_t i = which[k];
+            double mid = 0.5 * (curve.note_start(i) + curve.note_end(i));
+            double hz = PitchCurve::midi_to_hz(curve.steady_midi_at(mid));
+            pbas.push_back(cal_->pbas_for(voice_.bundle, hz));
+            pieces.push_back({"[[pbas " + std::to_string(pbas.back()) + "]]", ""});
+            pieces.push_back({"la", ipas[k]});
+            pieces.push_back({"[[slnc 500]]", ""});
+        }
+        std::vector<float> x;
+        double rate = 0.0;
+        std::string err;
+        if (!macspeech::render(voice_.bundle, pieces, &x, &rate, &err)) {
+            sung.error = err;
+            return silence(total, &sung);
+        }
+        std::vector<dsp::Segment> segs = dsp::split_on_silence(x, rate, 0.150);
+        std::vector<std::vector<float>> syllables;
+        if (segs.size() == which.size()) {
+            for (const dsp::Segment &g : segs) syllables.emplace_back(x.begin() + long(g.begin), x.begin() + long(g.end));
+        } else {
+            // the cut did not come out one to a syllable: ask for each on its own
+            for (size_t k = 0; k < which.size(); ++k) {
+                std::vector<macspeech::Piece> one{{"[[pmod 0]]", ""},
+                                                 {"[[pbas " + std::to_string(pbas[k]) + "]]", ""},
+                                                 {"la", ipas[k]}};
+                std::vector<float> y;
+                double r = 0.0;
+                syllables.emplace_back();
+                if (!macspeech::render(voice_.bundle, one, &y, &r, &err) || r != rate) continue;
+                std::vector<dsp::Segment> g = dsp::split_on_silence(y, rate, 0.150);
+                if (g.empty()) continue;
+                syllables.back().assign(y.begin() + long(g.front().begin), y.begin() + long(g.back().end));
+            }
+        }
+
+        // each syllable to its note's time and pitch, at the engine's rate
+        const double sr = rate;
+        std::vector<float> out(size_t(std::llround(curve.total() * sr)) + 1, 0.0f);
+        for (size_t k = 0; k < which.size(); ++k) {
+            std::vector<float> &syl = syllables[k];
+            if (syl.empty()) continue;
+            size_t i = which[k];
+            double a = curve.note_start(i), b = curve.note_end(i);
+            long want = std::llround((b - a) * sr);
+            if (want <= 0) continue;
+            dsp::F0Track f0 = dsp::track_f0(syl, sr);
+            double level = dsp::rms(syl, sr, &f0);
+            if (level > 1e-5) {
+                float g = float(kSyllableRms / level);
+                for (float &v : syl) v *= g;
+            }
+            double head = 0.0, tail = 0.0;
+            consonant_lengths(phrase.notes[i], &head, &tail);
+            auto map = dsp::syllable_time_map(syl.size(), sr, f0, size_t(want), head, tail);
+            auto hz = [&curve, a](double t) { return curve.hz_at(a + t); };
+            std::vector<float> y = dsp::psola(syl, sr, f0, size_t(want), map, hz);
+            // a few milliseconds in and out, so the joins do not click
+            long edge = std::min<long>(std::llround(0.003 * sr), want / 2);
+            for (long j = 0; j < edge; ++j) {
+                float w = float(j) / float(edge);
+                y[size_t(j)] *= w;
+                y[size_t(want - 1 - j)] *= w;
+            }
+            size_t at = size_t(std::llround(a * sr));
+            for (long j = 0; j < want && at + size_t(j) < out.size(); ++j) out[at + size_t(j)] += y[size_t(j)];
+        }
+        std::vector<float> res = resample_to_output(out, sr);
+        res.resize(size_t(total), 0.0f);
+        apply_levels(phrase, curve, &res);
+        sung.samples = std::move(res);
+        return sung;
+    }
+
+private:
+    static Sung silence(long total, Sung *s) {
+        s->samples.assign(size_t(total), 0.0f);
+        return *s;
+    }
+
+    // The note's velocity, smoothed over a few milliseconds (a rest keeps the
+    // level before it), and the part's level; a phrase that would still clip
+    // is brought down as a whole.
+    static void apply_levels(const Phrase &phrase, const PitchCurve &curve, std::vector<float> *out) {
+        const double sr = kSampleRate;
+        const double tc = 1.0 - std::exp(-1.0 / (0.008 * sr));
+        double g = -1.0, cur = -1.0, peak = 0.0;
+        for (size_t s = 0; s < out->size(); ++s) {
+            const SungNote &n = phrase.notes[curve.note_at(s / sr)];
+            bool rest = n.phonemes.empty() || (n.phonemes.size() == 1 && n.phonemes[0] == kRest);
+            if (!rest || g < 0) g = std::max(1, std::min(127, n.velocity)) / 127.0;
+            cur = cur < 0 ? g : cur + (g - cur) * tc;
+            float v = float((*out)[s] * cur * phrase.level);
+            (*out)[s] = v;
+            peak = std::max(peak, double(std::fabs(v)));
+        }
+        if (peak > 0.99) {
+            float k = float(0.99 / peak);
+            for (float &v : *out) v *= k;
+        }
+    }
+
+    const VoiceDef &voice_;
+    std::shared_ptr<MacCalibration> cal_;
+};
+
+//: The one slot the list shows on a Mac: Snow Leopard's numbers, which sing
+//: on Windows too, so a song made here sings there.
+constexpr int kMacSlot = 2;
+#endif
+
 // -- the family -----------------------------------------------------------------------
 
 class MacinTalkFamily : public Family {
@@ -1602,6 +1889,16 @@ public:
 
     std::vector<VoiceEntry> voices() override {
         std::vector<VoiceEntry> out;
+#ifdef __APPLE__
+        for (int v = 0; v < kVoiceCount; ++v) {
+            VoiceEntry e;
+            e.id = kMacinTalkBase + kGenStride * kMacSlot + v;
+            e.name = std::string("MacinTalk ") + kVoices[v].display;
+            e.installed = can_sing(install(), kMacSlot, v, nullptr);
+            out.push_back(e);
+        }
+        return out;
+#endif
         const Install &in = install();
         for (int g = 0; g < kGenCount; ++g)
             for (int v = 0; v < kVoiceCount; ++v) {
@@ -1637,11 +1934,20 @@ public:
             *why = found.empty() ? s + "; none was found." : s + ". " + capital(found) + ".";
         }
         return false;
+#elif defined(__APPLE__)
+        (void)in;
+        for (const VoiceDef &v : kVoices)
+            if (macspeech::voice_present(v.bundle)) return true;
+        if (why)
+            *why = "MacinTalk's voices are not installed on this Mac: System Settings, Accessibility, Spoken "
+                   "Content, System Voice, Manage Voices adds them, under English (Fred, Agnes, Victoria and "
+                   "the rest).";
+        return false;
 #else
         (void)in;
         if (why)
-            *why = "MacinTalk runs through Panthera, which is Windows-only; on a Mac the system's own "
-                   "voices are the way, which is not built yet.";
+            *why = "MacinTalk runs through Panthera, which is Windows-only; on this system the voices "
+                   "cannot sing.";
         return false;
 #endif
     }
@@ -1666,6 +1972,11 @@ public:
             hosts_[g] = std::make_shared<Host>(in.host, st.mt, st.sd, st.vd);
         }
         return std::make_unique<MacinTalkSinger>(hosts_[g], g, v);
+#elif defined(__APPLE__)
+        // every generation's number sings with the Mac's one voice of that name
+        std::lock_guard<std::mutex> lock(mu_);
+        if (!calibration_) calibration_ = std::make_shared<MacCalibration>();
+        return std::make_unique<MacSinger>(kVoices[v], calibration_);
 #else
         return nullptr;
 #endif
@@ -1680,12 +1991,32 @@ private:
     // Whether voice `v` of generation `g` can sing here, and if not why.
     static bool can_sing(const Install &in, int g, int v, std::string *why) {
         const VoiceDef &vd = kVoices[v];
+#ifdef __APPLE__
+        std::string name = std::string("MacinTalk ") + vd.display;
+#else
         std::string name = group_name(g) + " " + vd.display;
-#ifndef _WIN32
+#endif
+#if defined(__APPLE__)
+        (void)in;
+        (void)g;
+        if (!macspeech::voice_present(vd.bundle)) {
+            if (why)
+                *why = name + " is not installed on this Mac: System Settings, Accessibility, Spoken Content, "
+                       "System Voice, Manage Voices adds it, under English.";
+            return false;
+        }
+        if (vd.gift == kOwnTune) {
+            if (why)
+                *why = name + " plays its own tune to every syllable, at its own speed, whatever it is "
+                       "given, so it cannot sing a part.";
+            return false;
+        }
+        return true;
+#elif !defined(_WIN32)
         (void)in;
         if (why)
-            *why = "MacinTalk runs through Panthera, which is Windows-only; on a Mac the system's own "
-                   "voices are the way, which is not built yet.";
+            *why = "MacinTalk runs through Panthera, which is Windows-only; on this system the voices "
+                   "cannot sing.";
         return false;
 #else
         const GenState &st = in.gens[g];
@@ -1740,6 +2071,9 @@ private:
     Install install_;
 #ifdef _WIN32
     std::shared_ptr<Host> hosts_[kGenCount];
+#endif
+#ifdef __APPLE__
+    std::shared_ptr<MacCalibration> calibration_;
 #endif
 };
 

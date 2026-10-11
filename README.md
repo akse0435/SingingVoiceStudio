@@ -12,7 +12,7 @@ five synthesisers:
 | **DECtalk** | Paul, Betty, Harry, Frank, Dennis, Kit, Ursula, Rita, Wendy, Val | 1000 - 1009 | github.com/dectalk/dectalk, sung through its phoneme `<duration,pitch>` notation |
 | **SSI-263** | SSI-263, Deep, Bright, Child | 2000 - 2003 | the chip itself, driven at register level (github.com/tgeczy/ssi263-speech) |
 | **Microsoft** | Sam, Mike, Mary, each plain, in Hall, in Stadium, in Space, Whisper, RoboSoft One to Six | 3000 - 3050 | the SAPI 5 engine rebuilt in C, with the SAPI 4 voice modes (github.com/KamiKitsune420/ms-sam-mike-mary-decomp) |
-| **MacinTalk** | Agnes, Albert, Bad News, Bahh, Bells, Boing, Bruce, Bubbles, Cellos, Deranged, Fred, Good News, Hysterical, Junior, Kathy, Pipe Organ, Princess, Ralph, Trinoids, Vicki, Victoria, Whisper, Zarvox, from each of Mac OS X 10.4 Tiger, 10.5 Leopard, 10.6 Snow Leopard and 10.7 Lion | 4000 - 4022, 4100 - 4122, 4200 - 4222, 4300 - 4322 | Apple's own engines, run on Windows by Panthera's host (github.com/tgeczy/panthera-speech) and sung through Apple's TUNE notation; Windows only |
+| **MacinTalk** | Agnes, Albert, Bad News, Bahh, Bells, Boing, Bruce, Bubbles, Cellos, Deranged, Fred, Good News, Hysterical, Junior, Kathy, Pipe Organ, Princess, Ralph, Trinoids, Vicki, Victoria, Whisper, Zarvox, from each of Mac OS X 10.4 Tiger, 10.5 Leopard, 10.6 Snow Leopard and 10.7 Lion | 4000 - 4022, 4100 - 4122, 4200 - 4222, 4300 - 4322 | Apple's own engines: on Windows run by Panthera's host (github.com/tgeczy/panthera-speech) and sung through Apple's TUNE notation; on a Mac the system's own voices, spoken from phonemes and retuned to the score (see below) |
 
 A voice's number is what a song saves, and it is fixed per engine, so a song
 written with DECtalk Betty still says Betty on a machine without DECtalk and
@@ -87,6 +87,19 @@ own. Bad News, Bells, Cellos, Good News, Hysterical and Pipe Organ play their ow
 tune whatever they are given, and Lion's MacinTalk ignores a TUNE's lengths and
 pitches, so those are listed and cannot sing. Tiger from 10.4.5 on (MacinTalk 3.4)
 cannot run off Apple's hardware. Alex is not offered.
+
+On a Mac MacinTalk needs nothing supplied: the voices are the system's own
+(System Settings, Accessibility, Spoken Content, System Voice, Manage Voices,
+under English; macOS now calls Deranged Wobble, Hysterical Jester and Princess
+Superstar). Apple's engine there no longer takes the TUNE or PHON input, so
+each syllable is spoken from its phonemes in IPA with a flat baseline near
+the note, and the speech is retimed and retuned to the score by
+pitch-synchronous overlap-add (`src/voices/macintalk_dsp.cpp`): vibrato,
+bends and glides included. The list shows one set of voices, numbered as
+Snow Leopard's are on Windows, and a song from Windows sings with the Mac's
+voice of the same name whichever generation it named. The six novelty voices
+that play their own tune (Bells, Cellos, Pipe Organ, Bad News, Good News,
+Hysterical) are listed and cannot sing, as on Windows.
 
 On macOS DECtalk is `libtts.dylib`, built here with clang
 (`scripts/build_dectalk_mac.sh`) and kept in the bundle's `Contents/Frameworks`.

@@ -31,7 +31,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 set(SVS_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
-set(SVS_VERSION "1.0")
+set(SVS_VERSION "1.2")
 
 # -- VocalWriter's engine ----------------------------------------------------
 #

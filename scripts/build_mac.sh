@@ -205,7 +205,7 @@ cat > "$TMP/check.vws" <<'EOF'
 {"format": "vocalwriter-studio", "version": 2, "bpm": 100, "tracks": [{"name": "Voice 1", "notes": [
  {"phonemes": ["d", "EY"], "pitch": 67, "beats": 1.0}, {"phonemes": ["z", "IY"], "pitch": 65, "beats": 1.0}]}]}
 EOF
-for voice in Robert "DECtalk Betty" SSI-263 "Microsoft Sam"; do
+for voice in Robert "DECtalk Betty" SSI-263 "Microsoft Sam" "MacinTalk Fred"; do
     if SVS_ONLY_BESIDE=1 "$APP/Contents/MacOS/svs" "$TMP/check.vws" -o "$TMP/check.wav" --voice "$voice" > "$TMP/render.log" 2>&1 \
        && [ "$(stat -f %z "$TMP/check.wav")" -gt 40000 ]; then
         echo "   $voice sings ($(stat -f %z "$TMP/check.wav") bytes)"
