@@ -351,9 +351,9 @@ public:
     }
 
     //: The bank's voices are nothing like each other in level: Robert peaks
-    //: at about seven tenths of full scale, the wavetable voices forty or
-    //: fifty times over it. Each is sung once, quietly, to see, and a voice
-    //: that already fits is left exactly alone.
+    //: at about seven tenths of full scale, Richard and Minor Chrd a little
+    //: over it. Each is sung once, quietly, to see, and a voice that already
+    //: fits is left exactly alone.
     double headroom(int voice_id) override {
         {
             std::lock_guard<std::mutex> lock(mu_);
