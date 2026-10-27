@@ -29,10 +29,13 @@ struct PartRequest {
     std::optional<Reverb> reverb;
     std::optional<double> consonants;
     int velocity = kDefaultVelocity;
+    //: how many of the song's tracks before this one its engine sings too
+    int channel = 0;
     struct N {
         int pitch;
         double beats;
         std::vector<std::string> phonemes;
+        std::string word = {};
     };
     std::vector<N> notes;
     std::vector<BendPoint> bends;   // (beat, semitones, slides)
@@ -99,9 +102,13 @@ public:
     RenderResult render(const RenderRequest &req, const std::string &out);
 
 private:
-    Mixed mix_locked(const RenderRequest &req);
+    //: `whole`: an export, which an engine that keeps its own time sings
+    //: part by part rather than phrase by phrase
+    Mixed mix_locked(const RenderRequest &req, bool whole = false);
     std::vector<float> track(const PartRequest &t, double bpm, double consonants, double start,
-                             bool early, bool *stopped_short, std::string *error);
+                             bool early, bool whole, bool *stopped_short, std::string *error);
+    void keep(const std::string &key, std::shared_ptr<const std::vector<float>> sung,
+              bool stopped_short, double starts_before);
     //: a backing track's file, read the first time it is played and kept
     //: until it changes on disk
     std::shared_ptr<const std::vector<float>> backing(const std::string &path, std::string *error);
@@ -123,6 +130,7 @@ private:
         std::shared_ptr<const std::vector<float>> samples;
         bool stopped_short;
         unsigned long long used;
+        double starts_before;
     };
     std::map<std::string, Kept> phrases_;
     size_t phrase_bytes_ = 0;

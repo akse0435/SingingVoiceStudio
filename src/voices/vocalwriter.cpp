@@ -1,10 +1,10 @@
-// VocalWriter's engine, driven the way VocalWriter Studio drives it: the same
-// sequence of calls, in the same order, as the VocalWriter repository's
-// ppc/render.py, so the samples are the same samples.
+// VocalWriter's engine, driven the way VocalWriter 2.0 drives it: each part
+// is sung as a track of a VocalWriter song, through the application's own
+// parser and sequencer (vw_sequencer.h), so the samples are the same samples.
 #include "voices/vocalwriter.h"
 
 #include <algorithm>
-#include <cfenv>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <memory>
@@ -16,6 +16,7 @@
 extern "C" {
 #include "vw_editor.h"
 }
+#include "voices/vw_sequencer.h"
 
 namespace svs {
 
@@ -26,34 +27,17 @@ const char *const kGmSpeech = "assets\\GMSpeech.rsrc";
 const char *const kGmBank = "assets\\GMBank.rsrc";
 const char *const kEnglishLex = "assets\\EnglishLex";
 
-const int kSamplesPerFrame = 220;
-//: How many frames a second is: 200.4545..., the engine's only clock.
-const double kFramesASecond = double(kSampleRate) / kSamplesPerFrame;
-//: calibrated so frames per beat matches the above
-const float kTempoScale = 1.0f / 240.0f;
-const int kMaxFrames = 200000;
-//: Speech_PitchBend wants MIDI's 14-bit bend times 8 for a full-scale bend to
-//: reach the whole range (measured: 0 cents error at 12 semitones).
-const int kBendScale = 8;
-//: the bend range the engine is put into before any bend is sent
-const double kBendRange = 12.0;
+const int kTicksPerBeat = 240;
+//: the portamento VocalWriter's engine starts every voice with, its glide
+//: table's twentieth step: a song that wants another, none among them, says so
+const int kEnginePortamento = 40;
 
 //: Python's round(): halves go to the even neighbour.
 long round_half_even(double x) { return long(std::nearbyint(x)); }
 
-//: What the engine will make of a beat at this tempo, to the last bit:
-//: 12027.2727273 / (tempoMul * bpm) / 240 in single precision.
-double frames_per_beat(int bpm) {
-    float product = kTempoScale * float(bpm);
-    return double(float(12027.2727273 / double(product) / 240.0));
-}
-
-int engine_tempo(double bpm) {
-    return int(std::max(10L, std::min(250L, round_half_even(bpm))));
-}
-
-int bend_raw(double semitones) {
-    long v = round_half_even(semitones / kBendRange * 8192);
+//: A bend as MIDI's 14-bit bend about zero, in a range of `range` semitones.
+int bend_raw(double semitones, int range) {
+    long v = round_half_even(semitones / range * 8192);
     return int(std::max(-8192L, std::min(8191L, v)));
 }
 
@@ -154,186 +138,256 @@ std::vector<std::string> Lexicon::phonemes(const std::string &word, bool marked)
 }
 
 // -- singing -------------------------------------------------------------------
+//
+// A part is sung through VocalWriter's own play path (vw_sequencer.h): its
+// parser lays the consonants before the beats and fits the lengths to the
+// speech rate, and its sequencer sings the track as VocalWriter sang it.
 
 namespace {
+
+//: The sequencer's engine: opened once, as the application opened it at
+//: launch, and used by one part at a time.
+struct SeqEngine {
+    std::mutex mu;
+    vwseq_engine *e = nullptr;
+    bool tried = false;
+    std::string error;
+};
+
+SeqEngine &seq_engine() {
+    static SeqEngine instance;
+    return instance;
+}
+
+//: Called with the engine's lock held.
+bool open_seq_engine(SeqEngine &s) {
+    if (s.tried) return s.e != nullptr;
+    s.tried = true;
+    std::string rsrc = find_data(kRsrc), gm = find_data(kGmSpeech);
+    std::string bank = data_exists(kGmBank) ? find_data(kGmBank) : std::string();
+    int rc = 0;
+    s.e = vwseq_open(rsrc.c_str(), gm.c_str(), bank.empty() ? nullptr : bank.c_str(), &rc);
+    // a damaged bank leaves the natural voices working
+    if (!s.e && !bank.empty()) s.e = vwseq_open(rsrc.c_str(), gm.c_str(), nullptr, &rc);
+    if (!s.e) s.error = "VocalWriter's sequencer would not start (" + std::to_string(rc) + ")";
+    return s.e != nullptr;
+}
+
+//: VocalWriter's lyric text: only its last character matters to the
+//: parser, a "-" joining the syllable to the next one as a word.
+std::string lyric_text(const std::string &word) {
+    std::string out;
+    for (unsigned char c : word)
+        if (std::isalpha(c) || c == '-' || c == '=' || c == '\'') out.push_back(char(c));
+    if (out.size() > 12) out = out.substr(0, 11) + out.back();
+    return out;
+}
+
+bool is_rest_note(const SungNote &n) {
+    for (const std::string &p : n.phonemes)
+        if (p != kRest && phoneme_code(p) >= 0) return false;
+    return true;
+}
+
+void control(std::vector<vwseq_event> &ev, int32_t t, int status, int value) {
+    ev.push_back({t, status, 0, std::max(0, std::min(127, value))});
+}
+
+//: a 14-bit control about 8192: pitch bend, detune and chorus
+void control14(std::vector<vwseq_event> &ev, int32_t t, int status, int value) {
+    int v = std::max(0, std::min(16383, value + 8192));
+    ev.push_back({t, status, v & 127, v >> 7});
+}
+
+//: Over 32767, as the WAV writer multiplies back, so an export of a
+//: part holds the very samples VocalWriter wrote.
+int collect(void *user, const int16_t *samples, size_t count) {
+    auto *out = static_cast<std::vector<float> *>(user);
+    for (size_t i = 0; i < count; ++i) out->push_back(samples[i] / 32767.0f);
+    return 0;
+}
 
 class VwSinger : public Singer {
 public:
     VwSinger(int voice_id) : voice_id_(voice_id) {}
 
+    //: A phrase is a part that begins `room` beats before it, so that its
+    //: first consonants are sung before the beat as in the whole track.
     Sung sing(const Phrase &phrase) override {
-        Sung out;
-        std::unique_ptr<vw_editor, void (*)(vw_editor *)> eng(VwAssets::get().open_editor(),
-                                                              vw_ed_close);
-        if (!eng) return out;
-        vw_editor *e = eng.get();
-        double bpm = phrase.bpm;
-        vw_ed_tempo_scale(e, kTempoScale);
-        vw_ed_tempo(e, engine_tempo(bpm));
-        due_ = 0.0;
-        given_ = 0;
-        std::vector<unsigned char> blob = sequence(phrase.notes);
-        if (vw_ed_voice(e, voice_id_) != 0) return out;
-        vw_ed_sequence(e, blob.data(), blob.size());
-        vw_ed_start(e);
-        voice_controls(e, phrase);
-
-        // the controller events: the bend range first, then each value at
-        // its moment, applied between frames -- as fine as the engine's own
-        // control rate
-        enum Kind { kSens, kBend, kVibDepth };
-        struct Ev {
-            double t;
-            Kind kind;
-            int value;
-        };
-        std::vector<Ev> ev;
-        if (phrase.any_bends) {
-            ev.push_back({-1.0, kSens, int(kBendRange)});
-            for (const BendEvent &b : phrase.bends)
-                ev.push_back({b.seconds, kBend, bend_raw(b.semitones)});
+        Part part;
+        part.bpm = phrase.bpm;
+        part.bends = phrase.bends;
+        part.any_bends = phrase.any_bends;
+        part.mods = phrase.mods;
+        part.style = phrase.style;
+        part.level = phrase.level;
+        part.consonants = phrase.consonants;
+        part.channel = phrase.channel;
+        if (phrase.room > 0) {
+            SungNote lead;
+            lead.midi = phrase.notes.front().midi;
+            lead.beats = phrase.room;
+            lead.phonemes = {kRest};
+            part.notes.push_back(lead);
         }
-        // The mod wheel is the engine's own vibrato depth, moved between
-        // frames: Speech_VibDepth is the control VocalWriter's sequencer drives
-        // for exactly this. With the wheel at rest it is the part's setting.
-        if (!phrase.mods.empty()) {
-            int base = clean_voice(phrase.style).vibrato, last = -1;
-            std::vector<Ev> depth;
-            for (const BendEvent &m : phrase.mods) {
-                int v = int(std::lrint(effective_vibrato(base, m.semitones)));
-                if (v != last) depth.push_back({m.seconds, kVibDepth, v});
+        part.notes.insert(part.notes.end(), phrase.notes.begin(), phrase.notes.end());
+        Sung out = sing_part(part);
+        out.starts_before = phrase.room * 60.0 / std::max(phrase.bpm, 1e-6);
+        return out;
+    }
+
+    Sung sing_part(const Part &part) override {
+        Sung out;
+        if (part.notes.empty()) return out;
+        // The sequencer's tempo is a whole number; a tempo between two is
+        // kept by counting ticks at the whole one.
+        int tempo = int(std::max(10L, std::min(250L, std::lround(part.bpm))));
+        double tick_scale = kTicksPerBeat * tempo / std::max(part.bpm, 1e-6);
+        auto ticks = [&](double beats) { return int32_t(std::llround(beats * tick_scale)); };
+        double tick_per_second = kTicksPerBeat * tempo / 60.0;
+        auto at_second = [&](double s) { return int32_t(std::llround(std::max(0.0, s) * tick_per_second)); };
+
+        // placed by where each note begins, so that nothing drifts
+        std::vector<vwseq_note> notes;
+        double beat = 0.0;
+        int32_t end = 0;
+        for (size_t i = 0; i < part.notes.size(); ++i) {
+            const SungNote &n = part.notes[i];
+            int32_t a = ticks(beat), b = ticks(beat + n.beats);
+            beat += n.beats;
+            if (b <= a) continue;
+            vwseq_note v{};
+            v.start = a;
+            v.duration = b - a;
+            v.key = n.midi;
+            v.velocity = n.velocity;
+            if (is_rest_note(n)) {
+                // a rest carries the coming note's key, as VocalWriter
+                // writes it: that note's first consonants are sung in it
+                v.rest = 1;
+                for (size_t k = i + 1; k < part.notes.size(); ++k)
+                    if (!is_rest_note(part.notes[k])) {
+                        v.key = part.notes[k].midi;
+                        break;
+                    }
+                if (!notes.empty() && notes.back().rest && notes.back().start + notes.back().duration == a) {
+                    notes.back().duration += v.duration;
+                    end = b;
+                    continue;
+                }
+            } else {
+                std::string text = lyric_text(n.word);
+                std::memcpy(v.text, text.c_str(), text.size() + 1);
+                int count = 0;
+                for (const std::string &p : n.phonemes) {
+                    int code = phoneme_code(p);
+                    if (code < 0 || p == kRest || count == 12) continue;
+                    v.phonemes[1 + count++] = (unsigned char)code;
+                }
+                v.phonemes[0] = (unsigned char)count;
+            }
+            notes.push_back(v);
+            end = b;
+        }
+        if (notes.empty()) return out;
+        // the sequencer finishes a track once its voice has sung a rest
+        if (!notes.back().rest) {
+            vwseq_note r{};
+            r.start = end;
+            r.duration = kTicksPerBeat;
+            r.key = notes.back().key;
+            r.velocity = notes.back().velocity;
+            r.rest = 1;
+            notes.push_back(r);
+        }
+
+        // The part's settings at the start, only those off their defaults,
+        // so the voice starts as a VocalWriter song starts it; then the
+        // bends and the wheel as they move.
+        std::vector<vwseq_event> ev;
+        size_t count;
+        const VoiceControl *c = svs::voice_controls(&count);
+        VoiceStyle style = clean_voice(part.style);
+        for (size_t i = 0; i < count; ++i) {
+            int value = style.*(c[i].field);
+            std::string call = c[i].call;
+            if (value == (call == "Speech_Portamento" ? kEnginePortamento : c[i].def)) continue;
+            if (call == "Speech_Color") control(ev, 0, VWSEQ_COLOR, value);
+            else if (call == "Speech_VibDepth") control(ev, 0, VWSEQ_VIB_DEPTH, value);
+            else if (call == "Speech_VibFreq") control(ev, 0, VWSEQ_VIB_FREQ, value);
+            else if (call == "Speech_Chorus") control14(ev, 0, VWSEQ_CHORUS, value);
+            else if (call == "Speech_Breath") control(ev, 0, VWSEQ_BREATH, value);
+            else if (call == "Speech_Detune") control14(ev, 0, VWSEQ_DETUNE, value);
+            else if (call == "Speech_Portamento") control(ev, 0, VWSEQ_PORTAMENTO, value);
+        }
+        if (part.any_bends) {
+            // VocalWriter's own range of two semitones if the bends fit it,
+            // else the narrowest that holds them
+            double widest = 0;
+            for (const BendEvent &b : part.bends) widest = std::max(widest, std::fabs(b.semitones));
+            int range = widest <= 2.0 + 1e-9 ? 2 : int(std::min(12.0, std::ceil(widest - 1e-9)));
+            if (range != 2) control(ev, 0, VWSEQ_PB_RANGE, range);
+            for (const BendEvent &b : part.bends)
+                control14(ev, at_second(b.seconds), VWSEQ_PITCH_BEND, bend_raw(b.semitones, range));
+        }
+        if (!part.mods.empty()) {
+            int last = -1;
+            for (const BendEvent &m : part.mods) {
+                int v = int(std::lrint(effective_vibrato(style.vibrato, m.semitones)));
+                if (v != last) control(ev, at_second(m.seconds), VWSEQ_VIB_DEPTH, v);
                 last = v;
             }
-            ev.insert(ev.end(), depth.begin(), depth.end());
-            std::stable_sort(ev.begin(), ev.end(), [](const Ev &a, const Ev &b) { return a.t < b.t; });
         }
-        size_t ei = 0, next = 0;
-        auto feed = [&]() {
-            const SungNote &n = phrase.notes[next++];
-            vw_ed_tempo(e, engine_tempo(bpm));
-            note_call(e, n, bpm);
-        };
-        feed();
-        int frames = 0;
-        while (frames < kMaxFrames) {
-            double now = frames * kSamplesPerFrame / double(kSampleRate);
-            while (ei < ev.size() && ev[ei].t <= now) {
-                const Ev &x = ev[ei++];
-                if (x.kind == kSens)
-                    vw_ed_control(e, "Speech_PBSens", x.value);
-                else if (x.kind == kBend)
-                    vw_ed_control(e, "Speech_PitchBend", x.value * kBendScale);
-                else
-                    vw_ed_control(e, "Speech_VibDepth", x.value);
-            }
-            if (!vw_ed_frames(e, 1)) {
-                out.stopped_short = true;      // no room left to write into
-                break;
-            }
-            ++frames;
-            if (vw_ed_state(e) == 3) break;
-            if (vw_ed_wants_note(e)) {
-                if (next >= phrase.notes.size()) break;
-                feed();
-            }
+        std::stable_sort(ev.begin(), ev.end(),
+                         [](const vwseq_event &a, const vwseq_event &b) { return a.time < b.time; });
+
+        vwseq_part p{};
+        p.bpm = tempo;
+        p.voice = voice_id_;
+        p.notes = notes.data();
+        p.note_count = int(notes.size());
+        p.events = ev.data();
+        p.event_count = int(ev.size());
+        p.channel = part.channel;
+        p.consonants = part.consonants;
+        p.max_seconds = end / tick_per_second + 10.0;
+
+        SeqEngine &s = seq_engine();
+        std::lock_guard<std::mutex> lock(s.mu);
+        if (!open_seq_engine(s)) {
+            out.error = s.error;
+            return out;
         }
-        if (frames >= kMaxFrames) out.stopped_short = true;
-        // SayFrame writes groups of four halfwords as L0 L1 R0 R1: two
-        // samples per channel, not two interleaved frames.
-        int32_t n = vw_ed_wave_index(e);
-        const int16_t *raw = vw_ed_wave(e);
-        out.samples.reserve(size_t(n / 2));
-        for (int32_t i = 0; i + 1 < n; i += 4) {
-            out.samples.push_back(raw[i] / 32768.0f);
-            out.samples.push_back(raw[i + 1] / 32768.0f);
+        // the level as VocalWriter's track level, in whole percent, and
+        // what is finer than that on the samples; a voice VocalWriter sang
+        // past full scale is left as it sang it
+        int track_level = 100;
+        double residual = part.level;
+        if (part.level > 0 && part.level <= 1.0) {
+            track_level = std::max(1, int(std::lround(part.level * 100)));
+            residual = part.level / (track_level / 100.0);
         }
+        p.track_level = track_level;
+        int rc = vwseq_sing(s.e, &p, collect, &out.samples);
+        if (rc != 0) {
+            out.error = "VocalWriter's sequencer stopped (" + std::to_string(rc) + ")";
+            out.samples.clear();
+            return out;
+        }
+        if (residual != 1.0)
+            for (float &v : out.samples) v = float(v * residual);
         return out;
     }
 
 private:
-    //: The packed block SetSeqAddr expects. Every sequence ends with a
-    //: marked rest: Syllable_Duration scales a syllable against the next
-    //: note-start and gives up if there is none.
-    std::vector<unsigned char> sequence(const std::vector<SungNote> &notes) {
-        std::vector<uint16_t> phon, ctrl, dur;
-        for (const SungNote &note : notes) {
-            // as the original: unknown symbols are dropped, and the lengths
-            // are still read by position
-            std::vector<std::string> syms;
-            for (const std::string &p : note.phonemes)
-                if (phoneme_code(p) >= 0) syms.push_back(p);
-            if (syms.empty()) syms = {kRest};
-            for (size_t k = 0; k < syms.size(); ++k) {
-                double len = k < note.durations_ms.size() ? note.durations_ms[k]
-                                                          : phoneme(syms[k])->max_ms;
-                phon.push_back(uint16_t(phoneme_code(syms[k])));
-                ctrl.push_back(k == 0 ? 1 : 0);        // bit 0: this begins a note
-                dur.push_back(uint16_t(std::max(1L, round_half_even(len))));
-            }
-        }
-        phon.push_back(uint16_t(phoneme_code(kRest)));
-        ctrl.push_back(1);
-        dur.push_back(uint16_t(std::max(1, phoneme(kRest)->max_ms)));
-        size_t n = phon.size();
-        std::vector<unsigned char> blob;
-        auto be = [&](uint16_t v) {
-            blob.push_back((unsigned char)(v >> 8));
-            blob.push_back((unsigned char)v);
-        };
-        be(0);
-        be(uint16_t(n));
-        for (uint16_t v : phon) be(v);
-        for (uint16_t v : ctrl) be(v);
-        for (size_t i = 0; i < n; ++i) be(0);
-        for (uint16_t v : dur) be(v);
-        return blob;
-    }
-
-    //: InitDefaultVoiceCntrls and the glide table, the volume, the level,
-    //: then only the controls moved off their defaults.
-    void voice_controls(vw_editor *e, const Phrase &phrase) {
-        vw_ed_defaults(e, 1);
-        // The defaults clear the voice's own chorus (Webster's, the only one
-        // in the bank), so the voice is chosen again, as VocalWriter does.
-        vw_ed_voice(e, voice_id_);
-        vw_ed_volume(e, 127);
-        if (phrase.level != 1.0) vw_ed_level(e, float(phrase.level));
-        size_t count;
-        const VoiceControl *c = svs::voice_controls(&count);
-        VoiceStyle v = clean_voice(phrase.style);
-        for (size_t i = 0; i < count; ++i) {
-            int value = v.*(c[i].field);
-            if (value != c[i].def) vw_ed_control(e, c[i].call, value);
-        }
-        // The radiation shelf at the engine's own setting. VocalWriter Studio
-        // writes it back through the same arithmetic, so this does too.
-        if (vw_ed_hf_emph(e)) {
-            float a = vw_ed_emph_b(e);
-            vw_ed_set_emph(e, 2.0f - a, a);
-        }
-    }
-
-    //: Speech_Note, asked for the frames that put the *next* note where the
-    //: score puts it, so the error is half a frame either way and never
-    //: accumulates. Aiming at the middle of a frame makes the engine's floor
-    //: land where it is meant to.
-    void note_call(vw_editor *e, const SungNote &note, double bpm) {
-        due_ += note.beats * 60.0 / std::max(bpm, 1e-6);
-        long want = round_half_even(due_ * kFramesASecond);
-        long frames = std::max(1L, want - given_);
-        given_ += frames;
-        vw_ed_note(e, note.midi, 0, note.velocity,
-                   (frames + 0.5) / frames_per_beat(engine_tempo(bpm)));
-    }
-
     int voice_id_;
-    double due_ = 0.0;
-    long given_ = 0;
 };
 
 class VocalWriterFamily : public Family {
 public:
     std::string name() const override { return "VocalWriter"; }
+
+    bool sings_parts() const override { return true; }
 
     std::vector<VoiceEntry> voices() override {
         std::lock_guard<std::mutex> lock(mu_);
@@ -375,40 +429,6 @@ public:
         return std::make_unique<VwSinger>(index);
     }
 
-    //: The bank's voices are nothing like each other in level: Robert peaks
-    //: at about seven tenths of full scale, Richard and Minor Chrd a little
-    //: over it. Each is sung once, quietly, to see, and a voice that already
-    //: fits is left exactly alone.
-    double headroom(int voice_id) override {
-        {
-            std::lock_guard<std::mutex> lock(mu_);
-            auto it = headroom_.find(voice_id);
-            if (it != headroom_.end()) return it->second;
-        }
-        const double probe = 0.01;
-        double gain = 1.0;
-        std::unique_ptr<Singer> s = singer(voice_id, nullptr);
-        if (s) {
-            Phrase p;
-            p.bpm = 100;
-            p.level = probe;
-            SungNote n;
-            n.midi = 62;
-            n.beats = 0.6;
-            n.velocity = 100;
-            n.phonemes = {"d", "AA"};
-            p.notes = {n};
-            Sung y = s->sing(p);
-            float peak = 0;
-            for (float v : y.samples) peak = std::max(peak, std::fabs(v));
-            double rel = y.samples.empty() ? 1.0 : peak / probe;
-            gain = rel <= 1.0 ? 1.0 : 0.7 / std::max(rel, 1e-6);
-        }
-        std::lock_guard<std::mutex> lock(mu_);
-        headroom_[voice_id] = gain;
-        return gain;
-    }
-
 private:
     void load_names() {
         if (loaded_) return;
@@ -435,7 +455,6 @@ private:
     std::mutex mu_;
     bool loaded_ = false;
     std::vector<std::string> names_;
-    std::map<int, double> headroom_;
 };
 
 }  // namespace

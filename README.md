@@ -22,10 +22,11 @@ Everything renders through one path. A part is cut into phrases at its rests,
 the consonants are moved in front of the beat so the vowel lands on it, each
 phrase is sung by the part's voice and placed where the score puts it, and the
 parts are panned and mixed, the ones sharing a reverb setting through one room.
-VocalWriter's voices get exactly the calls the original made -- a song sung by
-VocalWriter's voices here is the same file, sample for sample, as the Python
-VocalWriter Studio renders, and a project saved here is the same file byte for
-byte. The other engines are handed the same notes, the same phoneme timings
+VocalWriter's voices are sung through VocalWriter 2.0's own play path -- its
+parser places the consonants and its sequencer sings the track -- so a part
+exported to WAV is, sample for sample, what VocalWriter 2.0 sang; playing, a
+phrase is sung on its own, which comes very near. A project saved here is the
+same file byte for byte as VocalWriter Studio's. The other engines are handed the same notes, the same phoneme timings
 and one shared pitch curve (written note, bend, detune, portamento, vibrato),
 each in its own terms: DECtalk a pitch per phoneme in Hz, the SSI-263 its
 inflection register every 32 samples, Microsoft's vocoder twenty pitch knots

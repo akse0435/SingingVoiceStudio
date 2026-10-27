@@ -397,7 +397,16 @@ void Studio::on_playback_shortcut(wxKeyEvent &evt) {
 
 void Studio::on_song_settings(wxCommandEvent &) {
     undoable("song settings", [this] {
-        SongSettingsDialog dlg(this, song_);
+        // VocalWriter's sequencer places the consonants itself, so the
+        // setting does nothing when every part is sung by it
+        bool own_time = false;
+        for (const Track &t : song_.tracks) {
+            if (t.is_backing()) continue;
+            Family *f = Registry::get().family_of(track_voice_of(t));
+            own_time = f && f->sings_parts();
+            if (!own_time) break;
+        }
+        SongSettingsDialog dlg(this, song_, own_time);
         if (dlg.ShowModal() != wxID_OK) return;
         Song was = song_;
         dlg.apply(song_);

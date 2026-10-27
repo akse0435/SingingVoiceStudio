@@ -165,6 +165,7 @@ set(CORE_SOURCES
   src/voices/pitch.cpp
   src/voices/registry.cpp
   src/voices/vocalwriter.cpp
+  src/voices/vw_sequencer.c
   src/voices/stubs.cpp
 )
 # -- miniaudio --------------------------------------------------------------

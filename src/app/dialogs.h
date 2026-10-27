@@ -140,7 +140,9 @@ private:
 //: Settings that belong to the whole song rather than to one part.
 class SongSettingsDialog : public wxDialog {
 public:
-    SongSettingsDialog(wxWindow *parent, const Song &song);
+    //: `own_time`: every part is sung by an engine that places its consonants
+    //: itself, which leaves "Consonants before the beat" nothing to do
+    SongSettingsDialog(wxWindow *parent, const Song &song, bool own_time = false);
     //: the song with the dialog's settings put on it
     void apply(Song &song) const;
 

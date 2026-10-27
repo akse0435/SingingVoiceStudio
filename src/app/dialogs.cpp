@@ -603,7 +603,7 @@ std::string PantheraDialog::folder() const {
     return U(t);
 }
 
-SongSettingsDialog::SongSettingsDialog(wxWindow *parent, const Song &song)
+SongSettingsDialog::SongSettingsDialog(wxWindow *parent, const Song &song, bool own_time)
     : wxDialog(parent, wxID_ANY, "Song settings"), was_sig_(song.sig) {
     wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
     tempo_ = spin(this, 30, 250, int(song.bpm), 80);
@@ -623,6 +623,11 @@ SongSettingsDialog::SongSettingsDialog(wxWindow *parent, const Song &song)
         "The vowel lands on the beat and the consonants are sung into the end of the note before "
         "it, the way a singer does. Turn this off to hear a note start exactly where it is "
         "written, consonants and all.");
+    if (own_time) {
+        anticipate_->Disable();
+        anticipate_->SetToolTip("VocalWriter's voices sing their consonants before the beat themselves, as "
+                                "VocalWriter did; this is for the other engines.");
+    }
     outer->Add(anticipate_, 0, wxALL, 6);
 
     room_ = spin(this, 0, 100, song.reverb.first, 80);

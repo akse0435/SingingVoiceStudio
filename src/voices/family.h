@@ -70,6 +70,10 @@ public:
     //: so that it does not clip. 1.0 leaves it alone. The default measures
     //: nothing; an engine with very uneven voices overrides it.
     virtual double headroom(int /*voice_id*/) { return 1.0; }
+    //: Whether it keeps its own time, as VocalWriter's sequencer does: it
+    //: places the consonants before the beat itself, and an export is sung
+    //: as whole parts rather than phrases.
+    virtual bool sings_parts() const { return false; }
 };
 
 std::unique_ptr<Family> make_vocalwriter_family();

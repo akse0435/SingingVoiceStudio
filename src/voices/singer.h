@@ -30,6 +30,8 @@ struct SungNote {
     int velocity = 64;
     std::vector<std::string> phonemes;
     std::vector<double> durations_ms;
+    //: the lyric as written; "ov-" joins it to the next note's syllable
+    std::string word;
 };
 
 //: A bend in force from `seconds` (from the start of the phrase) onwards, in
@@ -82,6 +84,27 @@ struct Phrase {
     //: The part's volume as a factor, already multiplied by whatever the
     //: voice needs to stay inside full scale.
     double level = 1.0;
+    //: For an engine that keeps its own time (sings_parts): the consonant
+    //: length, the beats of rest it starts the phrase with (its bends count
+    //: from there), and how many of the song's parts on the same engine come
+    //: before this one.
+    double consonants = 1.0;
+    double room = 0.0;
+    int channel = 0;
+};
+
+//: A whole part, rests and all, from the song's first beat: for an engine
+//: that sings a track as one stream, as VocalWriter's sequencer does.
+struct Part {
+    double bpm = 120.0;
+    std::vector<SungNote> notes;
+    std::vector<BendEvent> bends;     // in seconds from the song's start
+    bool any_bends = false;
+    std::vector<BendEvent> mods;
+    VoiceStyle style;
+    double level = 1.0;
+    double consonants = 1.0;
+    int channel = 0;
 };
 
 //: The rendered phrase. `stopped_short` says the engine ran out of room or
@@ -92,6 +115,8 @@ struct Sung {
     //: Set when the engine could not sing the phrase at all; the samples are
     //: then nothing to keep.
     std::string error;
+    //: how many seconds before the phrase's first beat the samples begin
+    double starts_before = 0.0;
 };
 
 //: The vibrato depth control (0-127) a part sings with when its own setting
@@ -105,6 +130,12 @@ class Singer {
 public:
     virtual ~Singer() = default;
     virtual Sung sing(const Phrase &phrase) = 0;
+    //: A whole part, for an engine that can sing one (Family::sings_parts).
+    virtual Sung sing_part(const Part &) {
+        Sung s;
+        s.error = "this engine sings phrases only";
+        return s;
+    }
 };
 
 }  // namespace svs
