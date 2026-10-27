@@ -133,13 +133,14 @@ the parts chosen has words, Import asks last which one is sung, so that it
 comes in as a part to sing, its short rests closed and its notes on AA until
 words are put on them; the box starts on "None", which has every part played
 by the GM Soundbank. A part the file leaves unnamed is named after its
-instrument, the drum kit's "Drums". Import asks first which parts come in,
-each ticked or unticked with Space: Every part, ticked to begin with, ticks
-or unticks all the others, so a few are chosen by unticking it and ticking
-those. A type 0 file, every part on one track of the file, has its lyrics on
-that track rather than on a part, so when more than one of the parts chosen
-could sing them Import then asks which one does, in a box that starts on the
-first; one of them sings them unasked. On the command line the same,
+instrument, the drum kit's "Drums", and so is each part of a track that plays
+on several channels, a type 0 file's or another's. Import asks first which
+parts come in, each ticked or unticked with Space: Every part, ticked to begin
+with, ticks or unticks all the others, so a few are chosen by unticking it and
+ticking those. A type 0 file, every part on one track of the file, has its
+lyrics on that track rather than on a part, so when more than one of the
+parts chosen could sing them Import then asks which one does, in a box that
+starts on the first; one of them sings them unasked. On the command line the same,
 the likeliest taken, and a file without words played throughout;
 `--sing-all` sings every part. Each track takes its volume from the
 file, CC 7 by CC 11 with both at 127 being 100%, at its loudest, with

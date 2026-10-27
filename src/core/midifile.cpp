@@ -518,8 +518,9 @@ MidiFile read_midi(const std::string &path, int lyrics_on) {
         }
         // A track playing on several channels -- a type 0 file's only track
         // -- is a part for each, as a type 1 file has them; the tempo and
-        // time signature stay on a track of their own. Unnamed in a type 0
-        // file, where the one name is the song's.
+        // time signature stay on a track of their own. Unnamed, so each is
+        // named after its instrument: the one name is the song's, or no one
+        // part's.
         MidiTrack meta;
         meta.name = trk.name;
         meta.tempos = trk.tempos;
@@ -552,7 +553,7 @@ MidiFile read_midi(const std::string &path, int lyrics_on) {
         }
         for (int ch : used) {
             MidiTrack t = trk.channel[ch];
-            t.name = mf.format == 0 ? "" : trk.name;
+            t.name.clear();
             if (ch == sung) put_words(t.notes, t.bends, trk, div);
             mf.tracks.push_back(t);
         }
