@@ -311,8 +311,10 @@ std::vector<int> pair_up(const std::vector<MidiNote> &notes,
 
 //: Whether a piece of lyric is a syllable of its own: it has a vowel letter,
 //: and if it `continues` a word, it does not open on one, unlike the "xt" of
-//: "ne", "xt" or the "ed" of "lov", "ed". A word starting ("a ") stands alone.
+//: "ne", "xt" or the "ed" of "lov", "ed". A word starting ("a ") stands alone,
+//: and so does one with a figure in it ("39"), said as words.
 bool own_syllable(const std::string &piece, bool continues) {
+    if (std::any_of(piece.begin(), piece.end(), [](unsigned char c) { return std::isdigit(c); })) return true;
     std::string t;
     for (unsigned char c : piece)
         if (std::isalpha(c)) t.push_back(char(std::tolower(c)));

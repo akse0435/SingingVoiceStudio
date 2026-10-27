@@ -154,6 +154,18 @@ std::vector<std::string> letter_name(char c, bool marked) {
 }  // namespace
 
 std::vector<std::string> Lexicon::phonemes(const std::string &word, bool marked) {
+    // figures said as words, each looked up: "39" as "thirty nine"
+    std::vector<std::string> said = number_words(word);
+    if (!said.empty()) {
+        std::vector<std::string> out;
+        for (const std::string &w : said) {
+            std::vector<std::string> one = phonemes(w, marked);
+            if (one.empty()) continue;
+            if (marked && !out.empty()) out.push_back(kSyllableBreak);
+            out.insert(out.end(), one.begin(), one.end());
+        }
+        return out;
+    }
     std::vector<std::string> pieces(1);
     for (unsigned char c : word) {
         if (c == '-' && !pieces.back().empty()) pieces.emplace_back();

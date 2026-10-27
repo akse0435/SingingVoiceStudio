@@ -250,8 +250,8 @@ std::pair<std::string, int> AddWordDialog::typed() const {
         }
     }
     std::string clean;
-    for (unsigned char c : raw)
-        if (std::isalpha(c) || c == '\'') clean.push_back(char(c));
+    for (size_t i = 0; i < raw.size(); ++i)
+        if (in_word(raw, i)) clean.push_back(raw[i]);
     return {clean, parts};
 }
 
@@ -259,9 +259,10 @@ std::pair<std::string, int> AddWordDialog::typed() const {
 //: in one, as a MIDI file's lyrics have them: "did-", "n't".
 std::vector<std::string> AddWordDialog::pieces() const {
     std::vector<std::string> out(1);
-    for (unsigned char c : raw()) {
-        if (c == '-' && !out.back().empty()) out.emplace_back();
-        else if (std::isalpha(c) || c == '\'') out.back().push_back(char(c));
+    std::string raw = this->raw();
+    for (size_t i = 0; i < raw.size(); ++i) {
+        if (raw[i] == '-' && !out.back().empty()) out.emplace_back();
+        else if (in_word(raw, i)) out.back().push_back(raw[i]);
     }
     if (out.back().empty()) out.pop_back();
     for (size_t i = 0; i + 1 < out.size(); ++i) out[i] += '-';

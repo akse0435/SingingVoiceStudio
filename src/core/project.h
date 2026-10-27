@@ -407,6 +407,16 @@ struct TextWord {
     std::string key() const;
 };
 
+//: Whether the character at `i` of `s` belongs to a typed word: a letter, a
+//: figure, an apostrophe, or a point or comma between figures ("3.5", "1,000").
+bool in_word(const std::string &s, size_t i);
+
+//: The words a word with figures in it is said as: "39" and "'39" as
+//: "thirty", "nine", "1984" as a year, "2nd" as "second", "60s" as
+//: "sixties", "3.5" as "three", "point", "five", a leading 0 figure by figure
+//: ("007"); its letters kept as words ("4ever"). Empty if it has no figure.
+std::vector<std::string> number_words(const std::string &word);
+
 //: The words of `text`, divided where it has white space; a stretch with no
 //: letter in it is no word. A tag in square brackets, "[Verse 1]", is left
 //: out; words in round ones, a backing part's, are kept.

@@ -934,10 +934,12 @@ Bend curve_over(const std::vector<std::pair<long, double>> &curve, long start, l
     return steps;
 }
 
+//: What of a piece of lyric is looked up: its letters, apostrophes and
+//: figures (in_word).
 std::string letters_of(const std::string &text) {
     std::string out;
-    for (char c : text)
-        if (std::isalpha((unsigned char)c) || c == '\'') out.push_back(c);
+    for (size_t i = 0; i < text.size(); ++i)
+        if (in_word(text, i)) out.push_back(text[i]);
     return out;
 }
 
@@ -1624,8 +1626,15 @@ std::vector<std::vector<std::string>> split_held(const std::vector<std::string> 
 }
 
 //: How many syllables a piece of lyric looks to hold: its runs of vowel
-//: letters, a silent e at the end of a word not counted.
+//: letters, a silent e at the end of a word not counted; figures as the
+//: words they are said as (number_words).
 int vowel_groups(const std::string &text, bool word_end) {
+    std::vector<std::string> said = number_words(text);
+    if (!said.empty()) {
+        int n = 0;
+        for (const std::string &w : said) n += vowel_groups(w, true);
+        return n;
+    }
     std::string t = letters_of(text);
     int n = 0;
     bool in = false;
@@ -1643,8 +1652,10 @@ int vowel_groups(const std::string &text, bool word_end) {
 
 //: Whether a piece of lyric goes on with the syllable before it rather than
 //: starting one: it opens on a vowel letter, or has none ("in-", "ste-", "ad").
+//: One with a figure in it starts its own.
 bool goes_on(const std::string &text) {
     std::string t = letters_of(text);
+    if (std::any_of(t.begin(), t.end(), [](unsigned char c) { return std::isdigit(c); })) return false;
     if (t.empty() || std::strchr("aeiouAEIOU", t[0])) return true;
     for (char c : t)
         if (std::strchr("aeiouyAEIOUY", c)) return false;
@@ -1814,6 +1825,142 @@ std::vector<std::vector<std::string>> word_on_notes(const std::vector<std::strin
     return out;
 }
 
+bool in_word(const std::string &s, size_t i) {
+    unsigned char c = (unsigned char)s[i];
+    if (std::isalnum(c) || c == '\'') return true;
+    return (c == '.' || c == ',') && i > 0 && i + 1 < s.size() && std::isdigit((unsigned char)s[i - 1]) &&
+           std::isdigit((unsigned char)s[i + 1]);
+}
+
+namespace {
+
+const char *const kOnes[20] = {"zero",    "one",     "two",       "three",    "four",
+                               "five",    "six",     "seven",     "eight",    "nine",
+                               "ten",     "eleven",  "twelve",    "thirteen", "fourteen",
+                               "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"};
+const char *const kTens[10] = {"", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"};
+
+//: 1 to 999 in words: "one hundred twenty three"
+void say_hundreds(int n, std::vector<std::string> &out) {
+    if (n >= 100) {
+        out.push_back(kOnes[n / 100]);
+        out.push_back("hundred");
+        n %= 100;
+        if (n == 0) return;
+    }
+    if (n >= 20) {
+        out.push_back(kTens[n / 10]);
+        if (n % 10) out.push_back(kOnes[n % 10]);
+    } else {
+        out.push_back(kOnes[n]);
+    }
+}
+
+//: a whole number in words: "one thousand nine hundred"
+void say_number(unsigned long long n, std::vector<std::string> &out) {
+    static const char *const scale[] = {"", "thousand", "million", "billion"};
+    if (n == 0) {
+        out.push_back("zero");
+        return;
+    }
+    std::vector<int> groups;
+    for (; n; n /= 1000) groups.push_back(int(n % 1000));
+    for (size_t g = groups.size(); g-- > 0;) {
+        if (groups[g] == 0) continue;
+        say_hundreds(groups[g], out);
+        if (g) out.push_back(scale[g]);
+    }
+}
+
+//: a year in pairs: "nineteen eighty four", "nineteen oh five"
+void say_year(int n, std::vector<std::string> &out) {
+    say_hundreds(n / 100, out);
+    int r = n % 100;
+    if (r == 0) {
+        out.push_back("hundred");
+    } else if (r < 10) {
+        out.push_back("oh");
+        out.push_back(kOnes[r]);
+    } else {
+        say_hundreds(r, out);
+    }
+}
+
+//: a number word as an ordinal: "first", "twelfth", "twentieth"
+std::string ordinal(const std::string &w) {
+    static const std::map<std::string, std::string> odd = {{"one", "first"},   {"two", "second"},
+                                                           {"three", "third"}, {"five", "fifth"},
+                                                           {"eight", "eighth"}, {"nine", "ninth"},
+                                                           {"twelve", "twelfth"}};
+    auto it = odd.find(w);
+    if (it != odd.end()) return it->second;
+    if (!w.empty() && w.back() == 'y') return w.substr(0, w.size() - 1) + "ieth";
+    return w + "th";
+}
+
+//: a number word as a plural: "sixties", "sixes", "hundreds"
+std::string plural_of(const std::string &w) {
+    if (!w.empty() && w.back() == 'y') return w.substr(0, w.size() - 1) + "ies";
+    if (!w.empty() && w.back() == 'x') return w + "es";
+    return w + "s";
+}
+
+}  // namespace
+
+std::vector<std::string> number_words(const std::string &word) {
+    auto digit = [&](size_t i) { return i < word.size() && std::isdigit((unsigned char)word[i]); };
+    auto letter = [&](size_t i) { return i < word.size() && std::isalpha((unsigned char)word[i]); };
+    if (std::none_of(word.begin(), word.end(), [](unsigned char c) { return std::isdigit(c); })) return {};
+    std::vector<std::string> out;
+    size_t i = 0;
+    while (i < word.size()) {
+        if (letter(i)) {
+            std::string w;
+            while (letter(i) || (i < word.size() && word[i] == '\'' && letter(i + 1))) w.push_back(word[i++]);
+            out.push_back(w);
+            continue;
+        }
+        if (!digit(i)) {
+            ++i;      // anything else only divides
+            continue;
+        }
+        // the figures, a comma before each three ("1,000"), and a decimal part
+        std::string figures, decimals;
+        bool grouped = false;
+        while (digit(i) || (word[i] == ',' && digit(i + 1) && digit(i + 2) && digit(i + 3) && !digit(i + 4))) {
+            if (word[i] == ',') grouped = true;
+            else figures.push_back(word[i]);
+            ++i;
+        }
+        if (i < word.size() && word[i] == '.' && digit(i + 1))
+            for (++i; digit(i); ++i) decimals.push_back(word[i]);
+        // "st", "nd", "rd" or "th" after it an ordinal, "s" or "'s" a plural
+        size_t j = i + (i < word.size() && word[i] == '\'' ? 1 : 0);
+        std::string after;
+        while (letter(j)) after.push_back(char(std::tolower((unsigned char)word[j++])));
+        bool nth = after == "st" || after == "nd" || after == "rd" || after == "th";
+        bool many = after == "s";
+        if (nth || many) i = j;
+        if ((figures.size() > 1 && figures[0] == '0') || figures.size() > 12) {
+            for (char d : figures) out.push_back(d == '0' ? "oh" : kOnes[d - '0']);
+        } else {
+            unsigned long long n = std::stoull(figures);
+            // a year in pairs, but 2005 as two thousand five, 3000 as three thousand
+            if (figures.size() == 4 && !grouped && decimals.empty() && !nth && n >= 1100 && n % 1000 >= 10)
+                say_year(int(n), out);
+            else
+                say_number(n, out);
+        }
+        if (!decimals.empty()) {
+            out.push_back("point");
+            for (char d : decimals) out.push_back(kOnes[d - '0']);
+        }
+        if (nth) out.back() = ordinal(out.back());
+        else if (many) out.back() = plural_of(out.back());
+    }
+    return out;
+}
+
 std::string TextWord::key() const {
     std::string out;
     for (const std::string &p : pieces) out += p;
@@ -1839,9 +1986,10 @@ std::vector<TextWord> text_words(const std::string &text) {
     while (in >> token) {
         TextWord w;
         w.pieces.emplace_back();
-        for (unsigned char c : token) {
+        for (size_t k = 0; k < token.size(); ++k) {
+            unsigned char c = (unsigned char)token[k];
             if (c == '-' && !w.pieces.back().empty()) w.pieces.emplace_back();
-            else if (std::isalpha(c) || c == '\'') w.pieces.back().push_back(char(c));
+            else if (in_word(token, k)) w.pieces.back().push_back(char(c));
         }
         if (w.pieces.back().empty()) w.pieces.pop_back();
         if (w.pieces.empty()) continue;

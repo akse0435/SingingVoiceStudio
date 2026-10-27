@@ -232,7 +232,9 @@ and lays a word over as many notes as are asked for: as its hyphens divide
 it, "did-n't" on two, or a syllable to a note, or with more notes than
 syllables each split at its vowel, "night" on two as n AY, AY t. Notes to
 use comes into the dialog once the word is looked up, starting on its
-syllables or the pieces its hyphens make.
+syllables or the pieces its hyphens make. Figures are said as words, here,
+in Add text and in a MIDI file's lyrics: 39 and '39 as thirty nine, 1984 as
+a year, 2nd as second, 60s as sixties, 3.5 as three point five.
 Note > Add word to existing note(s) (Ctrl+Shift+W) looks a word up the
 same way and puts it on the notes already in the track, from the one the
 cursor is on, rests and controllers passed over; each keeps its pitch,
