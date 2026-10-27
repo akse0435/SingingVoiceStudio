@@ -126,8 +126,6 @@ private:
     void refresh_row(int i, int voice = -1);
     //: whether an instrument plays the current track's row `i`
     bool played_at(int i) const { return is_gm_voice(voice_at(i)); }
-    //: the rows of the chord row `i` is in
-    std::vector<int> chord_of(int i) const;
     void refresh_bars();
     void nudge_pitch(int by);
     void nudge_length(bool up);
@@ -166,6 +164,7 @@ private:
     void start_playing(double start, bool quiet = false);
     void played(const Mixed &res, bool quiet);
     void stop_audio();
+    void drop_playback();
     void on_stop(wxCommandEvent &);
     void on_export(wxCommandEvent &);
     void on_export_tracks(wxCommandEvent &);
@@ -228,6 +227,8 @@ private:
     void write_project(const std::string &path);
     void on_song_settings(wxCommandEvent &);
     void on_import(wxCommandEvent &);
+    void on_append(wxCommandEvent &);
+    void take_midi(const std::string &path, bool append);
     void import_vocalwriter(const std::string &path);
     void imported_words(std::vector<ImportedPart> parts,
                         const std::map<std::string, std::vector<std::string>> &found, size_t pending);
@@ -243,8 +244,10 @@ private:
     std::map<int, int> program_map_;
     bool programs_known_ = false;
     std::string vw_waiting_;   // a VocalWriter song to import once they are
+    std::string midi_waiting_;   // a MIDI file to import once the voices are known
     Player player_;
     bool rendering_ = false;
+    bool discard_render_ = false;   // a new song came in while it rendered
     std::string path_;
     bool dirty_ = false;
     Settings settings_;

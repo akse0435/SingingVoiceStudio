@@ -20,6 +20,9 @@ namespace svs {
 extern const char *const kProjectSuffix;      // ".vws"
 extern const char *const kProjectWildcard;
 extern const char *const kImportWildcard;  // MIDI files and VocalWriter songs
+extern const char *const kMidiWildcard;
+//: whether a file is a MIDI file, by its name
+bool is_midi_file(const std::string &path);
 //: What a note sings when the file says nothing: "AA", the open vowel of
 //: "father" -- something to sing the line on, and the obvious thing to replace.
 extern const char *const kDefaultPhoneme;
@@ -218,6 +221,9 @@ bool sings(const Track &track);
 std::vector<std::pair<double, int>> voice_changes(const Track &track);
 //: the song at its starting tempo throughout, every tempo change taken out
 void steady_tempo(Song &song);
+//: steady_tempo, and the tracks that held nothing but tempo changes taken out
+//: with them, as an imported song's Tempo track
+void drop_tempo_map(Song &song);
 
 // -- what is shown --------------------------------------------------------
 

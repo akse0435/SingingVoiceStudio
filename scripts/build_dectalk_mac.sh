@@ -137,8 +137,9 @@ done
 wait
 
 echo "== linking voices/dectalk/libtts.dylib"
+# -x: no local symbols; the exported ones below stay
 clang -dynamiclib $ARCHFLAGS -mmacosx-version-min=$MIN -o "$OUT/libtts.dylib" $OBJS \
-    -install_name @rpath/libtts.dylib -lpthread -lm
+    -install_name @rpath/libtts.dylib -Wl,-x -lpthread -lm
 # the entry points the program asks for by name must be there
 for sym in TextToSpeechStartupExFonix TextToSpeechSpeak TextToSpeechSync \
            TextToSpeechOpenInMemory TextToSpeechAddBuffer TextToSpeechReturnBuffer; do

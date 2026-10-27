@@ -95,9 +95,9 @@ its own: a track it plays has an instrument for its voice. It plays rather
 than sings, so a track can hold chords: a chord is its notes in a row, all
 but the last at 0 beats, and Edit note, Sounds for, says how long a note
 sounds when that is not its beats. Several pitches typed into Pitch, as
-`C4 E4 G4`, make a chord, and Ctrl+H plays the whole chord. The list shows
-"(note)" in place of the phonemes, or on the drum kit the drum. Each note
-keeps its velocity, and of VocalWriter's controls an instrument takes the
+`C4 E4 G4`, make a chord; Ctrl+H plays the note the cursor is on. The list
+shows "(note)" in place of the phonemes, or on the drum kit the drum. Each
+note keeps its velocity, and of VocalWriter's controls an instrument takes the
 volume, the bend range, the detune and the sustain pedal. Like VocalWriter's
 voices it plays the whole track, in stereo, and exported with them and
 nothing panned the song is played as VocalWriter played it.
@@ -122,7 +122,12 @@ words is played throughout. A part the file leaves unnamed is named after its
 instrument, the drum kit's "Drums". On the command line the same;
 `--sing-all` sings every part. Each track takes its volume from the
 file, CC 7 by CC 11 with both at 127 being 100%, at its loudest, with
-VocalWriter's volume control against that where it changes.
+VocalWriter's volume control against that where it changes. A MIDI file
+opened from the desktop or named on the command line comes in the same way.
+
+**Append MIDI** (File > Append MIDI, Ctrl+Shift+M) puts the parts of a MIDI
+file under the song's own tracks, chosen as Import chooses them; its tempo
+changes and time signature take the place of the song's.
 
 **Short rests** between two notes can be closed as a MIDI file comes in
 (Settings > Close short rests when importing MIDI, Ctrl+Shift+I, off until it
@@ -338,6 +343,7 @@ Ctrl and Option for Alt, and Option+H to hear a note.
 | Ctrl+P / Ctrl+H / Ctrl+M / Ctrl+. | play from the start / hear one note / metronome / stop |
 | Ctrl+O / Ctrl+S | open and save a project |
 | Ctrl+I | import a MIDI file or a VocalWriter song |
+| Ctrl+Shift+M | append a MIDI file under the song's tracks |
 | Ctrl+Shift+I | whether importing MIDI closes the short rests between notes |
 | Ctrl+Shift+E | whether importing MIDI removes the note velocities from the sung tracks |
 | Ctrl+Shift+S / Ctrl+Shift+T | export one WAV / one WAV per track |

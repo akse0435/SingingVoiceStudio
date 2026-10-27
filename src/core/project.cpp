@@ -27,6 +27,12 @@ const char *const kProjectWildcard = "Singing Voice Studio project (*.vws)|*.vws
 const char *const kImportWildcard =
     "MIDI files and VocalWriter songs (*.mid;*.midi;*.trk)|*.mid;*.midi;*.trk|"
     "MIDI files (*.mid;*.midi)|*.mid;*.midi|VocalWriter songs (*.trk)|*.trk";
+const char *const kMidiWildcard = "MIDI files (*.mid;*.midi)|*.mid;*.midi";
+
+bool is_midi_file(const std::string &path) {
+    std::string e = extension_lower(path);
+    return e == ".mid" || e == ".midi";
+}
 const char *const kDefaultPhoneme = "AA";
 
 const NoteControl kNoteControls[] = {
@@ -1701,6 +1707,21 @@ void steady_tempo(Song &song) {
         }
         t.notes = kept;
     }
+}
+
+void drop_tempo_map(Song &song) {
+    std::vector<bool> tempo(song.tracks.size());
+    for (size_t k = 0; k < song.tracks.size(); ++k)
+        for (const Note &n : song.tracks[k].notes) tempo[k] = tempo[k] || (n.controller && n.tempo > 0);
+    steady_tempo(song);
+    std::vector<Track> kept;
+    for (size_t k = 0; k < song.tracks.size(); ++k) {
+        const Track &t = song.tracks[k];
+        bool more = t.is_backing() || sings(t);
+        for (const Note &n : t.notes) more = more || n.controller;
+        if (!tempo[k] || more) kept.push_back(t);
+    }
+    song.tracks = kept;
 }
 
 }  // namespace svs

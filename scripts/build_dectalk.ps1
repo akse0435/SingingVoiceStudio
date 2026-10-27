@@ -58,7 +58,8 @@ if (-not $NoBuild) {
     # (ucrt.lib, vcruntime.lib) in its link line, so that line is replaced
     # too, with the static libraries in their place. The DLL's entry point is
     # also changed from DECtalk's LibMain, which does nothing, to the C
-    # runtime's own, which a static runtime needs to set itself up.
+    # runtime's own, which a static runtime needs to set itself up. No debug
+    # information is made, in the DLL or beside it.
     $props = Join-Path $Src "dapi\build\svs_static_crt.props"
     New-Item -ItemType Directory -Force (Split-Path $props) | Out-Null
     Set-Content -Encoding utf8 $props @'
@@ -66,10 +67,12 @@ if (-not $NoBuild) {
   <ItemDefinitionGroup>
     <ClCompile>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <DebugInformationFormat>None</DebugInformationFormat>
     </ClCompile>
     <Link>
       <AdditionalDependencies>$(CoreLibraryDependencies);winmm.lib;libcmt.lib;libucrt.lib;libvcruntime.lib</AdditionalDependencies>
       <EntryPointSymbol Condition="'$(ConfigurationType)'=='DynamicLibrary'">_DllMainCRTStartup</EntryPointSymbol>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
     </Link>
   </ItemDefinitionGroup>
 </Project>

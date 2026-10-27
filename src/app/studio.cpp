@@ -37,7 +37,7 @@ enum {
     ID_BAR_REST, ID_GOTO_BAR, ID_METRONOME, ID_PLAY_PAUSE, ID_PANES,
     ID_TRACK_NEW, ID_TRACK_BACKING, ID_TRACK_EDIT, ID_TRACK_REMOVE, ID_TRACK_MUTE, ID_TRACK_SOLO,
     ID_TRACK_UP, ID_TRACK_DOWN, ID_PREVIEW_TIMER, ID_RECOVERY_TIMER, ID_ADD_CONTROLLER, ID_CLOSE_RESTS,
-    ID_REMOVE_VELOCITIES,
+    ID_REMOVE_VELOCITIES, ID_APPEND,
 };
 
 //: A beat is a quarter note, so a sixteenth is a quarter of a beat: the step
@@ -294,6 +294,8 @@ void Studio::build_menu() {
     f->AppendSeparator();
     f->Append(ID_IMPORT, K("&Import MIDI or VocalWriter song...\tCtrl+I"),
               "Take the notes from a MIDI file, or a whole song from VocalWriter");
+    f->Append(ID_APPEND, K("A&ppend MIDI...\tCtrl+Shift+M"),
+              "Put a MIDI file's parts under the song's tracks, its tempo in place of the song's");
     f->Append(ID_EXPORT, K("&Export WAV...\tCtrl+Shift+S"), "Write the whole song to one file");
     f->Append(ID_EXPORT_TRACKS, K("Export &tracks...\tCtrl+Shift+T"), "Write every track to a file of its own");
     f->AppendSeparator();
@@ -376,6 +378,7 @@ void Studio::build_menu() {
     on(wxID_SAVE, &Studio::on_save);
     on(wxID_SAVEAS, &Studio::on_save_as);
     on(ID_IMPORT, &Studio::on_import);
+    on(ID_APPEND, &Studio::on_append);
     on(ID_EXPORT, &Studio::on_export);
     on(ID_EXPORT_TRACKS, &Studio::on_export_tracks);
     on(wxID_PREFERENCES, &Studio::on_song_settings);
@@ -523,13 +526,22 @@ void Studio::preview_note(int i) {
     preview_timer_.StartOnce(kPreviewWait);
 }
 
+//: A note heard on its own: a chord's, which takes no time, as long as it is held.
+static Note alone(Note n) {
+    if (n.hold > 0) {
+        n.beats = n.hold;
+        n.hold = 0;
+    }
+    return n;
+}
+
 void Studio::preview_now(int i) {
     if (i < 0 || i >= int(notes().size()) || rendering_) return;
     const Note &note = notes()[size_t(i)];
     if (note.phonemes.empty() || note.controller) return;   // nothing to hear
     stop_audio();
     rendering_ = true;
-    mix(request(new std::vector<Note>{note}), [this](Mixed res) { heard(res); });
+    mix(request(new std::vector<Note>{alone(note)}), [this](Mixed res) { heard(res); });
 }
 
 void Studio::on_keys(wxCommandEvent &) {
@@ -566,7 +578,7 @@ void Studio::on_keys(wxCommandEvent &) {
         "the vibrato",
         "On a track the GM Soundbank plays, a chord is its notes in a row, all but the last taking 0 "
         "beats; several pitches typed into a note, as C4 E4 G4, make one. Alt+Right and Alt+Left "
-        "change how long a note held on its own sounds, and Ctrl+H plays the whole chord",
+        "change how long a note held on its own sounds, and Ctrl+H plays the note the cursor is on",
         "Space  play from the note the cursor is on, or stop if it is playing",
         "Ctrl+P  play every track from the start",
         is_mac() ? "Option+H  hear the selected note" : "Ctrl+H  hear the selected note",
@@ -575,6 +587,8 @@ void Studio::on_keys(wxCommandEvent &) {
         "Ctrl+O open a project, Ctrl+S save it",
         "Ctrl+I  import a MIDI file or a VocalWriter song. The parts without words are played by "
         "the GM Soundbank, VocalWriter's own instruments, as VocalWriter played them",
+        "Ctrl+Shift+M  append a MIDI file: its parts under the song's tracks, its tempo and time signature in "
+        "place of the song's",
         "Ctrl+Shift+I  whether importing MIDI closes the short rests between notes",
         "Ctrl+Shift+E  whether importing MIDI removes the note velocities from the sung tracks",
         "Ctrl+Shift+S  export the whole song as one WAV",
@@ -656,6 +670,12 @@ void Studio::set_voices(std::vector<VoiceListing> v) {
     // a song opened before the list arrived is put on its voices now
     resolve_voice_names(song_, voices_);
     sync_tracks(current_);        // the Voice column can now say
+    // a MIDI file opened before it arrived comes in now
+    if (!midi_waiting_.empty() && !voices_.empty()) {
+        std::string path;
+        path.swap(midi_waiting_);
+        take_midi(path, false);
+    }
 }
 
 std::string Studio::voice_name(int id) const {
@@ -1650,30 +1670,16 @@ void Studio::on_hear(wxCommandEvent &) {
     }
     stop_audio();
     rendering_ = true;
-    // on a track an instrument plays, the whole chord the note is in
-    auto *rows = new std::vector<Note>;
-    for (int k : chord_of(i)) rows->push_back(notes()[size_t(k)]);
-    mix(request(rows), [this](Mixed res) { heard(res); });
-}
-
-std::vector<int> Studio::chord_of(int i) const {
-    const std::vector<Note> &all = track().notes;
-    if (!played_at(i) || all[size_t(i)].is_rest()) return {i};
-    int a = i, b = i;
-    // back over the chord's notes before it
-    while (a > 0 && !all[size_t(a - 1)].controller && !all[size_t(a - 1)].is_rest() && all[size_t(a - 1)].beats <= 0)
-        --a;
-    // and on to the one that ends it
-    while (b + 1 < int(all.size()) && all[size_t(b)].beats <= 0 && !all[size_t(b + 1)].controller &&
-           !all[size_t(b + 1)].is_rest())
-        ++b;
-    std::vector<int> out;
-    for (int k = a; k <= b; ++k) out.push_back(k);
-    return out;
+    // the note the cursor is on, a chord's too
+    mix(request(new std::vector<Note>{alone(notes()[size_t(i)])}), [this](Mixed res) { heard(res); });
 }
 
 void Studio::heard(const Mixed &res) {
     rendering_ = false;
+    if (discard_render_) {
+        discard_render_ = false;
+        return;
+    }
     if (res.ok) play_audio(res, true);
     else say("render failed");
 }
@@ -1750,6 +1756,10 @@ void Studio::start_playing(double start, bool quiet) {
 void Studio::played(const Mixed &res, bool quiet) {
     rendering_ = false;
     mi_play_->Enable(true);
+    if (discard_render_) {
+        discard_render_ = false;
+        return;
+    }
     if (!res.ok) {
         say("render failed");
         return;
@@ -1779,6 +1789,12 @@ void Studio::play_audio(const Mixed &res, bool quiet) {
 }
 
 void Studio::stop_audio() { player_.stop(); }
+
+//: Another song came in: what plays stops, and one on its way is not played.
+void Studio::drop_playback() {
+    stop_audio();
+    if (rendering_) discard_render_ = true;
+}
 
 void Studio::on_stop(wxCommandEvent &) {
     stop_audio();
@@ -1997,6 +2013,7 @@ bool Studio::may_discard(const wxString &what) {
 
 //: Replace the song with what was loaded or imported.
 void Studio::take(const Song &song, const std::string &path) {
+    drop_playback();
     song_ = song;
     resolve_voice_names(song_, voices_);
     if (song_.tracks.empty()) {
@@ -2017,6 +2034,7 @@ void Studio::take(const Song &song, const std::string &path) {
 
 void Studio::on_new(wxCommandEvent &) {
     if (!may_discard("Start a new song")) return;
+    drop_playback();
     Track t;
     t.name = "Voice 1";
     t.program = track().program;
@@ -2040,6 +2058,10 @@ void Studio::on_open(wxCommandEvent &) {
 void Studio::open_project(const std::string &path) {
     if (is_vocalwriter_song(path)) {
         import_vocalwriter(path);
+        return;
+    }
+    if (is_midi_file(path)) {
+        take_midi(path, false);
         return;
     }
     Song song;
@@ -2098,6 +2120,26 @@ void Studio::on_import(wxCommandEvent &) {
         import_vocalwriter(path);
         return;
     }
+    take_midi(path, false);
+}
+
+//: File > Append MIDI: a MIDI file's parts under the song's tracks, its
+//: tempo map in place of the song's.
+void Studio::on_append(wxCommandEvent &) {
+    wxFileDialog dlg(this, "Append MIDI", "", "", kMidiWildcard, wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+    if (dlg.ShowModal() != wxID_OK) return;
+    take_midi(U(dlg.GetPath()), true);
+}
+
+//: A MIDI file's parts, chosen as Import asks: as a new song, or with
+//: `append` under this one.
+void Studio::take_midi(const std::string &path, bool append) {
+    // which parts the GM Soundbank can play is known once the voices are
+    if (voices_.empty()) {
+        if (append) say("the voices have not loaded yet. Try again in a moment.");
+        else midi_waiting_ = path;
+        return;
+    }
     std::vector<MidiPart> parts;
     try {
         parts = midi_parts(path);
@@ -2147,33 +2189,53 @@ void Studio::on_import(wxCommandEvent &) {
         say(W(std::string("cannot import: ") + e.what()));
         return;
     }
-    // as the original: the imported song keeps the consonant length, and
-    // starts its voice controls, reverb and timing afresh
-    Song song = fresh_song();
-    song.bpm = got.bpm;
-    song.sig = got.sig;
-    song.consonants = song_.consonants;
     // the tempo changes on a track of their own, above the parts
-    if (!got.tempo_changes.empty()) song.tracks.push_back(tempo_track(got.tempo_changes));
+    std::vector<Track> tracks;
+    if (!got.tempo_changes.empty()) tracks.push_back(tempo_track(got.tempo_changes));
     int program = track().program;
     size_t sung = 0;
     for (const ImportedPart &p : got.parts) {
         Track t = imported_track(p);
         t.program = program;
         sung += !p.played;
-        song.tracks.push_back(t);
+        tracks.push_back(t);
     }
-    take(song, "");
+    size_t first = 0;
+    if (append) {
+        undoable("append MIDI", [&] {
+            drop_playback();
+            // its tempo and time signature in place of the song's
+            drop_tempo_map(song_);
+            song_.bpm = double(std::max(long(kMinBpm), std::min(long(kMaxBpm), std::lrint(got.bpm))));
+            song_.sig = parse_sig(format_sig(got.sig));
+            first = song_.tracks.size();
+            song_.tracks.insert(song_.tracks.end(), tracks.begin(), tracks.end());
+            touch();
+            sync_tracks(int(first));
+            sync(0);
+        });
+    } else {
+        // as the original: the imported song keeps the consonant length, and
+        // starts its voice controls, reverb and timing afresh
+        Song song = fresh_song();
+        song.bpm = got.bpm;
+        song.sig = got.sig;
+        song.consonants = song_.consonants;
+        song.tracks = tracks;
+        take(song, "");
+    }
     size_t total = 0;
     for (const auto &p : got.parts)
         for (const Note &n : p.notes) total += !n.controller;
-    say(W("imported " + base_name(path) + ": " + plural(got.parts.size(), "track") + ", " + std::to_string(total) +
-          " notes, " + fmt_g(std::nearbyint(got.bpm)) + " bpm, " + format_sig(got.sig)));
+    say(W(std::string(append ? "appended " : "imported ") + base_name(path) + ": " + plural(got.parts.size(), "track") +
+          ", " + std::to_string(total) + " notes, " + fmt_g(std::nearbyint(got.bpm)) + " bpm, " + format_sig(got.sig) +
+          (append ? ", its tempo and time signature now the song's" : "")));
     if (got.closed_rests) say(W(plural(size_t(got.closed_rests), "short rest") + " closed"));
     if (!got.tempo_changes.empty()) {
-        sync_tracks(1);
+        sync_tracks(int(first) + 1);
         sync(0);
-        say(W(plural(got.tempo_changes.size(), "tempo change") + " on the Tempo track at the top"));
+        say(W(plural(got.tempo_changes.size(), "tempo change") +
+              (append ? " on a Tempo track above its parts" : " on the Tempo track at the top")));
     }
     bool any_pending = false, any_words = false;
     for (const auto &p : got.parts) {

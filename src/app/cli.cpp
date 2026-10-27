@@ -115,11 +115,6 @@ Reverb parse_reverb(const std::string &text) {
     return {room, wet};
 }
 
-bool is_midi(const std::string &path) {
-    std::string e = extension_lower(path);
-    return e == ".mid" || e == ".midi";
-}
-
 //: A project, a VocalWriter song or a MIDI file, the MIDI imported exactly as
 //: the window does it.
 Song open_song(const std::string &path, double close_rests, bool sing_all, bool remove_velocities) {
@@ -128,7 +123,7 @@ Song open_song(const std::string &path, double close_rests, bool sing_all, bool 
         for (const std::string &n : got.notes) say(n);
         return got.song;
     }
-    if (!is_midi(path)) return load_project(path);
+    if (!is_midi_file(path)) return load_project(path);
     std::vector<std::string> names, played;
     std::vector<MidiPart> parts = midi_parts(path);
     for (const auto &p : parts) names.push_back(p.name);
