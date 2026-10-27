@@ -2161,6 +2161,10 @@ void Studio::on_export_midi(wxCommandEvent &) {
         say(W(std::string("could not export: ") + e.what()));
         return;
     }
+    // written by now: the system's asterisk, as a WAV export ends (exported)
+#ifdef __WXMSW__
+    ::MessageBeep(MB_ICONASTERISK);
+#endif
     say(W("wrote " + base_name(path) + ": " + plural(tracks.size(), "track")));
 }
 
