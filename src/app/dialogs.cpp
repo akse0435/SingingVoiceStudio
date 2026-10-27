@@ -669,6 +669,8 @@ NoteDialog::NoteDialog(wxWindow *parent, Studio *studio, const Note *note, const
     outer->Add(buttons(this), 0, wxEXPAND | wxALL, 8);
     SetSizerAndFit(outer);
     phon_->SetFocus();
+    // selected, so what is typed replaces the phonemes, as in a field tabbed to
+    phon_->SelectAll();
 }
 
 void NoteDialog::on_insert(wxCommandEvent &) {
