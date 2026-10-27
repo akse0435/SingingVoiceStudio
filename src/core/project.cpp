@@ -1438,10 +1438,30 @@ Imported import_midi(const std::string &path, const std::vector<std::string> &na
 
 namespace {
 
+//: The vowel a note holding on to `vowel` sings when the vowel's whole sound
+//: is left to the last note: a diphthong's first part, an r-coloured vowel's
+//: plain one. The vowel itself if it is neither.
+std::string first_sound(const std::string &vowel) {
+    static const std::map<std::string, std::string> first = {
+        {"EY", "EH"}, {"AR", "AA"}, {"AW", "AA"}, {"AY", "AA"}, {"IR", "IY"},
+        {"OR", "O"},  {"OY", "O"},  {"UR", "UH"}, {"XR", "EH"},
+    };
+    auto it = first.find(vowel);
+    return it == first.end() ? vowel : it->second;
+}
+
+//: The vowel the notes after the first sing when `vowel` opens on a glide
+//: that is sung once, on the first note: YU's y, so UW is held after it.
+//: The vowel itself if it has none.
+std::string after_glide(const std::string &vowel) { return vowel == "YU" ? "UW" : vowel; }
+
 //: One syllable sung over `share` notes, split at its vowel: each note after
 //: the first starts on it, as "s t AR", "AR t". With no vowel the notes after
-//: the first rest.
-std::vector<std::vector<std::string>> split_held(const std::vector<std::string> &syl, int share) {
+//: the first rest. `plain`: every note but the last holds the vowel's first
+//: sound, as "s t AA", "AR t" (first_sound); a vowel opening on a glide is
+//: whole on the first note alone, as "f YU", "UW" (after_glide).
+std::vector<std::vector<std::string>> split_held(const std::vector<std::string> &syl, int share,
+                                                 bool plain) {
     auto vowel = std::find_if(syl.begin(), syl.end(), [](const std::string &x) { return is_nucleus(x); });
     std::vector<std::vector<std::string>> out;
     if (share <= 1 || vowel == syl.end()) {
@@ -1449,8 +1469,18 @@ std::vector<std::vector<std::string>> split_held(const std::vector<std::string> 
         out.resize(size_t(std::max(share, 1)));
         return out;
     }
-    out.emplace_back(syl.begin(), vowel + 1);
-    for (int j = 2; j < share; ++j) out.push_back({*vowel});
+    if (plain && after_glide(*vowel) != *vowel) {
+        std::string later = after_glide(*vowel);
+        out.emplace_back(syl.begin(), vowel + 1);
+        for (int j = 2; j < share; ++j) out.push_back({later});
+        out.push_back({later});
+        out.back().insert(out.back().end(), vowel + 1, syl.end());
+        return out;
+    }
+    std::string held = plain ? first_sound(*vowel) : *vowel;
+    out.emplace_back(syl.begin(), vowel);
+    out.back().push_back(held);
+    for (int j = 2; j < share; ++j) out.push_back({held});
     out.emplace_back(vowel, syl.end());
     return out;
 }
@@ -1488,9 +1518,9 @@ bool goes_on(const std::string &text) {
 //: share the syllables out as their lyrics read ("Jitter-", "bug" is two and
 //: one; "in-", "ste-", "ad" is one and two) where that adds up, and evenly
 //: where it does not, a syllable sung on more of them than one split at its
-//: vowel.
+//: vowel (split_held, `plain` as it has it).
 std::vector<std::vector<std::string>> on_notes(std::vector<std::string> phonemes,
-                                               const std::vector<std::string> &texts) {
+                                               const std::vector<std::string> &texts, bool plain) {
     std::vector<size_t> sung;              // the notes that start a syllable
     std::vector<int> held;                 // how many notes hold each one's vowel
     std::string letters;
@@ -1554,7 +1584,7 @@ std::vector<std::vector<std::string>> on_notes(std::vector<std::string> phonemes
         for (int k = 0; k < n; ++k) {
             int share = int(starts.size()) == n ? (k + 1 < n ? starts[size_t(k + 1)] : m) - starts[size_t(k)]
                                                 : m / n + (k < m % n ? 1 : 0);
-            auto part = split_held(syls[size_t(k)], share);
+            auto part = split_held(syls[size_t(k)], share, plain);
             groups.insert(groups.end(), part.begin(), part.end());
         }
     } else {
@@ -1581,7 +1611,7 @@ std::vector<std::vector<std::string>> on_notes(std::vector<std::string> phonemes
     groups.resize(size_t(m));
     std::vector<std::vector<std::string>> out;
     for (int k = 0; k < m; ++k) {
-        auto part = split_held(groups[size_t(k)], 1 + held[size_t(k)]);
+        auto part = split_held(groups[size_t(k)], 1 + held[size_t(k)], plain);
         out.insert(out.end(), part.begin(), part.end());
     }
     return out;
@@ -1590,7 +1620,7 @@ std::vector<std::vector<std::string>> on_notes(std::vector<std::string> phonemes
 }  // namespace
 
 int pronounce(std::vector<ImportedPart> &parts,
-              const std::map<std::string, std::vector<std::string>> &found) {
+              const std::map<std::string, std::vector<std::string>> &found, bool plain_held) {
     int got = 0;
     for (ImportedPart &part : parts) {
         for (const auto &pw : part.pending) {
@@ -1604,7 +1634,7 @@ int pronounce(std::vector<ImportedPart> &parts,
             }
             std::vector<std::string> texts;
             for (int i : indices) texts.push_back(i >= 0 && i < int(part.notes.size()) ? part.notes[i].word : "");
-            auto groups = on_notes(it->second, texts);
+            auto groups = on_notes(it->second, texts, plain_held);
             while (groups.size() < indices.size()) groups.push_back({});
             for (size_t k = 0; k < indices.size(); ++k) {
                 int i = indices[k];

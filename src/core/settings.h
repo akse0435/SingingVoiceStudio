@@ -30,6 +30,9 @@ struct Settings {
     //: sing VocalWriter's voices through VocalWriter 2.0's own play path
     //: rather than phrase by phrase (set_vocalwriter_own_path)
     bool vocalwriter_own_path = false;
+    //: a vowel an imported MIDI file holds over several notes sings its
+    //: first sound until the last of them (pronounce, `plain_held`)
+    bool plain_held_vowels = false;
 };
 
 Settings load_settings();

@@ -361,8 +361,10 @@ int close_short_rests(std::vector<Note> &notes, double longest);
 
 //: Put looked-up pronunciations on the notes an import left blank. Returns
 //: how many words were pronounced. A word the dictionary does not know leaves
-//: its notes singing kDefaultPhoneme.
+//: its notes singing kDefaultPhoneme. `plain_held`: a vowel held over several
+//: notes sings its first sound until the last of them, as "day" over three
+//: is "d EH", "EH", "EY" rather than "d EY", "EY", "EY".
 int pronounce(std::vector<ImportedPart> &parts,
-              const std::map<std::string, std::vector<std::string>> &found);
+              const std::map<std::string, std::vector<std::string>> &found, bool plain_held = false);
 
 }  // namespace svs

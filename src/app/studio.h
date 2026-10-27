@@ -179,6 +179,7 @@ private:
     double rests_to_close() const;
     void on_remove_velocities(wxCommandEvent &);
     void on_own_path(wxCommandEvent &);
+    void on_plain_held(wxCommandEvent &);
     void preview_note(int i);
     void preview_now(int i);
 
@@ -268,6 +269,7 @@ private:
     wxMenuItem *mi_auto_preview_ = nullptr;
     wxMenuItem *mi_remove_velocities_ = nullptr;
     wxMenuItem *mi_own_path_ = nullptr;
+    wxMenuItem *mi_plain_held_ = nullptr;
     wxMenuItem *mi_undo_ = nullptr;
     wxMenuItem *mi_redo_ = nullptr;
     bool relabel_pending_ = false;

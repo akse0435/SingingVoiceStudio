@@ -117,7 +117,8 @@ Reverb parse_reverb(const std::string &text) {
 
 //: A project, a VocalWriter song or a MIDI file, the MIDI imported exactly as
 //: the window does it.
-Song open_song(const std::string &path, double close_rests, bool sing_all, bool remove_velocities) {
+Song open_song(const std::string &path, double close_rests, bool sing_all, bool remove_velocities,
+               bool plain_held) {
     if (is_vocalwriter_song(path)) {
         VwSongImport got = import_vocalwriter_song(path, vocalwriter_program_voices());
         for (const std::string &n : got.notes) say(n);
@@ -146,7 +147,7 @@ Song open_song(const std::string &path, double close_rests, bool sing_all, bool 
         say("looking up " + std::to_string(words.size()) + " word" + s_if(words.size()));
         std::map<std::string, std::vector<std::string>> found;
         for (const auto &w : words) found[w] = Lexicon::get().phonemes(w, true);
-        int done = pronounce(got.parts, found);
+        int done = pronounce(got.parts, found, plain_held);
         size_t shortfall = pending - size_t(done);
         if (shortfall)
             say(std::to_string(shortfall) + " word" + s_if(shortfall) + " not in the dictionary; those notes sing " +
@@ -360,7 +361,8 @@ int run_cli(const CliArgs &args) {
 
     Song song;
     try {
-        song = open_song(args.file, args.close_rests, args.sing_all, args.remove_velocities);
+        song = open_song(args.file, args.close_rests, args.sing_all, args.remove_velocities,
+                         settings.plain_held_vowels);
     } catch (const std::exception &e) {
         return fail("cannot open " + args.file + ": " + e.what());
     }

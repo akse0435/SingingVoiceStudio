@@ -37,7 +37,7 @@ enum {
     ID_BAR_REST, ID_GOTO_BAR, ID_METRONOME, ID_PLAY_PAUSE, ID_PANES,
     ID_TRACK_NEW, ID_TRACK_BACKING, ID_TRACK_EDIT, ID_TRACK_REMOVE, ID_TRACK_MUTE, ID_TRACK_SOLO,
     ID_TRACK_UP, ID_TRACK_DOWN, ID_PREVIEW_TIMER, ID_RECOVERY_TIMER, ID_ADD_CONTROLLER, ID_CLOSE_RESTS,
-    ID_REMOVE_VELOCITIES, ID_APPEND, ID_OWN_PATH,
+    ID_REMOVE_VELOCITIES, ID_APPEND, ID_OWN_PATH, ID_PLAIN_HELD,
 };
 
 //: A beat is a quarter note, so a sixteenth is a quarter of a beat: the step
@@ -332,6 +332,11 @@ void Studio::build_menu() {
         prefs->AppendCheckItem(ID_REMOVE_VELOCITIES, K("Remove note &velocities from sung tracks when importing MIDI\tCtrl+Shift+E"),
                                "Give the sung parts of a MIDI file the track's velocity alone");
     mi_remove_velocities_->Check(settings_.remove_note_velocities);
+    mi_plain_held_ = prefs->AppendCheckItem(
+        ID_PLAIN_HELD, K("Sing a vowel &held over several notes on its first sound when importing MIDI\tCtrl+Shift+D"),
+        "The vowel's whole sound on the last note alone: \"day\" over three notes is d EH, EH, EY rather than d EY, EY, "
+        "EY; YU on the first alone, \"few\" as f YU, UW, UW");
+    mi_plain_held_->Check(settings_.plain_held_vowels);
     mi_own_path_ = prefs->AppendCheckItem(ID_OWN_PATH, K("Sing VocalWriter's voices through its own &sequencer\tCtrl+Shift+O"),
                                           "Sample for sample as VocalWriter 2.0 sang them; otherwise phrase by phrase, "
                                           "as the other engines sing");
@@ -392,6 +397,7 @@ void Studio::build_menu() {
     on(ID_CLOSE_RESTS, &Studio::on_close_rests);
     on(ID_REMOVE_VELOCITIES, &Studio::on_remove_velocities);
     on(ID_OWN_PATH, &Studio::on_own_path);
+    on(ID_PLAIN_HELD, &Studio::on_plain_held);
     Bind(wxEVT_MENU, [this](wxCommandEvent &) { Close(); }, wxID_EXIT);
 }
 
@@ -493,6 +499,17 @@ void Studio::on_remove_velocities(wxCommandEvent &) {
     bool kept = save_settings(settings_);
     say(wxString(on ? "importing MIDI removes the note velocities from the sung tracks"
                     : "importing MIDI keeps every note's velocity") +
+        (kept ? "" : ", for this sitting only: the settings file could not be written"));
+}
+
+//: A setting of the program too: whether a vowel a MIDI import holds over
+//: several notes sings its first sound until the last of them.
+void Studio::on_plain_held(wxCommandEvent &) {
+    bool on = mi_plain_held_->IsChecked();
+    settings_.plain_held_vowels = on;
+    bool kept = save_settings(settings_);
+    say(wxString(on ? "importing MIDI sings a vowel held over several notes on its first sound until the last of them"
+                    : "importing MIDI sings a vowel held over several notes whole on every one of them") +
         (kept ? "" : ", for this sitting only: the settings file could not be written"));
 }
 
@@ -613,6 +630,8 @@ void Studio::on_keys(wxCommandEvent &) {
         "place of the song's",
         "Ctrl+Shift+I  whether importing MIDI closes the short rests between notes",
         "Ctrl+Shift+E  whether importing MIDI removes the note velocities from the sung tracks",
+        "Ctrl+Shift+D  whether importing MIDI sings a vowel held over several notes on its first sound until "
+        "the last of them: day over three notes as d EH, EH, EY",
         "Ctrl+Shift+O  whether VocalWriter's voices are sung through its own sequencer, sample for sample as "
         "VocalWriter 2.0 sang them, or phrase by phrase as the other engines sing",
         "Ctrl+Shift+S  export the whole song as one WAV",
@@ -2338,7 +2357,7 @@ void Studio::import_vocalwriter(const std::string &path) {
 void Studio::imported_words(std::vector<ImportedPart> parts,
                             const std::map<std::string, std::vector<std::string>> &found, size_t pending) {
     undoable("pronounce imported words", [&] {
-        int got = pronounce(parts, found);
+        int got = pronounce(parts, found, settings_.plain_held_vowels);
         // the parts are the last tracks: a Tempo track may come first
         size_t first = song_.tracks.size() > parts.size() ? song_.tracks.size() - parts.size() : 0;
         for (size_t ti = 0; first + ti < song_.tracks.size() && ti < parts.size(); ++ti)

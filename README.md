@@ -146,6 +146,16 @@ and the note before it held on, its bend and wheel stretched with it, so a
 line the file has detached is sung legato. A VocalWriter song keeps its
 rests: it was made for VocalWriter already.
 
+**A vowel held over several notes**, as a MIDI file's lyrics leave a word
+sung on more than one note, can be sung on its first sound until the last of
+them (Settings > Sing a vowel held over several notes on its first sound when
+importing MIDI, Ctrl+Shift+D, off until it is turned on): "day" over three
+notes is d EH, EH, EY rather than d EY, EY, EY, and in the same way AY, AW
+and AR are held on AA, OY and OR on O, IR on IY, UR on UH and XR on EH. YU
+goes the other way, its y sung once: "few" over three notes is f YU, UW, UW
+rather than f YU, YU, YU. The command line does as the window was last set
+to.
+
 **Velocities** come in on every note of a MIDI file, sung or played, as
 VocalWriter took them in: the one most of a track's notes have is the
 track's, and a note keeps its own where it differs. Settings > Remove note
@@ -355,6 +365,7 @@ Ctrl and Option for Alt, and Option+H to hear a note.
 | Ctrl+Shift+M | append a MIDI file under the song's tracks |
 | Ctrl+Shift+I | whether importing MIDI closes the short rests between notes |
 | Ctrl+Shift+E | whether importing MIDI removes the note velocities from the sung tracks |
+| Ctrl+Shift+D | whether importing MIDI sings a vowel held over several notes on its first sound |
 | Ctrl+Shift+O | whether VocalWriter's voices are sung through its own sequencer |
 | Ctrl+Shift+S / Ctrl+Shift+T | export one WAV / one WAV per track |
 
