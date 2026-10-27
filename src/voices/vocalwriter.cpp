@@ -773,7 +773,11 @@ private:
         VoiceStyle v = clean_voice(phrase.style);
         for (size_t i = 0; i < count; ++i) {
             int value = v.*(c[i].field);
-            if (value != c[i].def) vw_ed_control(e, c[i].call, value);
+            if (value == c[i].def) continue;
+            // the detune as the sequencer takes it, moved up three, so it is
+            // the same shade either way
+            if (c[i].field == &VoiceStyle::detune) value *= 8;
+            vw_ed_control(e, c[i].call, value);
         }
         // The radiation shelf at the engine's own setting. VocalWriter Studio
         // writes it back through the same arithmetic, so this does too.

@@ -84,7 +84,9 @@ velocity too -- to another engine a velocity would only be loudness, which a
 track's volume is -- so they are greyed for a note another engine sings. The
 bend range and the rest's pitch are its sequencer's: sung phrase by phrase,
 a bend is sung in semitones whatever the range, and the consonants are placed
-as for every other engine. The
+as for every other engine. A value typed in outside its range is said rather
+than quietly moved into it: the chorus goes from -100 to 100, the bend range
+from 0 to 12, and a bend from -24 to 24 semitones. The
 volume is the exception: where another engine sings, the mix follows it. A
 track's velocity, which its notes follow unless they have their own, is 114
 to begin with, VocalWriter's: its notes window put a new note in at 90%.

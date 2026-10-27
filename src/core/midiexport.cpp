@@ -200,7 +200,7 @@ std::vector<unsigned char> one_track(const Track &t, int ch, const std::map<int,
                 long tk = a + std::lround(pt.first * double(b - a));
                 if (c.first == "volume") cc(tk, 7, pt.second);
                 else if (c.first == "sustain") cc(tk, 64, pt.second);
-                else if (c.first == "bend_range") ranges.push_back({tk, std::max(1, std::min(24, int(std::lround(pt.second))))});
+                else if (c.first == "bend_range") ranges.push_back({tk, std::max(0, std::min(24, int(std::lround(pt.second))))});
                 else control(tk, c.first, pt.second);
             }
         if (n.controller) continue;
@@ -260,7 +260,8 @@ std::vector<unsigned char> one_track(const Track &t, int ch, const std::map<int,
         int range = 2;
         for (const auto &r : ranges)
             if (r.first <= tick) range = r.second;
-        long v = std::lround(semitones / range * 8192) + 8192;
+        // a range of 0 bends nothing, so the wheel stays in the middle
+        long v = range > 0 ? std::lround(semitones / range * 8192) + 8192 : 8192;
         v = std::max(0L, std::min(16383L, v));
         return std::vector<unsigned char>{(unsigned char)(0xE0 | ch), (unsigned char)(v & 127), (unsigned char)(v >> 7)};
     });

@@ -43,9 +43,9 @@ const NoteControl kNoteControls[] = {
     {"vibrato", "Vibrato depth", 0, 127, "0 to 127"},
     {"vibrato_rate", "Vibrato rate", 0, 127, "0 to 127"},
     {"portamento", "Portamento", 0, 127, "0 to 127, the glide between notes"},
-    {"chorus", "Chorus", -8192, 8191, "-8192 to 8191"},
+    {"chorus", "Chorus", -100, 100, "-100 to 100"},
     {"detune", "Detune", -8192, 8191, "-8192 to 8191"},
-    {"bend_range", "Bend range", 1, 12, "semitones a full bend reaches; VocalWriter starts at 2"},
+    {"bend_range", "Bend range", 0, 12, "0 to 12, semitones a full bend reaches; VocalWriter starts at 2"},
     {"lead_pitch", "Lead-in pitch", 0, 127,
      "on a rest, the MIDI pitch the next note's first consonants are sung at, when not the next note's"},
     {"sustain", "Sustain pedal", 0, 127,
@@ -1218,7 +1218,7 @@ ImportedPart from_midi_played(const MidiFile &midi, const MidiTrack &track, cons
     // the volume, CC 7 by CC 11
     int volume = midi_volume(track, beat, changes);
     for (const auto &v : track.sustains) changes.push_back({beat(v.first), "sustain", v.second <= 63 ? 0.0 : 127.0});
-    for (const auto &r : track.bend_range) changes.push_back({beat(r.first), "bend_range", double(std::max(1, std::min(12, r.second)))});
+    for (const auto &r : track.bend_range) changes.push_back({beat(r.first), "bend_range", double(std::max(0, std::min(12, r.second)))});
     for (const auto &b : bend_curve(track)) changes.push_back({beat(b.first), "", round_to(b.second, 4)});
     vocalwriter_controls(track, beat, changes);
     int program = std::max(0, program_at_start(track));

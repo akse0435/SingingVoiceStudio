@@ -100,6 +100,7 @@ public:
     std::pair<double, double> result() const;
 
 private:
+    void on_ok(wxCommandEvent &evt);
     const CurveKind &kind_;
     wxTextCtrl *at_, *value_;
 };
@@ -156,6 +157,7 @@ public:
     std::vector<int> pitches() const;
 
 private:
+    void on_ok(wxCommandEvent &evt);
     void on_insert(wxCommandEvent &);
     void on_preview(wxCommandEvent &);
     void on_points(const CurveKind &kind);
@@ -212,6 +214,7 @@ public:
     Note result() const;
 
 private:
+    void on_ok(wxCommandEvent &evt);
     void fill_voices(int select);
     void show_kind();
     Note note_;

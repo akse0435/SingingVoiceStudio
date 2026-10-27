@@ -274,7 +274,7 @@ Track instrument_track(const std::vector<Event> &events, bool drums, Beat beat) 
         } else if (e.status == kSustain) {
             changes.push_back({b, "sustain", double(e.vol)});
         } else if (e.status == kBendRange) {
-            range = std::max(1, std::min(12, e.vol));
+            range = std::max(0, std::min(12, e.vol));
             changes.push_back({b, "bend_range", double(range)});
         } else if (e.status == kPitchBend) {
             changes.push_back({b, "", ((e.vol << 7) + e.key - 8192) / 8192.0 * range});

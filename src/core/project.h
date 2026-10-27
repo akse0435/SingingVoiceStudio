@@ -52,8 +52,8 @@ using Bend = std::vector<std::pair<double, double>>;
 using Mod = Bend;
 
 //: One of VocalWriter's controls a note may carry: its name in the file, what
-//: the window calls it, and its range -- 0-127 for most, chorus and detune
-//: 14-bit about zero.
+//: the window calls it, and its range -- 0-127 for most, detune 14-bit about
+//: zero, chorus as far either way as is any use.
 struct NoteControl {
     const char *key, *label;
     int lo, hi;
@@ -62,6 +62,8 @@ struct NoteControl {
 extern const NoteControl kNoteControls[];
 extern const size_t kNoteControlCount;
 const NoteControl *note_control(const std::string &key);
+//: How far a bend typed in may go either way, in semitones: two octaves.
+const double kMaxBend = 24.0;
 
 struct Note {
     std::vector<std::string> phonemes;

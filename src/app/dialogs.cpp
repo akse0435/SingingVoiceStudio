@@ -40,6 +40,25 @@ bool read_number(const wxString &raw, double *out) {
 
 wxSizer *buttons(wxDialog *d) { return d->CreateStdDialogButtonSizer(wxOK | wxCANCEL); }
 
+//: Whether `field` holds a number from `lo` to `hi`, or is blank where
+//: `blank` allows it. If not, it is said, and the field is given back to be
+//: put right rather than the value quietly moved into range.
+bool check_range(wxDialog *d, wxTextCtrl *field, const wxString &name, double lo, double hi, bool blank) {
+    wxString t = field->GetValue();
+    t.Trim(true).Trim(false);
+    if (t.empty() && blank) return true;
+    double v = 0;
+    bool number = t.ToCDouble(&v);
+    if (number && v >= lo && v <= hi) return true;
+    wxString range = name + " goes from " + W(fmt_g(lo)) + " to " + W(fmt_g(hi));
+    wxString said = !number ? range + "; type a number in that range."
+                            : range + ", so " + t + " is too " + (v < lo ? "low." : "high.");
+    wxMessageBox(said, d->GetTitle(), wxOK | wxICON_ERROR, d);
+    field->SetFocus();
+    field->SelectAll();
+    return false;
+}
+
 }  // namespace
 
 // -- PhonemePicker --------------------------------------------------------------
@@ -294,8 +313,8 @@ void AddWordDialog::on_preview(wxCommandEvent &) {
 //: What differs between editing a bend and editing the mod wheel: the words,
 //: the range, and how a value is written.
 const CurveKind kBendCurve = {"Pitch bend", "Bend point", "Bend points", "Semitones",
-                              "above or below the written pitch", -1e9, 1e9, true, "bend",
-                              " semitones", &Note::bend};
+                              "-24 to 24, above or below the written pitch", -kMaxBend, kMaxBend, true,
+                              "bend", " semitones", &Note::bend};
 const CurveKind kModCurve = {"Mod wheel", "Mod point", "Mod wheel points", "Mod wheel",
                              "0 is at rest, 127 is the deepest vibrato", 0, 127, false, "mod wheel",
                              "", &Note::mod};
@@ -368,8 +387,15 @@ PointDialog::PointDialog(wxWindow *parent, const CurveKind &kind, double at, dou
                             wxSize(90, -1));
     labelled(this, outer, kind.value_label, value_, 0, kind.value_hint);
     outer->Add(buttons(this), 0, wxEXPAND | wxALL, 8);
+    Bind(wxEVT_BUTTON, &PointDialog::on_ok, this, wxID_OK);
     SetSizerAndFit(outer);
     at_->SetFocus();
+}
+
+void PointDialog::on_ok(wxCommandEvent &evt) {
+    if (check_range(this, at_, "Position", 0, 100, false) &&
+        check_range(this, value_, kind_.value_label, kind_.lo, kind_.hi, false))
+        evt.Skip();
 }
 
 std::pair<double, double> PointDialog::result() const {
@@ -643,7 +669,7 @@ NoteDialog::NoteDialog(wxWindow *parent, Studio *studio, const Note *note, const
     enable_labelled(hold_, played_);
     auto ends = bend_ends(note_.bend);
     bend_start_ = new wxTextCtrl(this, wxID_ANY, W(bend_text(ends.first)), wxDefaultPosition, wxSize(90, -1));
-    labelled(this, outer, "Bend at start", bend_start_, 0, "semitones, blank for none");
+    labelled(this, outer, "Bend at start", bend_start_, 0, "semitones, -24 to 24, blank for none");
     bend_end_ = new wxTextCtrl(this, wxID_ANY, W(bend_text(ends.second)), wxDefaultPosition, wxSize(90, -1));
     labelled(this, outer, "Bend at end", bend_end_, 0, "semitones, blank to hold the starting value");
     wxButton *points = new wxButton(this, wxID_ANY, "Bend p&oints...");
@@ -674,10 +700,20 @@ NoteDialog::NoteDialog(wxWindow *parent, Studio *studio, const Note *note, const
     controls->Enable(vocalwriter);
     outer->Add(controls, 0, wxALL, 6);
     outer->Add(buttons(this), 0, wxEXPAND | wxALL, 8);
+    Bind(wxEVT_BUTTON, &NoteDialog::on_ok, this, wxID_OK);
     SetSizerAndFit(outer);
     phon_->SetFocus();
     // selected, so what is typed replaces the phonemes, as in a field tabbed to
     phon_->SelectAll();
+}
+
+void NoteDialog::on_ok(wxCommandEvent &evt) {
+    if (check_range(this, bend_start_, "Bend at start", -kMaxBend, kMaxBend, true) &&
+        check_range(this, bend_end_, "Bend at end", -kMaxBend, kMaxBend, true) &&
+        check_range(this, mod_start_, "Mod at start", 0, 127, true) &&
+        check_range(this, mod_end_, "Mod at end", 0, 127, true) &&
+        (!velocity_->IsEnabled() || check_range(this, velocity_, "Velocity", 1, 127, true)))
+        evt.Skip();
 }
 
 void NoteDialog::on_insert(wxCommandEvent &) {
@@ -1029,9 +1065,23 @@ ControllerDialog::ControllerDialog(wxWindow *parent, Studio *studio, const Note 
     kind_->SetSelection(kind);
     kind_->Bind(wxEVT_CHOICE, [this](wxCommandEvent &) { show_kind(); });
     outer_->Add(buttons(this), 0, wxEXPAND | wxALL, 8);
+    Bind(wxEVT_BUTTON, &ControllerDialog::on_ok, this, wxID_OK);
     SetSizer(outer_);
     show_kind();
     kind_->SetFocus();
+}
+
+//: Only the field of the kind chosen is checked: the others are not there.
+void ControllerDialog::on_ok(wxCommandEvent &evt) {
+    int k = kind_->GetSelection();
+    bool fine = true;
+    if (k == 1) fine = check_range(this, tempo_, "Tempo", kMinBpm, kMaxBpm, true);
+    else if (k == 2) fine = check_range(this, pan_, "Pan", -100, 100, true);
+    else if (k >= 3 && size_t(k - 3) < controls_.size()) {
+        const auto &c = controls_[size_t(k - 3)];
+        fine = check_range(this, c.second, c.first->label, c.first->lo, c.first->hi, true);
+    }
+    if (fine) evt.Skip();
 }
 
 //: Only the fields of the kind chosen are there, and the window fits them.
