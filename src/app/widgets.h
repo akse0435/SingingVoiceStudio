@@ -136,6 +136,10 @@ wxWindow *labelled(wxWindow *parent, wxSizer *sizer, const wxString &label, wxWi
 //: Grey a captioned control and its caption together: a screen reader reads
 //: the caption of a greyed control as text of the window's own.
 void enable_labelled(wxWindow *ctrl, bool on);
+//: A field's text selected whenever the keyboard is put on it, so that what
+//: is typed replaces it; not on a click, which places the caret. A spin
+//: control given a caption (labelled) is one already.
+void select_on_focus(wxWindow *field);
 //: A caption above a control that fills the window, such as a list.
 ReportList *caption(wxWindow *parent, wxSizer *sizer, const wxString &label, ReportList *ctrl,
                     int proportion = 1);

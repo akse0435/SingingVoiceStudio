@@ -1210,6 +1210,9 @@ void Studio::on_goto_bar(wxCommandEvent &) {
     }
     int last_bar = bar_of(int(notes().size()) - 1);
     wxTextEntryDialog dlg(this, W("Bar number, 1 to " + std::to_string(last_bar)), "Go to bar", "1");
+    // the 1 selected, so a bar typed replaces it
+    for (wxWindow *w : dlg.GetChildren())
+        if (wxTextCtrl *t = wxDynamicCast(w, wxTextCtrl)) dlg.CallAfter([t] { t->SelectAll(); });
     bool ok = dlg.ShowModal() == wxID_OK;
     wxString text = dlg.GetValue();
     if (!ok) return;

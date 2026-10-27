@@ -413,6 +413,8 @@ PointDialog::PointDialog(wxWindow *parent, const CurveKind &kind, double at, dou
     outer->Add(buttons(this), 0, wxEXPAND | wxALL, 8);
     Bind(wxEVT_BUTTON, &PointDialog::on_ok, this, wxID_OK);
     SetSizerAndFit(outer);
+    select_on_focus(at_);
+    select_on_focus(value_);
     at_->SetFocus();
 }
 
@@ -1498,10 +1500,12 @@ void BackingDialog::on_ok(wxCommandEvent &evt) {
                                     : W("There is no file " + file() + "."),
                      "Backing track", wxOK | wxICON_ERROR, this);
         path_->SetFocus();
+        path_->SelectAll();
     } else if (!read_number(start_->GetValue(), &v)) {
         wxMessageBox("Starts at is a number of seconds, such as 0, 2.5 or -1.", "Backing track",
                      wxOK | wxICON_ERROR, this);
         start_->SetFocus();
+        start_->SelectAll();
     } else {
         evt.Skip();
     }

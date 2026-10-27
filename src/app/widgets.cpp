@@ -326,11 +326,26 @@ wxWindow *labelled(wxWindow *parent, wxSizer *sizer, const wxString &label, wxWi
     ctrl->SetName(label);
     set_accessible(ctrl, label, hint);
     name_spin_buddy(ctrl, text);
+    if (wxDynamicCast(ctrl, wxSpinCtrl)) select_on_focus(ctrl);
     wxBoxSizer *box = new wxBoxSizer(wxHORIZONTAL);
     box->Add(text, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
     box->Add(ctrl, proportion, wxALIGN_CENTER_VERTICAL);
     sizer->Add(box, 0, wxEXPAND | wxALL, 4);
     return ctrl;
+}
+
+// Tabbing into a text box selects its text already. A spin control's edit
+// box, and a box the program puts the focus in, get only the caret at the
+// start, so what was typed went in front of what was there.
+void select_on_focus(wxWindow *field) {
+    field->Bind(wxEVT_SET_FOCUS, [field](wxFocusEvent &evt) {
+        evt.Skip();
+        if (wxGetMouseState().LeftIsDown()) return;
+        field->CallAfter([field] {
+            if (wxSpinCtrl *s = wxDynamicCast(field, wxSpinCtrl)) s->SetSelection(-1, -1);
+            else if (wxTextCtrl *t = wxDynamicCast(field, wxTextCtrl)) t->SelectAll();
+        });
+    });
 }
 
 void enable_labelled(wxWindow *ctrl, bool on) {
