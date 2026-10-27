@@ -1727,6 +1727,33 @@ std::vector<std::vector<std::string>> on_notes(std::vector<std::string> phonemes
 
 }  // namespace
 
+namespace {
+
+//: The first sound sung after note `after`, rests and controllers passed
+//: over: the note's own, or the word still to be looked up that starts
+//: there. Empty at the end.
+std::string sound_after(const ImportedPart &part, int after,
+                        const std::map<std::string, std::vector<std::string>> &found) {
+    int i = after + 1;
+    // one still to be looked up has no phonemes, which is_rest takes for a rest
+    auto passed = [&](const Note &n) { return n.controller || (!n.phonemes.empty() && n.is_rest()); };
+    while (i < int(part.notes.size()) && passed(part.notes[size_t(i)])) ++i;
+    if (i >= int(part.notes.size())) return "";
+    const Note &n = part.notes[size_t(i)];
+    std::vector<std::string> sounds = n.phonemes;
+    if (sounds.empty())
+        for (const auto &pw : part.pending)
+            if (!pw.second.empty() && pw.second.front() == i) {
+                auto it = found.find(pw.first);
+                if (it != found.end()) sounds = it->second;
+            }
+    for (const std::string &s : sounds)
+        if (s != kSyllableBreak) return s;
+    return "";
+}
+
+}  // namespace
+
 int pronounce(std::vector<ImportedPart> &parts,
               const std::map<std::string, std::vector<std::string>> &found, bool plain_held) {
     int got = 0;
@@ -1734,6 +1761,14 @@ int pronounce(std::vector<ImportedPart> &parts,
         for (const auto &pw : part.pending) {
             auto it = found.find(pw.first);
             const std::vector<int> &indices = pw.second;
+            // "the" before a vowel is "thee"; YU starts with a y
+            if (it != found.end() && lower(pw.first) == "the" && !indices.empty()) {
+                std::string next = sound_after(part, indices.back(), found);
+                if (is_vowel(next) && next != "YU") {
+                    static const std::map<std::string, std::vector<std::string>> thee = {{"the", {"DH", "IY"}}};
+                    it = thee.find("the");
+                }
+            }
             if (it == found.end() || it->second.empty()) {
                 for (int i : indices)
                     if (i >= 0 && i < int(part.notes.size()) && part.notes[i].phonemes.empty())

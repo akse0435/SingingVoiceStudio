@@ -126,6 +126,33 @@ Lexicon::Lexicon() {
     }
 }
 
+namespace {
+
+//: A letter on its own, said as its name: "d" is "d IY". Not "a", a word;
+//: the dictionary knows few of the others.
+std::vector<std::string> letter_name(char c, bool marked) {
+    static const char *const names[26] = {
+        nullptr,  "b IY", "s IY",  "d IY", "IY",     "EH f", "JH IY",          "EY CH", "AY",
+        "JH EY",  "k EY", "EH LX", "EH m", "EH n",   "OW",   "p IY",           "k YU",  "AR",
+        "EH s",   "t IY", "YU",    "v IY", "d UX . b EL . YU", "EH k s", "w AY", "z IY"};
+    const char *name = names[std::tolower((unsigned char)c) - 'a'];
+    std::vector<std::string> out;
+    if (!name) return out;
+    std::string sym;
+    for (const char *p = name;; ++p) {
+        if (*p && *p != ' ') {
+            sym.push_back(*p);
+            continue;
+        }
+        if (!sym.empty() && (marked || sym != kSyllableBreak)) out.push_back(sym);
+        sym.clear();
+        if (!*p) break;
+    }
+    return out;
+}
+
+}  // namespace
+
 std::vector<std::string> Lexicon::phonemes(const std::string &word, bool marked) {
     std::vector<std::string> pieces(1);
     for (unsigned char c : word) {
@@ -135,6 +162,10 @@ std::vector<std::string> Lexicon::phonemes(const std::string &word, bool marked)
     if (pieces.back().empty()) pieces.pop_back();
     std::string whole;
     for (const std::string &p : pieces) whole += p;
+    if (whole.size() == 1 && std::isalpha((unsigned char)whole[0])) {
+        std::vector<std::string> name = letter_name(whole[0], marked);
+        if (!name.empty()) return name;
+    }
     if (whole.empty() || !ed_) return {};
     std::lock_guard<std::mutex> lock(mu_);
     bool known = false;
