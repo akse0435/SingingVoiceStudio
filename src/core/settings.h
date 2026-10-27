@@ -24,6 +24,9 @@ struct Settings {
     //: those up to `close_rests_beats` long
     bool close_rests = false;
     double close_rests_beats = 0.125;
+    //: remove the notes' own velocities from the sung tracks of an imported
+    //: MIDI file, so they take the track's
+    bool remove_note_velocities = false;
 };
 
 Settings load_settings();

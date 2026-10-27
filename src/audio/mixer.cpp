@@ -108,6 +108,59 @@ std::pair<double, double> pan_gains(double pan) {
     return {std::sqrt(2.0) * std::cos(theta), std::sqrt(2.0) * std::sin(theta)};
 }
 
+//: whether a part is heard anywhere but in the middle
+bool panned(const PartRequest &t) {
+    if (std::fabs(t.pan) > 1e-6) return true;
+    for (const auto &p : t.pans)
+        if (std::fabs(p.second) > 1e-6) return true;
+    return false;
+}
+
+//: A part's pan and gain from a frame on
+struct MixStep {
+    size_t frame;
+    double pan, gain;
+};
+
+//: The part's pan from each frame on, its own and then each controller's,
+//: and the volume control as a gain wherever its engine does not follow it
+//: itself; counted from `start` (beats).
+std::vector<MixStep> mix_steps(const PartRequest &t, const Clock &clock, double start) {
+    struct Event {
+        double beat;
+        int kind;      // 0 pan, 1 volume, 2 voice
+        double value;
+    };
+    std::vector<Event> ev;
+    for (const auto &p : t.pans) ev.push_back({p.first, 0, p.second});
+    for (const ControlAt &c : t.controls)
+        if (c.name == "volume") ev.push_back({c.beat, 1, c.value});
+    double at = 0;
+    for (const auto &n : t.notes) {
+        auto it = n.controls.find("volume");
+        if (it != n.controls.end())
+            for (const auto &p : it->second) ev.push_back({at + p.first * n.beats, 1, p.second});
+        at += n.beats;
+    }
+    for (const auto &v : t.voices) ev.push_back({v.first, 2, double(v.second)});
+    std::stable_sort(ev.begin(), ev.end(), [](const Event &a, const Event &b) { return a.beat < b.beat; });
+    double pan = t.pan, volume = 127;
+    int voice = t.voice_id;
+    auto gain = [&] { return sings_volume(voice) ? 1.0 : volume / 127.0; };
+    std::vector<MixStep> out{{0, pan, gain()}};
+    double from = clock.seconds(start);
+    for (const Event &e : ev) {
+        if (e.kind == 0) pan = e.value;
+        else if (e.kind == 1) volume = e.value;
+        else voice = int(e.value);
+        long long f = std::llround((clock.seconds(e.beat) - from) * kSampleRate);
+        if (f <= 0) out.front() = {0, pan, gain()};
+        else if (size_t(f) == out.back().frame) out.back() = {size_t(f), pan, gain()};
+        else out.push_back({size_t(f), pan, gain()});
+    }
+    return out;
+}
+
 Reverb clean_reverb(const Reverb &r) {
     return {std::max(0, std::min(100, r.first)), std::max(0, std::min(100, r.second))};
 }
@@ -249,6 +302,11 @@ std::string request_key(const RenderRequest &r) {
             num(c.beat);
             num(c.value);
         }
+        for (const auto &p : t.pans) {
+            k += "P";
+            num(p.first);
+            num(p.second);
+        }
         for (const auto &n : t.notes) {
             k += "N";
             num(n.pitch);
@@ -374,12 +432,14 @@ RenderRequest make_request(const Song &song, const std::vector<const Track *> &p
         // every change is kept, where it stands
         p.voice_id = first_voice(*t, program_map);
         p.voices = voice_changes(*t);
-        // and the controls the controllers set, where they stand
+        // and the controls and pans the controllers set, where they stand
         double at = 0;
         for (const Note &n : t->notes) {
-            if (n.controller)
+            if (n.controller) {
                 for (const auto &c : n.controls)
                     if (!c.second.empty()) p.controls.push_back({at, c.first, c.second.front().second});
+                if (n.pan) p.pans.push_back({at, *n.pan / 100.0});
+            }
             at += n.beats;
         }
         p.volume = t->volume / 100.0;
@@ -911,7 +971,7 @@ Mixed Mixer::mix_locked(const RenderRequest &req, bool whole) {
     size_t n = 0;                                     // frames
     for (size_t k = 0; k < ys.size(); ++k) n = std::max(n, ys[k].size() / size_t(chans[k]));
     bool stereo = false;
-    for (const PartRequest &t : req.tracks) stereo = stereo || std::fabs(t.pan) > 1e-6;
+    for (const PartRequest &t : req.tracks) stereo = stereo || panned(t);
     for (const auto &g : groups) stereo = stereo || g.first.second > 0;
     for (int c : chans) stereo = stereo || c == 2;
 
@@ -929,27 +989,35 @@ Mixed Mixer::mix_locked(const RenderRequest &req, bool whole) {
             Mix m{g.first, std::vector<float>(n * 2, 0.0f), std::vector<float>(n * 2, 0.0f)};
             for (size_t k : g.second) {
                 const auto &y = ys[k];
-                if (chans[k] == 2) {
-                    // stereo already: its pan is a balance
-                    double pan = req.tracks[k].pan;
-                    double bl = std::min(1.0, 1.0 - pan), br = std::min(1.0, 1.0 + pan);
-                    for (size_t i = 0; i + 1 < y.size(); i += 2) {
-                        m.mix[i] += float(y[i] * bl);
-                        m.mix[i + 1] += float(y[i + 1] * br);
-                        m.room[i] += y[i];
-                        m.room[i + 1] += y[i + 1];
+                size_t frames = y.size() / size_t(chans[k]);
+                auto steps = mix_steps(req.tracks[k], req.clock(), req.start);
+                for (size_t j = 0; j < steps.size(); ++j) {
+                    size_t a = std::min(steps[j].frame, frames);
+                    size_t b = j + 1 < steps.size() ? std::min(steps[j + 1].frame, frames) : frames;
+                    double pan = steps[j].pan, g = steps[j].gain;
+                    if (chans[k] == 2) {
+                        // stereo already: its pan is a balance
+                        double bl = std::min(1.0, 1.0 - pan), br = std::min(1.0, 1.0 + pan);
+                        for (size_t i = 2 * a; i < 2 * b; i += 2) {
+                            double l = y[i] * g, r = y[i + 1] * g;
+                            m.mix[i] += float(l * bl);
+                            m.mix[i + 1] += float(r * br);
+                            m.room[i] += float(l);
+                            m.room[i + 1] += float(r);
+                        }
+                        continue;
                     }
-                    continue;
-                }
-                auto [gl, gr] = pan_gains(req.tracks[k].pan);
-                for (size_t i = 0; i < y.size(); ++i) {
-                    m.mix[2 * i] += float(y[i] * gl);
-                    m.mix[2 * i + 1] += float(y[i] * gr);
-                    // the same voices with the panning left off, which is
-                    // what the reverberator is given: panning moves the
-                    // voices, not the room they are singing in
-                    m.room[2 * i] += y[i];
-                    m.room[2 * i + 1] += y[i];
+                    auto [gl, gr] = pan_gains(pan);
+                    for (size_t i = a; i < b; ++i) {
+                        double v = y[i] * g;
+                        m.mix[2 * i] += float(v * gl);
+                        m.mix[2 * i + 1] += float(v * gr);
+                        // the same voices with the panning left off, which is
+                        // what the reverberator is given: panning moves the
+                        // voices, not the room they are singing in
+                        m.room[2 * i] += float(v);
+                        m.room[2 * i + 1] += float(v);
+                    }
                 }
             }
             mixes.push_back(std::move(m));
@@ -986,8 +1054,13 @@ Mixed Mixer::mix_locked(const RenderRequest &req, bool whole) {
     } else {
         out.assign(n, 0.0f);
         for (size_t k = 0; k < req.tracks.size(); ++k) {
-            double gl = pan_gains(req.tracks[k].pan).first;
-            for (size_t i = 0; i < ys[k].size(); ++i) out[i] += float(ys[k][i] * gl);
+            auto steps = mix_steps(req.tracks[k], req.clock(), req.start);
+            for (size_t j = 0; j < steps.size(); ++j) {
+                double gl = pan_gains(steps[j].pan).first, g = steps[j].gain;
+                size_t a = std::min(steps[j].frame, ys[k].size());
+                size_t b = j + 1 < steps.size() ? std::min(steps[j + 1].frame, ys[k].size()) : ys[k].size();
+                for (size_t i = a; i < b; ++i) out[i] += float(ys[k][i] * g * gl);
+            }
         }
         for (float v : out) peak = std::max(peak, double(std::fabs(v)));
         if (peak > 1.0)
@@ -1007,7 +1080,7 @@ bool Mixer::sung_together(const RenderRequest &req, std::vector<float> *out, int
     for (const PartRequest &t : req.tracks) {
         instruments = instruments || played(t.voice_id);
         Family *f = Registry::get().family_of(t.voice_id);
-        if (!f || !f->sings_parts() || std::fabs(t.pan) > 1e-6 || (t.reverb && clean_reverb(*t.reverb) != rev))
+        if (!f || !f->sings_parts() || panned(t) || (t.reverb && clean_reverb(*t.reverb) != rev))
             return false;
         for (const auto &v : t.voices)
             if (Registry::get().family_of(v.second) != f) return false;

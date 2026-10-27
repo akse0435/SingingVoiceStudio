@@ -37,6 +37,7 @@ enum {
     ID_BAR_REST, ID_GOTO_BAR, ID_METRONOME, ID_PLAY_PAUSE, ID_PANES,
     ID_TRACK_NEW, ID_TRACK_BACKING, ID_TRACK_EDIT, ID_TRACK_REMOVE, ID_TRACK_MUTE, ID_TRACK_SOLO,
     ID_TRACK_UP, ID_TRACK_DOWN, ID_PREVIEW_TIMER, ID_RECOVERY_TIMER, ID_ADD_CONTROLLER, ID_CLOSE_RESTS,
+    ID_REMOVE_VELOCITIES,
 };
 
 //: A beat is a quarter note, so a sixteenth is a quarter of a beat: the step
@@ -324,6 +325,10 @@ void Studio::build_menu() {
     mi_auto_preview_->Check(settings_.auto_preview);
     prefs->Append(ID_CLOSE_RESTS, K("Close short &rests when importing MIDI...\tCtrl+Shift+I"),
                   "Take out the short rests between notes when a MIDI file comes in");
+    mi_remove_velocities_ =
+        prefs->AppendCheckItem(ID_REMOVE_VELOCITIES, K("Remove note &velocities from sung tracks when importing MIDI\tCtrl+Shift+E"),
+                               "Give the sung parts of a MIDI file the track's velocity alone");
+    mi_remove_velocities_->Check(settings_.remove_note_velocities);
     prefs->Append(ID_PANTHERA, K("Panthera &folder..."), "Where to find Panthera, for the MacinTalk voices");
     bar->Append(prefs, "&Settings");
     bar->Append(help, "&Help");
@@ -377,6 +382,7 @@ void Studio::build_menu() {
     on(ID_AUTO_PREVIEW, &Studio::on_auto_preview);
     on(ID_PANTHERA, &Studio::on_panthera);
     on(ID_CLOSE_RESTS, &Studio::on_close_rests);
+    on(ID_REMOVE_VELOCITIES, &Studio::on_remove_velocities);
     Bind(wxEVT_MENU, [this](wxCommandEvent &) { Close(); }, wxID_EXIT);
 }
 
@@ -419,7 +425,7 @@ void Studio::on_song_settings(wxCommandEvent &) {
         if (dlg.ShowModal() != wxID_OK) return;
         Song was = song_;
         dlg.apply(song_);
-        song_.bpm = std::max(30.0, std::min(250.0, song_.bpm));
+        song_.bpm = std::max(kMinBpm, std::min(kMaxBpm, song_.bpm));
         bool changed = song_.bpm != was.bpm || song_.sig != was.sig || song_.consonants != was.consonants ||
                        song_.voice != was.voice || song_.reverb != was.reverb ||
                        song_.anticipate != was.anticipate || song_.end != was.end;
@@ -469,6 +475,17 @@ void Studio::on_close_rests(wxCommandEvent &) {
 
 //: the longest rest a MIDI import closes, or 0 to keep them all
 double Studio::rests_to_close() const { return settings_.close_rests ? settings_.close_rests_beats : 0.0; }
+
+//: A setting of the program too: whether a MIDI import removes the notes'
+//: own velocities from the sung tracks.
+void Studio::on_remove_velocities(wxCommandEvent &) {
+    bool on = mi_remove_velocities_->IsChecked();
+    settings_.remove_note_velocities = on;
+    bool kept = save_settings(settings_);
+    say(wxString(on ? "importing MIDI removes the note velocities from the sung tracks"
+                    : "importing MIDI keeps every note's velocity") +
+        (kept ? "" : ", for this sitting only: the settings file could not be written"));
+}
 
 //: Where Panthera is. MacinTalk looks again at once, and what it finds is
 //: said: the voices it has now, or why it has none.
@@ -559,6 +576,7 @@ void Studio::on_keys(wxCommandEvent &) {
         "Ctrl+I  import a MIDI file or a VocalWriter song. The parts without words are played by "
         "the GM Soundbank, VocalWriter's own instruments, as VocalWriter played them",
         "Ctrl+Shift+I  whether importing MIDI closes the short rests between notes",
+        "Ctrl+Shift+E  whether importing MIDI removes the note velocities from the sung tracks",
         "Ctrl+Shift+S  export the whole song as one WAV",
         "Ctrl+Shift+T  export every track to its own WAV",
         "Enter on a note edits it",
@@ -826,6 +844,7 @@ std::string Studio::label_of(const Note &n) const {
     auto add = [&](const std::string &s) { said += (said.empty() ? "" : ", ") + s; };
     if (n.voice_id) add("voice change to " + voice_name(*n.voice_id));
     if (n.tempo > 0) add("tempo change to " + fmt_g(n.tempo));
+    if (n.pan) add("pan " + std::to_string(*n.pan));
     if (!n.controls.empty()) add(describe_controls(n));
     return "(" + (said.empty() ? std::string("controller") : said) + ")";
 }
@@ -1440,7 +1459,7 @@ void Studio::on_add_controller(wxCommandEvent &) {
         ControllerDialog dlg(this, this, Note::tempo_change(0), voice_at(insertion_point()));
         if (dlg.ShowModal() != wxID_OK) return;
         Note c = dlg.result();
-        if (c.tempo <= 0 && !c.voice_id && c.controls.empty()) {
+        if (c.tempo <= 0 && !c.voice_id && !c.pan && c.controls.empty()) {
             say("nothing was filled in, so no controller was added");
             return;
         }
@@ -1458,10 +1477,11 @@ std::string Studio::controller_said(int i) {
     double at = position(i);
     auto bb = bar_and_beat(at, signature());
     std::string where = "bar " + std::to_string(bb.first) + " beat " + fmt_g(std::nearbyint(bb.second * 1000) / 1000);
-    if (c.tempo <= 0 && !c.voice_id && c.controls.empty()) return "nothing at " + where + ". Delete removes it";
+    if (c.tempo <= 0 && !c.voice_id && !c.pan && c.controls.empty()) return "nothing at " + where + ". Delete removes it";
     std::string out;
     auto add = [&](const std::string &s) { out += (out.empty() ? "" : ", ") + s; };
     if (c.voice_id) add("voice " + voice_name(*c.voice_id));
+    if (c.pan) add("pan " + std::to_string(*c.pan));
     if (!c.controls.empty()) add(describe_controls(c));
     if (!out.empty()) out += " from " + where;
     if (c.tempo <= 0) return out;
@@ -1984,7 +2004,7 @@ void Studio::take(const Song &song, const std::string &path) {
         t.name = "Voice 1";
         song_.tracks.push_back(t);
     }
-    song_.bpm = double(std::max(30L, std::min(250L, std::lrint(song.bpm))));
+    song_.bpm = double(std::max(long(kMinBpm), std::min(long(kMaxBpm), std::lrint(song.bpm))));
     song_.sig = parse_sig(format_sig(song.sig));
     song_.consonants = std::max(10L, std::min(100L, std::lrint(song.consonants * 100))) / 100.0;
     song_.voice = clean_voice(song.voice);
@@ -2122,7 +2142,7 @@ void Studio::on_import(wxCommandEvent &) {
     }
     Imported got;
     try {
-        got = import_midi(path, names, rests_to_close(), played);
+        got = import_midi(path, names, rests_to_close(), played, settings_.remove_note_velocities);
     } catch (const std::exception &e) {
         say(W(std::string("cannot import: ") + e.what()));
         return;

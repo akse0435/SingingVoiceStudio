@@ -25,10 +25,15 @@ extern const char *const kImportWildcard;  // MIDI files and VocalWriter songs
 extern const char *const kDefaultPhoneme;
 
 constexpr int kDefaultPitch = 60;
-//: how hard a part's notes are sung when it says nothing, 1-127
-constexpr int kDefaultVelocity = 64;
+//: how hard a part's notes are sung when it says nothing, 1-127: VocalWriter's,
+//: whose notes window starts its velocity slider at 90 per cent
+constexpr int kDefaultVelocity = 114;
+//: the default before that: what a song file without a velocity means
+constexpr int kPlainVelocity = 64;
 //: the loudest a track may be turned up, in per cent
 constexpr int kMaxVolume = 200;
+//: the slowest and fastest tempo, beats a minute; VocalWriter's were 10 and 250
+constexpr double kMinBpm = 5, kMaxBpm = 500;
 constexpr double kDefaultBeats = 0.5;
 //: semitones below which a bend point is not worth keeping
 constexpr double kBendEpsilon = 0.01;
@@ -78,10 +83,12 @@ struct Note {
     //: from here on, for the whole song whichever track it is on; 0 changes
     //: nothing. `voice_id` is the voice this track sings with from here on,
     //: any engine's, its name kept as a track keeps it (Track::voice_name).
+    //: `pan` is the track's pan from here on, -100 to 100, whatever sings it.
     bool controller = false;
     double tempo = 0;
     std::optional<int> voice_id;
     std::optional<std::string> voice_name;
+    std::optional<int> pan;
 
     Note() = default;
     Note(std::vector<std::string> ph, int p = kDefaultPitch, double b = kDefaultBeats,
@@ -100,7 +107,7 @@ struct Note {
         return phonemes == o.phonemes && pitch == o.pitch && beats == o.beats &&
                word == o.word && bend == o.bend && mod == o.mod && velocity == o.velocity &&
                controls == o.controls && hold == o.hold && controller == o.controller && tempo == o.tempo &&
-               voice_id == o.voice_id && voice_name == o.voice_name;
+               voice_id == o.voice_id && voice_name == o.voice_name && pan == o.pan;
     }
 };
 
@@ -290,12 +297,14 @@ struct ImportedPart {
     std::vector<Note> notes;
     //: words still to be looked up: (word, [note index...])
     std::vector<std::pair<std::string, std::vector<int>>> pending;
-    //: played by the GM Soundbank rather than sung, with this instrument,
-    //: velocity and pan
+    //: played by the GM Soundbank rather than sung, with this instrument and pan
     bool played = false;
     std::optional<int> voice_id;
+    //: the velocity most of the notes have; a note keeps its own if it differs
     int velocity = kDefaultVelocity;
     int pan = 0;
+    //: per cent, CC 7 by CC 11 (see midi_volume)
+    int volume = 100;
 };
 //: The part as a track of the song.
 Track imported_track(const ImportedPart &part);
@@ -310,9 +319,10 @@ struct Imported {
 };
 //: `close_rests`: the longest rest between two notes to close, in beats; 0
 //: keeps every rest. The tracks named in `played` are played by the GM
-//: Soundbank, chords and all; the rest are sung.
+//: Soundbank, chords and all; the rest are sung, and `remove_velocities`
+//: leaves their notes the track's velocity, none of their own.
 Imported import_midi(const std::string &path, const std::vector<std::string> &names, double close_rests = 0,
-                     const std::vector<std::string> &played = {});
+                     const std::vector<std::string> &played = {}, bool remove_velocities = false);
 
 // -- tracks an instrument plays ---------------------------------------------
 

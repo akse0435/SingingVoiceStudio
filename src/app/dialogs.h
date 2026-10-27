@@ -169,9 +169,9 @@ private:
 //: A note as a chord: a row for each pitch, all but the last taking no time
 //: and sounding as long as the note.
 std::vector<Note> chord_rows(const Note &note, const std::vector<int> &pitches);
-//: Whether a note control (kNoteControls) reaches a voice: all but the
-//: pedal reach VocalWriter's voices; the volume, pedal, bend range and
-//: detune reach its instruments.
+//: Whether a note control (kNoteControls) reaches a voice: the volume
+//: reaches every voice; all but the pedal reach VocalWriter's voices; the
+//: pedal, bend range and detune reach its instruments.
 bool control_reaches(const std::string &key, int voice);
 //: A voice's name without its engine's: "Betty", "Cello" for "GM Cello".
 std::string short_voice_name(const std::string &name, const std::string &engine);
@@ -215,7 +215,7 @@ private:
     std::vector<std::string> engine_names_;
     std::vector<int> ids_;      // the voices in the voice box, in order
     wxChoice *kind_, *engine_, *voice_;
-    wxTextCtrl *tempo_;
+    wxTextCtrl *tempo_, *pan_;
     std::vector<std::pair<const NoteControl *, wxTextCtrl *>> controls_;
     //: the fields of each kind, in the order the first box lists them
     wxBoxSizer *outer_;

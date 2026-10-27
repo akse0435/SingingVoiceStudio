@@ -62,12 +62,13 @@ project too, the backing track as a part with no notes.
 notes that takes no time and is sung by nobody: a change from where it stands
 on. Its tempo change applies to the entire song, whichever track it is on --
 where two tracks change the tempo at one beat, the one higher up wins -- and
-mute and solo leave it in force. Every engine sings to the tempo, and
-VocalWriter's voices take the changes as their own song's. A MIDI file's tempo
-changes come in on a Tempo track at the top, rests and controllers alone, so
-each one falls exactly where the file has it. The project keeps a track's
-controllers beside its notes, so a song without any is the same file as
-before.
+mute and solo leave it in force. A pan change moves the track from there on,
+whatever sings it. Every engine sings to the tempo, 5 to 500 beats a minute
+(VocalWriter's went from 10 to 250), and VocalWriter's voices take the
+changes as their own song's. A MIDI file's tempo changes come in on a Tempo
+track at the top, rests and controllers alone, so each one falls exactly
+where the file has it. The project keeps a track's controllers beside its
+notes, so a song without any is the same file as before.
 
 **VocalWriter's controls** are kept on the notes as its songs keep them: a
 velocity, and the volume, colour, noise, breath, vibrato, portamento, chorus,
@@ -75,7 +76,10 @@ detune and bend range from a point in a note on, each holding until the next,
 and on a rest the pitch the next note's first consonants are sung at (Edit
 note, VocalWriter controls). Only VocalWriter's voices sing them, the
 velocity too -- to another engine a velocity would only be loudness, which a
-track's volume is -- so they are greyed for a note another engine sings.
+track's volume is -- so they are greyed for a note another engine sings. The
+volume is the exception: where another engine sings, the mix follows it. A
+track's velocity, which its notes follow unless they have their own, is 114
+to begin with, VocalWriter's: its notes window put a new note in at 90%.
 
 **A voice change** is a controller too: from where it stands, the track
 sings with another voice, any engine's. A track that only ever changes
@@ -116,7 +120,9 @@ took them in: the parts with words are sung, and the others are played with
 the programs the file gives them, channel 10 on the drum kit; a file without
 words is played throughout. A part the file leaves unnamed is named after its
 instrument, the drum kit's "Drums". On the command line the same;
-`--sing-all` sings every part.
+`--sing-all` sings every part. Each track takes its volume from the
+file, CC 7 by CC 11 with both at 127 being 100%, at its loudest, with
+VocalWriter's volume control against that where it changes.
 
 **Short rests** between two notes can be closed as a MIDI file comes in
 (Settings > Close short rests when importing MIDI, Ctrl+Shift+I, off until it
@@ -125,6 +131,13 @@ than the length set there, an eighth of a beat to begin with, is taken out
 and the note before it held on, its bend and wheel stretched with it, so a
 line the file has detached is sung legato. A VocalWriter song keeps its
 rests: it was made for VocalWriter already.
+
+**Velocities** come in on every note of a MIDI file, sung or played, as
+VocalWriter took them in: the one most of a track's notes have is the
+track's, and a note keeps its own where it differs. Settings > Remove note
+velocities from sung tracks when importing MIDI (Ctrl+Shift+E, off until it
+is turned on; `--remove-velocities` on the command line) leaves the sung
+tracks with the track's alone. A VocalWriter song keeps them all.
 
 Notes are written in VocalWriter's phoneme symbols whichever engine sings
 them; each engine translates (the tables are at the top of
@@ -326,6 +339,7 @@ Ctrl and Option for Alt, and Option+H to hear a note.
 | Ctrl+O / Ctrl+S | open and save a project |
 | Ctrl+I | import a MIDI file or a VocalWriter song |
 | Ctrl+Shift+I | whether importing MIDI closes the short rests between notes |
+| Ctrl+Shift+E | whether importing MIDI removes the note velocities from the sung tracks |
 | Ctrl+Shift+S / Ctrl+Shift+T | export one WAV / one WAV per track |
 
 ## From the command line

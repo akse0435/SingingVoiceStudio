@@ -178,6 +178,7 @@ private:
     void on_panthera(wxCommandEvent &);
     void on_close_rests(wxCommandEvent &);
     double rests_to_close() const;
+    void on_remove_velocities(wxCommandEvent &);
     void preview_note(int i);
     void preview_now(int i);
 
@@ -261,6 +262,7 @@ private:
     wxMenuItem *mi_play_ = nullptr;
     wxMenuItem *mi_metronome_ = nullptr;
     wxMenuItem *mi_auto_preview_ = nullptr;
+    wxMenuItem *mi_remove_velocities_ = nullptr;
     wxMenuItem *mi_undo_ = nullptr;
     wxMenuItem *mi_redo_ = nullptr;
     bool relabel_pending_ = false;

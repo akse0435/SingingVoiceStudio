@@ -238,29 +238,40 @@ bool to_seq(const Part &part, int voice_id, SeqPart *sp) {
     const int kind = !played ? VWSEQ_VOCAL : voice_id == kGmDrums ? VWSEQ_DRUMS : VWSEQ_INSTRUMENT;
     const int base = played ? kGmBase : kVocalWriterBase;
     const int voice = voice_id - base;
-    // The sequencer's tempo is a whole number; a tempo between two is
-    // kept by counting ticks at the whole one. Tempo changes are whole, and
-    // go in as the song's own.
+    // The sequencer's tempo is a whole number from 10 to 250. Any other is
+    // played at the nearest it has, with a beat's ticks counted to match:
+    // 240 at a tempo it has, as VocalWriter counts them. The changes go in
+    // as the song's own.
     auto whole = [](double bpm) { return int(std::max(10L, std::min(250L, std::lround(bpm)))); };
-    int tempo = whole(part.bpm);
-    double tick_scale = part.tempos.empty() ? kTicksPerBeat * tempo / std::max(part.bpm, 1e-6) : kTicksPerBeat;
-    auto ticks = [&](double beats) { return int32_t(std::llround(beats * tick_scale)); };
     struct Span {
-        double tick, second;
-        int bpm;
+        double beat, tick, second;
+        int bpm;              // the sequencer's
+        double per_beat;      // ticks
     };
-    std::vector<Span> spans = {{0.0, 0.0, tempo}};
+    auto span = [&](double beat, double tick, double second, double bpm) {
+        int e = whole(bpm);
+        return Span{beat, tick, second, e, kTicksPerBeat * e / std::max(bpm, 1e-6)};
+    };
+    std::vector<Span> spans = {span(0.0, 0.0, 0.0, part.bpm)};
+    bool plain = spans[0].per_beat == kTicksPerBeat;
     for (const auto &c : part.tempos) {
-        const Span &last = spans.back();
-        double tick = c.first * kTicksPerBeat;
-        if (tick <= last.tick) continue;
-        spans.push_back({tick, last.second + (tick - last.tick) * 60.0 / (kTicksPerBeat * last.bpm), whole(c.second)});
+        const Span last = spans.back();
+        if (c.first <= last.beat) continue;
+        double tick = plain ? c.first * kTicksPerBeat : last.tick + (c.first - last.beat) * last.per_beat;
+        spans.push_back(span(c.first, tick, last.second + (tick - last.tick) * 60.0 / (kTicksPerBeat * last.bpm), c.second));
         sp->tempos.push_back({int32_t(std::llround(tick)), spans.back().bpm});
+        plain = plain && spans.back().per_beat == kTicksPerBeat;
     }
+    int tempo = spans[0].bpm;
     auto span_at = [&](auto key, double v) {
         size_t i = spans.size() - 1;
         while (i > 0 && spans[i].*key > v) --i;
         return spans[i];
+    };
+    auto ticks = [&](double beats) {
+        if (plain) return int32_t(std::llround(beats * kTicksPerBeat));
+        Span s = span_at(&Span::beat, beats);
+        return int32_t(std::llround(s.tick + (beats - s.beat) * s.per_beat));
     };
     auto at_second = [&](double s) {
         Span sp_ = span_at(&Span::second, std::max(0.0, s));

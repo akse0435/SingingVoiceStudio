@@ -583,6 +583,8 @@ std::vector<Note> chord_rows(const Note &note, const std::vector<int> &pitches) 
 }
 
 bool control_reaches(const std::string &key, int voice) {
+    // the mix follows the volume where an engine does not
+    if (key == "volume") return true;
     if (is_vocalwriter_voice(voice)) return key != "sustain";
     if (is_gm_voice(voice)) return key == "volume" || key == "sustain" || key == "bend_range" || key == "detune";
     return false;
@@ -857,7 +859,7 @@ SongSettingsDialog::SongSettingsDialog(wxWindow *parent, const Song &song, bool 
     : wxDialog(parent, wxID_ANY, "Song settings"), was_sig_(song.sig), was_end_(song.end),
       end_shown_(W(end_text(song.end, song.sig))) {
     wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
-    tempo_ = spin(this, 30, 250, int(song.bpm), 80);
+    tempo_ = spin(this, int(kMinBpm), int(kMaxBpm), int(song.bpm), 80);
     labelled(this, outer, "Tempo", tempo_, 0, "beats per minute at the start; a controller changes it");
     sig_ = new wxTextCtrl(this, wxID_ANY, W(format_sig(song.sig)), wxDefaultPosition, wxSize(60, -1));
     labelled(this, outer, "Time signature", sig_, 0, "as 4/4; it sets where the bars fall");
@@ -924,6 +926,7 @@ ControllerDialog::ControllerDialog(wxWindow *parent, Studio *studio, const Note 
     wxArrayString kinds;
     kinds.Add("Voice change");
     kinds.Add("Tempo change");
+    kinds.Add("Pan change");
     kind_ = new wxChoice(this, wxID_ANY, wxDefaultPosition, wxSize(220, -1), kinds);
     labelled(this, outer_, "Controller", kind_, 0, "what it changes from here on");
 
@@ -953,9 +956,16 @@ ControllerDialog::ControllerDialog(wxWindow *parent, Studio *studio, const Note 
     tempo_ = new wxTextCtrl(this, wxID_ANY, controller.tempo > 0 ? W(fmt_g(controller.tempo)) : wxString(),
                             wxDefaultPosition, wxSize(80, -1));
     labelled(this, tempo_group, "Tempo change (applies to the entire song)", tempo_, 0,
-             "beats per minute from here on, 10 to 250");
+             "beats per minute from here on, 5 to 500");
     outer_->Add(tempo_group, 0, wxEXPAND);
     groups_.push_back(tempo_group);
+
+    wxBoxSizer *pan_group = new wxBoxSizer(wxVERTICAL);
+    pan_ = new wxTextCtrl(this, wxID_ANY, controller.pan ? W(std::to_string(*controller.pan)) : wxString(),
+                          wxDefaultPosition, wxSize(80, -1));
+    labelled(this, pan_group, "Pan", pan_, 0, "-100 (left) to 100 (right) from here on, whatever sings the track");
+    outer_->Add(pan_group, 0, wxEXPAND);
+    groups_.push_back(pan_group);
 
     // VocalWriter's controls, each from here on, as a note's own can be set
     // inside it; only VocalWriter's voices sing them, so they are greyed
@@ -970,9 +980,11 @@ ControllerDialog::ControllerDialog(wxWindow *parent, Studio *studio, const Note 
                              : wxString();
         wxBoxSizer *group = new wxBoxSizer(wxVERTICAL);
         wxTextCtrl *field = new wxTextCtrl(this, wxID_ANY, shown, wxDefaultPosition, wxSize(80, -1));
-        labelled(this, group, k.label, field, 0,
-                 W(std::string(k.hint) + (std::string(k.key) == "sustain" ? "" : "; VocalWriter's voices only" +
-                                          std::string(control_reaches(k.key, kGmBase) ? ", and its instruments" : ""))));
+        std::string key = k.key, reach;
+        if (key == "volume") reach = "; every voice and instrument";
+        else if (key != "sustain")
+            reach = std::string("; VocalWriter's voices only") + (control_reaches(key, kGmBase) ? ", and its instruments" : "");
+        labelled(this, group, k.label, field, 0, W(std::string(k.hint) + reach));
         enable_labelled(field, control_reaches(k.key, voice_before));
         outer_->Add(group, 0, wxEXPAND);
         groups_.push_back(group);
@@ -980,10 +992,10 @@ ControllerDialog::ControllerDialog(wxWindow *parent, Studio *studio, const Note 
         kind_->Append(k.label);
     }
     // an existing controller shows what it changes
-    int kind = controller.tempo > 0 && !controller.voice_id ? 1 : 0;
-    for (size_t i = 0; i < controls_.size() && !controller.voice_id && controller.tempo <= 0; ++i)
+    int kind = controller.voice_id ? 0 : controller.tempo > 0 ? 1 : controller.pan ? 2 : 0;
+    for (size_t i = 0; i < controls_.size() && !controller.voice_id && controller.tempo <= 0 && !controller.pan; ++i)
         if (controller.controls.count(controls_[i].first->key)) {
-            kind = 2 + int(i);
+            kind = 3 + int(i);
             break;
         }
     kind_->SetSelection(kind);
@@ -1027,6 +1039,7 @@ Note ControllerDialog::result() const {
     n.tempo = 0;
     n.voice_id.reset();
     n.voice_name.reset();
+    n.pan.reset();
     n.controls.clear();
     int k = kind_->GetSelection();
     if (k == 0) {
@@ -1038,9 +1051,12 @@ Note ControllerDialog::result() const {
     } else if (k == 1) {
         double bpm = 0;
         if (read_number(tempo_->GetValue(), &bpm) && bpm > 0)
-            n.tempo = std::max(10.0, std::min(250.0, std::nearbyint(bpm * 1e3) / 1e3));
-    } else if (k >= 2 && size_t(k - 2) < controls_.size()) {
-        const auto &c = controls_[size_t(k - 2)];
+            n.tempo = std::max(kMinBpm, std::min(kMaxBpm, std::nearbyint(bpm * 1e3) / 1e3));
+    } else if (k == 2) {
+        double pan = 0;
+        if (read_number(pan_->GetValue(), &pan)) n.pan = std::max(-100, std::min(100, int(std::lrint(pan))));
+    } else if (k >= 3 && size_t(k - 3) < controls_.size()) {
+        const auto &c = controls_[size_t(k - 3)];
         double v = 0;
         if (read_number(c.second->GetValue(), &v))
             n.controls[c.first->key] = {{0.0, std::max(double(c.first->lo), std::min(double(c.first->hi), std::nearbyint(v)))}};

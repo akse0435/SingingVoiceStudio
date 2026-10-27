@@ -47,6 +47,8 @@ struct PartRequest {
     std::vector<std::pair<double, int>> voices;
     //: the controls controllers set, each from its beat on
     std::vector<ControlAt> controls;
+    //: (beat, -1 .. 1): the pan a controller sets from its beat on
+    std::vector<std::pair<double, double>> pans;
     std::vector<BendPoint> bends;   // (beat, semitones, slides)
     std::vector<BendPoint> mods;    // (beat, mod wheel 0-127, slides)
 };

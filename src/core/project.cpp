@@ -110,6 +110,7 @@ std::string Note::label() const {
         std::string said;
         if (tempo > 0) said = "tempo change to " + fmt_g(tempo);
         if (voice_id) said += std::string(said.empty() ? "" : ", ") + "voice change";
+        if (pan) said += std::string(said.empty() ? "" : ", ") + "pan " + std::to_string(*pan);
         for (const auto &c : controls) {
             const NoteControl *k = note_control(c.first);
             if (k && !c.second.empty())
@@ -394,6 +395,7 @@ json controller_doc(const Note &n) {
     if (n.tempo > 0) c["tempo"] = round_to(n.tempo, 3);
     if (n.voice_id) c["voice_id"] = *n.voice_id;
     if (n.voice_name) c["voice_name"] = *n.voice_name;
+    if (n.pan) c["pan"] = *n.pan;
     // VocalWriter's controls, each as the value it sets
     for (const auto &k : n.controls)
         if (!k.second.empty()) c["controls"][k.first] = k.second.front().second;
@@ -447,8 +449,8 @@ json track_doc(const Track &t) {
     if (t.voice_name) d["voice_name"] = *t.voice_name;
     d["volume"] = t.volume;
     d["pan"] = t.pan;
-    // only when moved, so an older song is the same file
-    if (t.velocity != kDefaultVelocity) d["velocity"] = t.velocity;
+    // always: a song file without it is from before the default changed
+    d["velocity"] = t.velocity;
     d["mute"] = t.mute;
     d["solo"] = t.solo;
     // The controllers apart from the notes, each with how many notes come
@@ -513,6 +515,7 @@ void read_controller(const json &c, Note &n) {
     if (c.contains("tempo")) n.tempo = std::max(0.0, as_double(c["tempo"], 0));
     if (c.contains("voice_id") && !c["voice_id"].is_null()) n.voice_id = as_int(c["voice_id"], 0);
     if (c.contains("voice_name") && c["voice_name"].is_string()) n.voice_name = c["voice_name"].get<std::string>();
+    if (c.contains("pan") && c["pan"].is_number()) n.pan = std::max(-100, std::min(100, as_int(c["pan"], 0)));
     if (c.contains("controls") && c["controls"].is_object())
         for (auto it = c["controls"].begin(); it != c["controls"].end(); ++it)
             if (const NoteControl *k = note_control(it.key()))
@@ -598,7 +601,7 @@ Track read_track(const json &doc, size_t index) {
     t.program = get("program") ? as_int(*get("program"), 0) : 0;
     t.volume = std::max(0, std::min(kMaxVolume, get("volume") ? as_int(*get("volume"), 100) : 100));
     t.pan = std::max(-100, std::min(100, get("pan") ? as_int(*get("pan"), 0) : 0));
-    int velocity = get("velocity") ? as_int(*get("velocity"), kDefaultVelocity) : kDefaultVelocity;
+    int velocity = get("velocity") ? as_int(*get("velocity"), kPlainVelocity) : kPlainVelocity;
     t.velocity = std::max(1, std::min(127, velocity));
     t.mute = get("mute") && truthy(*get("mute"));
     t.solo = get("solo") && truthy(*get("solo"));
@@ -1013,6 +1016,82 @@ void hold_vowels(std::vector<Note> &notes) {
         if (notes[i].phonemes.empty() && notes[i].word.empty() && !held[i]) notes[i].phonemes = {kDefaultPhoneme};
 }
 
+//: CC 7 by CC 11 as it changes, (tick, 0-127), in single precision as
+//: VocalWriter has it: CC 7 at 100 is 99
+std::vector<std::pair<long, int>> midi_levels(const MidiTrack &track) {
+    std::vector<std::tuple<long, int, int>> ev;   // (tick, which, value)
+    for (const auto &v : track.volumes) ev.push_back({v.first, 0, v.second});
+    for (const auto &v : track.expressions) ev.push_back({v.first, 1, v.second});
+    std::stable_sort(ev.begin(), ev.end(), [](const auto &a, const auto &b) { return std::get<0>(a) < std::get<0>(b); });
+    std::vector<std::pair<long, int>> out;
+    float vol = 1.0f, expr = 1.0f;
+    for (const auto &e : ev) {
+        (std::get<1>(e) ? expr : vol) = float(std::get<2>(e)) / 127.0f;
+        float both = vol * expr;
+        out.push_back({std::get<0>(e), int(double(both) * 127.0)});
+    }
+    return out;
+}
+
+//: a level as a track's volume, 127 being 100%
+int level_volume(int level) { return int(std::lround(100.0 * level / 127.0)); }
+
+//: The track's volume, CC 7 by CC 11 at its loudest, and into `changes`
+//: VocalWriter's volume control against that wherever it is not full.
+template <class Beat>
+int midi_volume(const MidiTrack &track, Beat beat, std::vector<PlayedChange> &changes) {
+    auto levels = midi_levels(track);
+    long first = track.notes.empty() ? 0 : track.notes.front().tick;
+    for (const MidiNote &n : track.notes) first = std::min(first, n.tick);
+    // the level at the first note, and after it the last at each tick
+    int at_first = 127;
+    long set_at = -1;
+    std::vector<std::pair<long, int>> later;
+    for (const auto &l : levels) {
+        if (l.first <= first) {
+            at_first = l.second;
+            set_at = l.first;
+        } else if (!later.empty() && later.back().first == l.first) {
+            later.back().second = l.second;
+        } else {
+            later.push_back(l);
+        }
+    }
+    int loudest = at_first;
+    for (const auto &l : later) loudest = std::max(loudest, l.second);
+    auto against = [&](int level) { return loudest ? int(std::lround(127.0 * level / loudest)) : 0; };
+    for (const auto &l : later) changes.push_back({beat(l.first), "volume", double(against(l.second))});
+    // full is where the engine starts
+    if (set_at >= 0 && against(at_first) != 127)
+        changes.push_back({beat(set_at), "volume", double(against(at_first))});
+    return levels.empty() ? 100 : level_volume(loudest);
+}
+
+//: Each change onto the row taking time it falls in, at its place there, as
+//: lay_out_played puts an instrument's.
+void place_controls(std::vector<Note> &rows, std::vector<PlayedChange> changes) {
+    const double eps = 1e-9;
+    std::stable_sort(changes.begin(), changes.end(),
+                     [](const PlayedChange &a, const PlayedChange &b) { return a.beat < b.beat; });
+    std::vector<size_t> spans;
+    std::vector<double> starts;
+    double at = 0;
+    for (size_t k = 0; k < rows.size(); ++k) {
+        if (rows[k].beats > eps) {
+            spans.push_back(k);
+            starts.push_back(at);
+        }
+        at += rows[k].beats;
+    }
+    if (spans.empty()) return;
+    for (const PlayedChange &c : changes) {
+        auto it = std::upper_bound(starts.begin(), starts.end(), c.beat + eps);
+        size_t m = it == starts.begin() ? 0 : size_t(it - starts.begin()) - 1;
+        Note &row = rows[spans[m]];
+        row.controls[c.name].push_back({std::max(0.0, std::min(1.0, (c.beat - starts[m]) / row.beats)), c.value});
+    }
+}
+
 ImportedPart from_midi(const MidiFile &midi, const MidiTrack &track, const std::string &name,
                        double grid, double close_rests, int *closed) {
     double div = midi.division ? midi.division : 480;
@@ -1057,10 +1136,18 @@ ImportedPart from_midi(const MidiFile &midi, const MidiTrack &track, const std::
         part.notes.push_back(Note(ph, n.pitch, length * step, word,
                                   curve_over(curve, n.tick, n.tick + span, kBendEpsilon),
                                   curve_over(wheel, n.tick, n.tick + span, kModEpsilon)));
+        part.notes.back().velocity = std::max(1, std::min(127, n.velocity));
         at += length;
     }
     *closed += close_short_rests(part.notes, close_rests);
     hold_vowels(part.notes);
+    // each note's velocity, as VocalWriter's import kept it; the commonest is
+    // the track's
+    part.velocity = common_velocity(part.notes);
+    // the volume, as an instrument's
+    std::vector<PlayedChange> volumes;
+    part.volume = midi_volume(track, [&](long tick) { return double(tick) / div; }, volumes);
+    place_controls(part.notes, volumes);
     part.pending = pending_words(part.notes);
     return part;
 }
@@ -1110,19 +1197,7 @@ ImportedPart from_midi_played(const MidiFile &midi, const MidiTrack &track, cons
     });
     std::vector<PlayedChange> changes;
     // the volume, CC 7 by CC 11
-    {
-        std::vector<std::tuple<long, int, int>> ev;   // (tick, which, value)
-        for (const auto &v : track.volumes) ev.push_back({v.first, 0, v.second});
-        for (const auto &v : track.expressions) ev.push_back({v.first, 1, v.second});
-        std::stable_sort(ev.begin(), ev.end(), [](const auto &a, const auto &b) { return std::get<0>(a) < std::get<0>(b); });
-        // in single precision, as VocalWriter has it: CC 7 at 100 is 99
-        float vol = 1.0f, expr = 1.0f;
-        for (const auto &e : ev) {
-            (std::get<1>(e) ? expr : vol) = float(std::get<2>(e)) / 127.0f;
-            float both = vol * expr;
-            changes.push_back({beat(std::get<0>(e)), "volume", double(int(double(both) * 127.0))});
-        }
-    }
+    int volume = midi_volume(track, beat, changes);
     for (const auto &v : track.sustains) changes.push_back({beat(v.first), "sustain", v.second <= 63 ? 0.0 : 127.0});
     for (const auto &r : track.bend_range) changes.push_back({beat(r.first), "bend_range", double(std::max(1, std::min(12, r.second)))});
     for (const auto &b : bend_curve(track)) changes.push_back({beat(b.first), "", round_to(b.second, 4)});
@@ -1138,6 +1213,7 @@ ImportedPart from_midi_played(const MidiFile &midi, const MidiTrack &track, cons
     ImportedPart part;
     part.name = name;
     part.played = true;
+    part.volume = volume;
     part.notes = lay_out_played(notes, changes);
     part.velocity = common_velocity(part.notes);
     part.voice_id = drums ? kGmDrums : kGmBase + program;
@@ -1186,24 +1262,27 @@ Track imported_track(const ImportedPart &part) {
     Track t;
     t.name = part.name;
     t.notes = part.notes;
+    t.velocity = part.velocity;
+    t.volume = part.volume;
     if (part.played) {
         t.voice_id = part.voice_id;
-        t.velocity = part.velocity;
         t.pan = part.pan;
     }
     return t;
 }
 
 int common_velocity(std::vector<Note> &notes) {
+    // a note still waiting for its word has no phonemes yet, but is sung
+    auto silent = [](const Note &n) { return n.controller || (!n.phonemes.empty() && n.is_rest()); };
     std::map<int, int> counts;
     for (const Note &n : notes)
-        if (!n.controller && !n.is_rest() && n.velocity > 0) ++counts[n.velocity];
+        if (!silent(n) && n.velocity > 0) ++counts[n.velocity];
     if (counts.empty()) return kDefaultVelocity;
     int most = counts.begin()->first;
     for (const auto &c : counts)
         if (c.second > counts[most]) most = c.first;
     for (Note &n : notes)
-        if (n.velocity == most || n.controller || n.is_rest()) n.velocity = 0;
+        if (n.velocity == most || silent(n)) n.velocity = 0;
     return most;
 }
 
@@ -1326,7 +1405,7 @@ std::vector<std::pair<std::string, int>> midi_tracks(const std::string &path) {
 }
 
 Imported import_midi(const std::string &path, const std::vector<std::string> &names, double close_rests,
-                     const std::vector<std::string> &played) {
+                     const std::vector<std::string> &played, bool remove_velocities) {
     MidiFile midi = read_midi(path);
     auto named = named_tracks(midi);
     if (named.empty()) throw std::runtime_error("this file has no notes in it");
@@ -1342,6 +1421,8 @@ Imported import_midi(const std::string &path, const std::vector<std::string> &na
         if (!track) throw std::runtime_error("no track named " + want);
         if (std::find(played.begin(), played.end(), want) == played.end()) {
             out.parts.push_back(from_midi(midi, *track, want, grid, close_rests, &out.closed_rests));
+            if (remove_velocities)
+                for (Note &n : out.parts.back().notes) n.velocity = 0;
             continue;
         }
         out.parts.push_back(from_midi_played(midi, *track, want));
@@ -1554,7 +1635,7 @@ std::vector<TempoChange> clean_tempo_changes(std::vector<TempoChange> changes) {
     std::vector<TempoChange> out;
     for (TempoChange c : changes) {
         if (!(c.beat > 1e-9) || !std::isfinite(c.beat) || !std::isfinite(c.bpm) || c.bpm <= 0) continue;
-        c.bpm = std::max(10.0, std::min(250.0, std::nearbyint(c.bpm * 1e3) / 1e3));
+        c.bpm = std::max(kMinBpm, std::min(kMaxBpm, std::nearbyint(c.bpm * 1e3) / 1e3));
         c.beat = std::nearbyint(c.beat * 1e6) / 1e6;
         if (!out.empty() && out.back().beat == c.beat) out.back() = c;
         else out.push_back(c);
@@ -1575,9 +1656,9 @@ Clock Song::clock() const {
     }
     std::stable_sort(all.begin(), all.end(),
                      [](const TempoChange &a, const TempoChange &b) { return a.beat < b.beat; });
-    Clock c{bpm, {}};
+    Clock c{std::max(kMinBpm, std::min(kMaxBpm, bpm)), {}};
     for (const TempoChange &t : all)
-        if (t.beat <= 1e-9) c.bpm = std::max(10.0, std::min(250.0, t.bpm));
+        if (t.beat <= 1e-9) c.bpm = std::max(kMinBpm, std::min(kMaxBpm, t.bpm));
     c.changes = clean_tempo_changes(all);
     return c;
 }
@@ -1616,7 +1697,7 @@ void steady_tempo(Song &song) {
         for (Note n : t.notes) {
             // a controller that changes something else too keeps doing that
             if (n.controller) n.tempo = 0;
-            if (!n.controller || n.voice_id || !n.controls.empty()) kept.push_back(n);
+            if (!n.controller || n.voice_id || n.pan || !n.controls.empty()) kept.push_back(n);
         }
         t.notes = kept;
     }

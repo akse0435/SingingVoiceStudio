@@ -122,7 +122,7 @@ bool is_midi(const std::string &path) {
 
 //: A project, a VocalWriter song or a MIDI file, the MIDI imported exactly as
 //: the window does it.
-Song open_song(const std::string &path, double close_rests, bool sing_all) {
+Song open_song(const std::string &path, double close_rests, bool sing_all, bool remove_velocities) {
     if (is_vocalwriter_song(path)) {
         VwSongImport got = import_vocalwriter_song(path, vocalwriter_program_voices());
         for (const std::string &n : got.notes) say(n);
@@ -138,7 +138,7 @@ Song open_song(const std::string &path, double close_rests, bool sing_all) {
     Family *gm = Registry::get().family_of(kGmBase);
     if (!sing_all && gm && gm->available(&why)) played = parts_to_play(parts);
     else if (!sing_all) say("every part is sung: the GM Soundbank cannot play here (" + why + ")");
-    Imported got = import_midi(path, names, close_rests, played);
+    Imported got = import_midi(path, names, close_rests, played, remove_velocities);
     if (got.closed_rests) say(std::to_string(got.closed_rests) + " short rest" + s_if(size_t(got.closed_rests)) + " closed");
     std::vector<std::string> words;
     size_t pending = 0;
@@ -207,7 +207,7 @@ std::string usage() {
     return "usage: svs [FILE] [-o FILE] [--tracks FOLDER] [--save FILE] [--track NAME]...\n"
            "           [--tempo BPM] [--voice NAME] [--consonants PERCENT] [--reverb ROOM,WET]\n"
            "           [--anticipate | --no-anticipate] [--from BEATS] [--close-rests BEATS]\n"
-           "           [--sing-all]\n"
+           "           [--sing-all] [--remove-velocities]\n"
            "           [--list-voices] [--list-tracks] [--pronounce WORD...] [--version] [-q]\n"
            "\n"
            "Sing a Singing Voice Studio project, a VocalWriter song (.trk) or a MIDI file.\n"
@@ -219,7 +219,8 @@ std::string usage() {
            "\n"
            "how to sing it (each overrides what the file says):\n"
            "  --track NAME          sing only this track, by name or number; may be repeated\n"
-           "  --tempo BPM           a steady tempo, the song's own changes left out\n"
+           "  --tempo BPM           a steady tempo, 5 to 500, the song's own changes\n"
+           "                        left out\n"
            "  --voice NAME          sing every track with this voice, by name or number;\n"
            "                        a GM Soundbank instrument plays every instrument\n"
            "                        track instead\n"
@@ -234,6 +235,8 @@ std::string usage() {
            "  --sing-all            on importing a MIDI file, sing every part; otherwise\n"
            "                        the parts without words are played on the GM\n"
            "                        Soundbank, VocalWriter's own instruments\n"
+           "  --remove-velocities   on importing a MIDI file, remove the note velocities\n"
+           "                        from the sung parts, so they take the track's\n"
            "\n"
            "what it can tell you:\n"
            "  --list-voices         every voice of every engine, numbered\n"
@@ -292,6 +295,7 @@ CliArgs parse_args(const std::vector<std::string> &argv) {
         else if (s == "--from") number(s, need(i, s), &a.start);
         else if (s == "--close-rests") number(s, need(i, s), &a.close_rests);
         else if (s == "--sing-all") a.sing_all = true;
+        else if (s == "--remove-velocities") a.remove_velocities = true;
         else if (s == "--list-voices") a.list_voices = true;
         else if (s == "--list-tracks") a.list_tracks = true;
         else if (s == "--version") a.version = true;
@@ -358,7 +362,7 @@ int run_cli(const CliArgs &args) {
 
     Song song;
     try {
-        song = open_song(args.file, args.close_rests, args.sing_all);
+        song = open_song(args.file, args.close_rests, args.sing_all, args.remove_velocities);
     } catch (const std::exception &e) {
         return fail("cannot open " + args.file + ": " + e.what());
     }
@@ -387,7 +391,7 @@ int run_cli(const CliArgs &args) {
     }
     // a steady tempo: the song's own changes go too
     if (args.has_tempo) {
-        song.bpm = args.tempo;
+        song.bpm = std::max(kMinBpm, std::min(kMaxBpm, args.tempo));
         steady_tempo(song);
     }
     if (args.has_consonants) song.consonants = std::max(10.0, std::min(100.0, args.consonants)) / 100.0;

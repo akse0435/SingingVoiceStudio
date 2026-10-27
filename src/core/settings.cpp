@@ -55,6 +55,8 @@ Settings load_settings() {
         s.close_rests = doc["close_rests"].get<bool>();
     if (doc.contains("close_rests_beats") && doc["close_rests_beats"].is_number())
         s.close_rests_beats = std::max(0.0, doc["close_rests_beats"].get<double>());
+    if (doc.contains("remove_note_velocities") && doc["remove_note_velocities"].is_boolean())
+        s.remove_note_velocities = doc["remove_note_velocities"].get<bool>();
     return s;
 }
 
@@ -65,6 +67,7 @@ bool save_settings(const Settings &s) {
     if (!s.panthera_folder.empty()) doc["panthera_folder"] = s.panthera_folder;
     doc["close_rests"] = s.close_rests;
     doc["close_rests_beats"] = s.close_rests_beats;
+    doc["remove_note_velocities"] = s.remove_note_velocities;
     return write_text(in_folder("settings.json"), doc.dump(1) + "\n");
 }
 
