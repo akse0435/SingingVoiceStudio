@@ -119,6 +119,7 @@ private:
     bool returning();
     void give_back_focus();
     void to_tracks();
+    void show_title();
 
     // -- notes ------------------------------------------------------------
     int selection() const;

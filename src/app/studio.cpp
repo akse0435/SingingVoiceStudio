@@ -2309,9 +2309,15 @@ void Studio::touch(bool dirty) {
         relabel_pending_ = true;
         CallAfter([this] { relabel_history(); });
     }
-    std::string name = path_.empty() ? "Untitled" : base_name(path_);
-    SetTitle(W((dirty ? "*" : "") + name + " - " + kAppName));
+    show_title();
     keep_a_copy();
+}
+
+//: The project's file, or the name of the file the song was imported from
+//: until it is saved as a project, or Untitled.
+void Studio::show_title() {
+    std::string name = !path_.empty() ? base_name(path_) : !import_name_.empty() ? import_name_ : "Untitled";
+    SetTitle(W((dirty_ ? "*" : "") + name + " - " + kAppName));
 }
 
 //: The synthesisers are in this process, so the song is written out a couple
@@ -2449,8 +2455,10 @@ void Studio::on_save(wxCommandEvent &e) {
 }
 
 void Studio::on_save_as(wxCommandEvent &) {
-    wxFileDialog dlg(this, "Save project", "", W(std::string("song") + kProjectSuffix), kProjectWildcard,
-                     wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+    // named after the file the song came from, if it was imported
+    std::string name = song_name();
+    wxFileDialog dlg(this, "Save project", "", W((name.empty() ? std::string("song") : name) + kProjectSuffix),
+                     kProjectWildcard, wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
     if (dlg.ShowModal() != wxID_OK) return;
     std::string path = U(dlg.GetPath());
     if (extension_lower(path) != kProjectSuffix) path += kProjectSuffix;
@@ -2650,6 +2658,7 @@ void Studio::take_midi(const std::string &path, bool append) {
     }
     // what a file made of the song is called, until it is saved as a project
     if (path_.empty() && (!append || import_name_.empty())) import_name_ = base_name(strip_extension(path));
+    show_title();
     size_t total = 0;
     for (const auto &p : got.parts)
         for (const Note &n : p.notes) total += !n.controller;
@@ -2722,6 +2731,7 @@ void Studio::import_vocalwriter(const std::string &path) {
     Clock clock = got.song.clock();
     take(got.song, "");
     import_name_ = base_name(strip_extension(path));
+    show_title();
     int n = 0, parts = 0;
     for (const Track &t : song_.tracks) {
         parts += sings(t);
