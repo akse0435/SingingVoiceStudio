@@ -345,9 +345,11 @@ struct Imported {
 //: leaves their notes the track's velocity, none of their own. A sung
 //: part's program changes are changes of voice, to the one `programs` gives
 //: each number, as vocalwriter_program_voices does (-1 for none).
+//: `close_word_rests`: a sung part's rests in the middle of a word are
+//: closed whatever `close_rests` is (close_short_rests).
 Imported import_midi(const std::string &path, const std::vector<std::string> &names, double close_rests = 0,
                      const std::vector<std::string> &played = {}, bool remove_velocities = false,
-                     int lyrics_on = -1, const std::vector<int> &programs = {});
+                     int lyrics_on = -1, const std::vector<int> &programs = {}, bool close_word_rests = false);
 
 // -- tracks an instrument plays ---------------------------------------------
 
@@ -375,9 +377,10 @@ int common_velocity(std::vector<Note> &notes);
 
 //: The rests between two notes no longer than `longest` beats taken out, the
 //: note before each one held through it, its bend, wheel and controls
-//: stretched with it: a line the file has detached, sung legato. Returns how
-//: many were closed.
-int close_short_rests(std::vector<Note> &notes, double longest);
+//: stretched with it: a line the file has detached, sung legato. With
+//: `in_words`, every rest in the middle of a word too, however long ("al-",
+//: rest, "right"). Returns how many were closed.
+int close_short_rests(std::vector<Note> &notes, double longest, bool in_words = false);
 
 //: Put looked-up pronunciations on the notes an import left blank. Returns
 //: how many words were pronounced. A word the dictionary does not know leaves

@@ -118,7 +118,7 @@ Reverb parse_reverb(const std::string &text) {
 //: A project, a VocalWriter song or a MIDI file, the MIDI imported exactly as
 //: the window does it.
 Song open_song(const std::string &path, double close_rests, bool sing_all, bool remove_velocities,
-               bool plain_held) {
+               bool plain_held, bool close_word_rests) {
     if (is_vocalwriter_song(path)) {
         VwSongImport got = import_vocalwriter_song(path, vocalwriter_program_voices());
         for (const std::string &n : got.notes) say(n);
@@ -134,7 +134,8 @@ Song open_song(const std::string &path, double close_rests, bool sing_all, bool 
     Family *gm = Registry::get().family_of(kGmBase);
     if (!sing_all && gm && gm->available(&why)) played = parts_to_play(parts);
     else if (!sing_all) say("every part is sung: the GM Soundbank cannot play here (" + why + ")");
-    Imported got = import_midi(path, names, close_rests, played, remove_velocities, -1, vocalwriter_program_voices());
+    Imported got = import_midi(path, names, close_rests, played, remove_velocities, -1, vocalwriter_program_voices(),
+                               close_word_rests);
     if (got.closed_rests) say(std::to_string(got.closed_rests) + " short rest" + s_if(size_t(got.closed_rests)) + " closed");
     std::vector<std::string> words;
     size_t pending = 0;
@@ -362,7 +363,7 @@ int run_cli(const CliArgs &args) {
     Song song;
     try {
         song = open_song(args.file, args.close_rests, args.sing_all, args.remove_velocities,
-                         settings.plain_held_vowels);
+                         settings.plain_held_vowels, settings.close_word_rests);
     } catch (const std::exception &e) {
         return fail("cannot open " + args.file + ": " + e.what());
     }

@@ -757,8 +757,8 @@ std::vector<Note> notes_from_clipboard(const std::string &text) {
 
 std::string song_fingerprint(const Song &song) { return song_doc(song).dump(); }
 
-int close_short_rests(std::vector<Note> &notes, double longest) {
-    if (longest <= 0) return 0;
+int close_short_rests(std::vector<Note> &notes, double longest, bool in_words) {
+    if (longest <= 0 && !in_words) return 0;
     // a note whose word is still to be looked up has no phonemes yet, and
     // is no rest
     auto rest = [](const Note &n) { return !n.controller && !n.phonemes.empty() && n.is_rest(); };
@@ -773,9 +773,12 @@ int close_short_rests(std::vector<Note> &notes, double longest) {
     };
     std::vector<Note> out;
     int closed = 0;
+    std::string word;       // the last syllable sung, "al-" running on into "right"
     for (size_t i = 0; i < notes.size(); ++i) {
         const Note &r = notes[i];
-        if (rest(r) && r.beats <= longest + 1e-9 && !out.empty() && sung(out.back()) &&
+        if (!r.word.empty()) word = r.word;
+        bool inside = in_words && !word.empty() && word.back() == '-';
+        if (rest(r) && (r.beats <= longest + 1e-9 || inside) && !out.empty() && sung(out.back()) &&
             i + 1 < notes.size() && sung(notes[i + 1])) {
             Note &n = out.back();
             double a = n.beats, b = r.beats;
@@ -1201,7 +1204,8 @@ void vocalwriter_controls(const MidiTrack &track, Beat beat, std::vector<PlayedC
 }
 
 ImportedPart from_midi(const MidiFile &midi, const MidiTrack &track, const std::string &name,
-                       double grid, double close_rests, int *closed, const std::vector<int> &programs) {
+                       double grid, double close_rests, int *closed, const std::vector<int> &programs,
+                       bool close_word_rests) {
     double div = midi.division ? midi.division : 480;
     auto curve = bend_curve(track);
     // CC 1, the mod wheel, as it stands: already 0 to 127
@@ -1247,7 +1251,7 @@ ImportedPart from_midi(const MidiFile &midi, const MidiTrack &track, const std::
         part.notes.back().velocity = std::max(1, std::min(127, n.velocity));
         at += length;
     }
-    *closed += close_short_rests(part.notes, close_rests);
+    *closed += close_short_rests(part.notes, close_rests, close_word_rests);
     hold_vowels(part.notes);
     // each note's velocity, as VocalWriter's import kept it; the commonest is
     // the track's
@@ -1519,7 +1523,7 @@ std::vector<std::pair<std::string, int>> midi_tracks(const std::string &path) {
 
 Imported import_midi(const std::string &path, const std::vector<std::string> &names, double close_rests,
                      const std::vector<std::string> &played, bool remove_velocities, int lyrics_on,
-                     const std::vector<int> &programs) {
+                     const std::vector<int> &programs, bool close_word_rests) {
     MidiFile midi = read_midi(path, lyrics_on);
     auto named = named_tracks(midi);
     if (named.empty()) throw std::runtime_error("this file has no notes in it");
@@ -1534,7 +1538,8 @@ Imported import_midi(const std::string &path, const std::vector<std::string> &na
             if (nt.first == want) track = nt.second;
         if (!track) throw std::runtime_error("no track named " + want);
         if (std::find(played.begin(), played.end(), want) == played.end()) {
-            out.parts.push_back(from_midi(midi, *track, want, grid, close_rests, &out.closed_rests, programs));
+            out.parts.push_back(
+                from_midi(midi, *track, want, grid, close_rests, &out.closed_rests, programs, close_word_rests));
             if (remove_velocities)
                 for (Note &n : out.parts.back().notes) n.velocity = 0;
             continue;

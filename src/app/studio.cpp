@@ -578,14 +578,18 @@ void Studio::on_auto_preview(wxCommandEvent &) {
 
 //: A setting of the program too: whether a MIDI import closes short rests.
 void Studio::on_close_rests(wxCommandEvent &) {
-    CloseRestsDialog dlg(this, settings_.close_rests, settings_.close_rests_beats);
+    CloseRestsDialog dlg(this, settings_.close_rests, settings_.close_rests_beats, settings_.close_word_rests);
     if (dlg.ShowModal() != wxID_OK) return;
     settings_.close_rests = dlg.on();
     settings_.close_rests_beats = dlg.beats();
+    settings_.close_word_rests = dlg.in_words();
     bool kept = save_settings(settings_);
+    std::string words = settings_.close_word_rests ? ", and every rest in the middle of a word" : "";
     say(W((settings_.close_rests ? "importing MIDI closes the rests between notes up to " +
-                                       beat_count(settings_.close_rests_beats) + " long"
-                                 : std::string("importing MIDI keeps every rest")) +
+                                       beat_count(settings_.close_rests_beats) + " long" + words
+                                 : settings_.close_word_rests ? "importing MIDI closes every rest in the middle "
+                                                                "of a word, and keeps the others"
+                                                              : std::string("importing MIDI keeps every rest")) +
           (kept ? "" : ", for this sitting only: the settings file could not be written")));
 }
 
@@ -2396,6 +2400,7 @@ void Studio::take(const Song &song, const std::string &path) {
 
 void Studio::on_new(wxCommandEvent &) {
     if (!may_discard("Start a new song")) return;
+    to_tracks();
     drop_playback();
     Track t;
     t.name = "Voice 1";
@@ -2616,7 +2621,7 @@ void Studio::take_midi(const std::string &path, bool append) {
         for (const auto &pv : program_map_)
             if (pv.first >= 0 && pv.first < 128) programs[size_t(pv.first)] = pv.second;
         got = import_midi(path, names, rests_to_close(), played, settings_.remove_note_velocities, lyrics_on,
-                          programs);
+                          programs, settings_.close_word_rests);
     } catch (const std::exception &e) {
         say(W(std::string("cannot import: ") + e.what()));
         return;

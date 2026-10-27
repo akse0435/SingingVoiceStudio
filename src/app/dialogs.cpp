@@ -871,7 +871,7 @@ double parse_end(const wxString &text, Sig sig) {
 
 // -- CloseRestsDialog --------------------------------------------------------------------
 
-CloseRestsDialog::CloseRestsDialog(wxWindow *parent, bool on, double beats)
+CloseRestsDialog::CloseRestsDialog(wxWindow *parent, bool on, double beats, bool in_words)
     : wxDialog(parent, wxID_ANY, "Close short rests"), was_(beats) {
     wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
     on_ = new wxCheckBox(this, wxID_ANY, "&Close short rests when importing MIDI");
@@ -882,9 +882,15 @@ CloseRestsDialog::CloseRestsDialog(wxWindow *parent, bool on, double beats)
                     "rests.");
     outer->Add(on_, 0, wxALL, 6);
     beats_ = new wxTextCtrl(this, wxID_ANY, W(fmt_g(beats)), wxDefaultPosition, wxSize(80, -1));
-    labelled(this, outer, "Longest rest to close", beats_, 0, "in beats; 0.125 is a thirty-second note");
+    labelled(this, outer, "Longest rest to close", beats_, 0, "in beats; 0.25 is a sixteenth note");
     enable_labelled(beats_, on);
     on_->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent &) { enable_labelled(beats_, on_->GetValue()); });
+    // whatever the length, and with the box above ticked or not
+    words_ = new wxCheckBox(this, wxID_ANY, "Always close a rest in the &middle of a word");
+    words_->SetValue(in_words);
+    words_->SetToolTip("A rest between two syllables of one word, as \"al-\" and \"right\" with a gap between "
+                       "them, is taken out however long it is, the syllable before it held on.");
+    outer->Add(words_, 0, wxALL, 6);
     outer->Add(buttons(this), 0, wxEXPAND | wxALL, 8);
     SetSizerAndFit(outer);
     on_->SetFocus();

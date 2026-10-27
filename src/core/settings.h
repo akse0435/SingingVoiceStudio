@@ -23,7 +23,9 @@ struct Settings {
     //: close the short rests between notes when a MIDI file is imported,
     //: those up to `close_rests_beats` long
     bool close_rests = false;
-    double close_rests_beats = 0.125;
+    double close_rests_beats = 0.25;
+    //: and every rest in the middle of a word, however long
+    bool close_word_rests = false;
     //: remove the notes' own velocities from the sung tracks of an imported
     //: MIDI file, so they take the track's
     bool remove_note_velocities = false;

@@ -189,9 +189,12 @@ already, and is left out.
 **Short rests** between two notes can be closed as a MIDI file comes in
 (Settings > Close short rests when importing MIDI, Ctrl+Shift+I, off until it
 is turned on; `--close-rests BEATS` on the command line): a rest no longer
-than the length set there, an eighth of a beat to begin with, is taken out
+than the length set there, a quarter of a beat to begin with, is taken out
 and the note before it held on, its bend and wheel stretched with it, so a
-line the file has detached is sung legato. A VocalWriter song keeps its
+line the file has detached is sung legato. Always close a rest in the middle
+of a word, in the same window and off until it is turned on, takes out a rest
+between two syllables of one word however long, "al-" held on to "right"; the
+command line does as the window was last set to. A VocalWriter song keeps its
 rests: it was made for VocalWriter already.
 
 **A vowel held over several notes**, as a MIDI file's lyrics leave a word

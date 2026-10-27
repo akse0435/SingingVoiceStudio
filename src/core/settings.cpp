@@ -59,6 +59,8 @@ Settings load_settings() {
         s.remove_note_velocities = doc["remove_note_velocities"].get<bool>();
     if (doc.contains("vocalwriter_own_path") && doc["vocalwriter_own_path"].is_boolean())
         s.vocalwriter_own_path = doc["vocalwriter_own_path"].get<bool>();
+    if (doc.contains("close_word_rests") && doc["close_word_rests"].is_boolean())
+        s.close_word_rests = doc["close_word_rests"].get<bool>();
     if (doc.contains("plain_held_vowels") && doc["plain_held_vowels"].is_boolean())
         s.plain_held_vowels = doc["plain_held_vowels"].get<bool>();
     if (doc.contains("follow_playback") && doc["follow_playback"].is_boolean())
@@ -75,6 +77,7 @@ bool save_settings(const Settings &s) {
     doc["close_rests_beats"] = s.close_rests_beats;
     doc["remove_note_velocities"] = s.remove_note_velocities;
     doc["vocalwriter_own_path"] = s.vocalwriter_own_path;
+    doc["close_word_rests"] = s.close_word_rests;
     doc["plain_held_vowels"] = s.plain_held_vowels;
     doc["follow_playback"] = s.follow_playback;
     return write_text(in_folder("settings.json"), doc.dump(1) + "\n");

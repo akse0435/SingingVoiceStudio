@@ -237,12 +237,13 @@ private:
 //: Whether a MIDI import closes the short rests between notes, and up to how long.
 class CloseRestsDialog : public wxDialog {
 public:
-    CloseRestsDialog(wxWindow *parent, bool on, double beats);
+    CloseRestsDialog(wxWindow *parent, bool on, double beats, bool in_words);
     bool on() const { return on_->GetValue(); }
     double beats() const;
+    bool in_words() const { return words_->GetValue(); }
 
 private:
-    wxCheckBox *on_;
+    wxCheckBox *on_, *words_;
     wxTextCtrl *beats_;
     double was_;
 };
