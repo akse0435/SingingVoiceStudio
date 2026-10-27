@@ -64,13 +64,24 @@ std::string Note::text() const {
     return out;
 }
 
+Note Note::tempo_change(double bpm) {
+    Note n({}, kDefaultPitch, 0.0);
+    n.controller = true;
+    n.tempo = bpm;
+    return n;
+}
+
 bool Note::is_rest() const {
+    if (controller) return false;
     for (const std::string &p : phonemes)
         if (p != kRest) return false;
     return true;
 }
 
-std::string Note::label() const { return is_rest() ? "(rest)" : text(); }
+std::string Note::label() const {
+    if (controller) return tempo > 0 ? "(tempo change to " + fmt_g(tempo) + ")" : "(controller)";
+    return is_rest() ? "(rest)" : text();
+}
 
 // -- what is shown -------------------------------------------------------------
 
@@ -242,6 +253,7 @@ static std::vector<BendPoint> gather(const std::vector<Note> &notes, Bend Note::
     std::vector<BendPoint> out;
     double at = 0.0, held = 0.0;
     for (const Note &n : notes) {
+        if (n.controller) continue;
         const Bend &c = n.*field;
         if (c.empty()) {
             if (std::fabs(held) >= epsilon) {
@@ -275,7 +287,7 @@ std::vector<std::pair<const Track *, std::string>> export_jobs(const std::vector
     std::set<std::string> taken;
     for (const Track &t : tracks) {
         // a backing track is a file already: there is nothing to write
-        if (t.notes.empty() || t.is_backing()) continue;
+        if (!sings(t) || t.is_backing()) continue;
         std::string stem = file_name(base, "song") + " - " + file_name(t.name);
         std::string name = stem;
         int k = 1;
@@ -338,8 +350,20 @@ Reverb read_reverb(const json &doc) {
     }
 }
 
+//: A controller's changes, only those it makes.
+json controller_doc(const Note &n) {
+    json c = json::object();
+    if (n.tempo > 0) c["tempo"] = round_to(n.tempo, 3);
+    return c;
+}
+
 json note_doc(const Note &n) {
     json d;
+    // on the clipboard, where a controller goes in among the notes
+    if (n.controller) {
+        d["controller"] = controller_doc(n);
+        return d;
+    }
     d["phonemes"] = n.phonemes;
     d["pitch"] = n.pitch;
     d["beats"] = double(n.beats);
@@ -371,9 +395,21 @@ json track_doc(const Track &t) {
     if (t.velocity != kDefaultVelocity) d["velocity"] = t.velocity;
     d["mute"] = t.mute;
     d["solo"] = t.solo;
-    json notes = json::array();
-    for (const Note &n : t.notes) notes.push_back(note_doc(n));
+    // The controllers apart from the notes, each with how many notes come
+    // before it: the notes are what VocalWriter Studio reads, and a track
+    // without controllers is the same file it writes.
+    json notes = json::array(), controllers = json::array();
+    for (const Note &n : t.notes) {
+        if (!n.controller) {
+            notes.push_back(note_doc(n));
+            continue;
+        }
+        json c = controller_doc(n);
+        c["at"] = notes.size();
+        controllers.push_back(c);
+    }
     d["notes"] = notes;
+    if (!controllers.empty()) d["controllers"] = controllers;
     // A track with voice controls of its own writes what it has moved, which
     // may be nothing -- an empty entry still says "its own".
     if (t.voice) d["voice"] = voice_doc(*t.voice);
@@ -415,6 +451,12 @@ bool truthy(const json &v) {
     return false;
 }
 
+void read_controller(const json &c, Note &n) {
+    n = Note::tempo_change(0);
+    if (!c.is_object()) return;
+    if (c.contains("tempo")) n.tempo = std::max(0.0, as_double(c["tempo"], 0));
+}
+
 std::vector<Note> read_notes(const json &entries) {
     std::vector<Note> out;
     if (!entries.is_array()) return out;
@@ -422,6 +464,11 @@ std::vector<Note> read_notes(const json &entries) {
         if (!e.is_object()) continue;
         try {
             Note n;
+            if (e.contains("controller")) {
+                read_controller(e["controller"], n);
+                out.push_back(n);
+                continue;
+            }
             auto ph = e.find("phonemes");
             if (ph != e.end() && ph->is_array())
                 for (const json &p : *ph) n.phonemes.push_back(p.get<std::string>());
@@ -475,6 +522,22 @@ Track read_track(const json &doc, size_t index) {
     t.mute = get("mute") && truthy(*get("mute"));
     t.solo = get("solo") && truthy(*get("solo"));
     if (const json *n = get("notes")) t.notes = read_notes(*n);
+    if (const json *cs = get("controllers"); cs && cs->is_array()) {
+        // in order, each before the note it was saved in front of
+        size_t placed = 0, seen = 0;
+        for (const json &c : *cs) {
+            if (!c.is_object()) continue;
+            Note n;
+            read_controller(c, n);
+            size_t at = c.contains("at") ? size_t(std::max(0, as_int(c.at("at"), 0))) : 0;
+            while (placed < t.notes.size() && (seen < at || t.notes[placed].controller)) {
+                if (!t.notes[placed].controller) ++seen;
+                ++placed;
+            }
+            t.notes.insert(t.notes.begin() + long(placed), n);
+            ++placed;
+        }
+    }
     if (const json *v = get("audio"); v && v->is_string()) t.audio = v->get<std::string>();
     if (const json *v = get("audio_start")) t.audio_start = as_double(*v, 0);
     return t;
@@ -647,6 +710,19 @@ Sig midi_sig(const MidiFile &midi) {
         return {first.num, first.den};
     }
     return kDefaultSig;
+}
+
+//: The tempo changes after the first, at the beats they fall on.
+std::vector<TempoChange> midi_tempo_changes(const MidiFile &midi) {
+    double div = midi.division ? midi.division : 480;
+    std::vector<std::pair<long, long>> all;
+    for (const MidiTrack &t : midi.tracks) all.insert(all.end(), t.tempos.begin(), t.tempos.end());
+    std::stable_sort(all.begin(), all.end(),
+                     [](const std::pair<long, long> &a, const std::pair<long, long> &b) { return a.first < b.first; });
+    std::vector<TempoChange> out;
+    for (size_t i = 1; i < all.size(); ++i)
+        if (all[i].second != all[i - 1].second) out.push_back({all[i].first / div, 60e6 / double(all[i].second)});
+    return clean_tempo_changes(out);
 }
 
 double quantise(double beats, double grid) {
@@ -876,6 +952,7 @@ Imported import_midi(const std::string &path, const std::vector<std::string> &na
     double grid = midi_grid(midi);
     Imported out;
     out.bpm = midi_tempo(midi);
+    out.tempo_changes = midi_tempo_changes(midi);
     out.sig = midi_sig(midi);
     for (const std::string &want : names) {
         const MidiTrack *track = nullptr;
@@ -1066,6 +1143,85 @@ int pronounce(std::vector<ImportedPart> &parts,
         }
     }
     return got;
+}
+
+double Clock::seconds(double beat) const {
+    double s = 0, at = 0, now = bpm;
+    for (const TempoChange &c : changes) {
+        if (c.beat >= beat) break;
+        s += (c.beat - at) * 60.0 / std::max(now, 1e-6);
+        at = c.beat;
+        now = c.bpm;
+    }
+    return s + (beat - at) * 60.0 / std::max(now, 1e-6);
+}
+
+double Clock::bpm_at(double beat) const {
+    double now = bpm;
+    for (const TempoChange &c : changes)
+        if (c.beat <= beat) now = c.bpm;
+    return now;
+}
+
+std::vector<TempoChange> clean_tempo_changes(std::vector<TempoChange> changes) {
+    std::stable_sort(changes.begin(), changes.end(),
+                     [](const TempoChange &a, const TempoChange &b) { return a.beat < b.beat; });
+    std::vector<TempoChange> out;
+    for (TempoChange c : changes) {
+        if (!(c.beat > 1e-9) || !std::isfinite(c.beat) || !std::isfinite(c.bpm) || c.bpm <= 0) continue;
+        c.bpm = std::max(10.0, std::min(250.0, std::nearbyint(c.bpm * 1e3) / 1e3));
+        c.beat = std::nearbyint(c.beat * 1e6) / 1e6;
+        if (!out.empty() && out.back().beat == c.beat) out.back() = c;
+        else out.push_back(c);
+    }
+    return out;
+}
+
+Clock Song::clock() const {
+    // the lowest track first, so that where two change it at one beat the
+    // one higher up is the one kept
+    std::vector<TempoChange> all;
+    for (auto t = tracks.rbegin(); t != tracks.rend(); ++t) {
+        double at = 0;
+        for (const Note &n : t->notes) {
+            if (n.controller && n.tempo > 0) all.push_back({at, n.tempo});
+            at += n.beats;
+        }
+    }
+    std::stable_sort(all.begin(), all.end(),
+                     [](const TempoChange &a, const TempoChange &b) { return a.beat < b.beat; });
+    Clock c{bpm, {}};
+    for (const TempoChange &t : all)
+        if (t.beat <= 1e-9) c.bpm = std::max(10.0, std::min(250.0, t.bpm));
+    c.changes = clean_tempo_changes(all);
+    return c;
+}
+
+Track tempo_track(const std::vector<TempoChange> &changes) {
+    Track t;
+    t.name = "Tempo";
+    double at = 0;
+    for (const TempoChange &c : changes) {
+        if (c.beat > at) t.notes.push_back(Note({kRest}, kDefaultPitch, c.beat - at));
+        t.notes.push_back(Note::tempo_change(c.bpm));
+        at = std::max(at, c.beat);
+    }
+    return t;
+}
+
+bool sings(const Track &track) {
+    for (const Note &n : track.notes)
+        if (!n.controller && !n.is_rest()) return true;
+    return false;
+}
+
+void steady_tempo(Song &song) {
+    for (Track &t : song.tracks) {
+        std::vector<Note> kept;
+        for (const Note &n : t.notes)
+            if (!n.controller || n.tempo <= 0) kept.push_back(n);
+        t.notes = kept;
+    }
 }
 
 }  // namespace svs

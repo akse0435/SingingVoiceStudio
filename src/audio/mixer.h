@@ -53,6 +53,7 @@ struct BackingRequest {
 
 struct RenderRequest {
     double bpm = 120;
+    std::vector<TempoChange> tempo_changes;
     double consonants = 1.0;
     double start = 0.0;          // beats
     Reverb reverb{0, 0};
@@ -61,6 +62,7 @@ struct RenderRequest {
     std::vector<BackingRequest> backings;
     //: beats to the bar, when the metronome is wanted (never in an export)
     std::optional<double> metronome_bar;
+    Clock clock() const { return {bpm, tempo_changes}; }
 };
 
 //: A song mixed in memory, ready to play.
@@ -105,7 +107,7 @@ private:
     //: `whole`: an export, which an engine that keeps its own time sings
     //: part by part rather than phrase by phrase
     Mixed mix_locked(const RenderRequest &req, bool whole = false);
-    std::vector<float> track(const PartRequest &t, double bpm, double consonants, double start,
+    std::vector<float> track(const PartRequest &t, const Clock &clock, double consonants, double start,
                              bool early, bool whole, bool *stopped_short, std::string *error);
     void keep(const std::string &key, std::shared_ptr<const std::vector<float>> sung,
               bool stopped_short, double starts_before);
@@ -151,7 +153,7 @@ private:
 
 //: One tick of the metronome mixed in, accented at each bar line; `start` is
 //: the beat the audio begins on so the ticks stay on the song's beats.
-void with_metronome(std::vector<float> &y, int channels, double bpm, double bar_beats,
+void with_metronome(std::vector<float> &y, int channels, const Clock &clock, double bar_beats,
                     double start);
 
 }  // namespace svs

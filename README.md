@@ -57,6 +57,17 @@ already). The project saves where the file is; a project sent along with its
 file in the same folder finds it there. VocalWriter Studio reads such a
 project too, the backing track as a part with no notes.
 
+**A controller** (Note > Add controller, Ctrl+Shift+C) is a row among the
+notes that takes no time and is sung by nobody: a change from where it stands
+on. Its tempo change applies to the entire song, whichever track it is on --
+where two tracks change the tempo at one beat, the one higher up wins -- and
+mute and solo leave it in force. Every engine sings to the tempo, and
+VocalWriter's voices take the changes as their own song's. A MIDI file's tempo
+changes come in on a Tempo track at the top, rests and controllers alone, so
+each one falls exactly where the file has it. The project keeps a track's
+controllers beside its notes, so a song without any is the same file as
+before.
+
 Notes are written in VocalWriter's phoneme symbols whichever engine sings
 them; each engine translates (the tables are at the top of
 `src/voices/<engine>.cpp`). Add word uses VocalWriter's own dictionary.
@@ -240,6 +251,7 @@ Ctrl and Option for Alt, and Option+H to hear a note.
 | Ctrl+Up / Ctrl+Down | reorder the parts, or move a note |
 | Ctrl+W / Ctrl+N / Ctrl+R | add a word / a note / a rest, after the selected note |
 | Ctrl+Shift+R | a rest to the end of the bar |
+| Ctrl+Shift+C | add a controller: a tempo change for the entire song |
 | Ctrl+E, or Enter on a note | edit it, including its pitch bend |
 | Ctrl+D, or Delete | remove it |
 | Alt+Up / Alt+Down | transpose a semitone |

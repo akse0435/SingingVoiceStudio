@@ -91,6 +91,10 @@ struct Phrase {
     double consonants = 1.0;
     double room = 0.0;
     int channel = 0;
+    //: For such an engine too: the tempo changes inside the phrase, as (beats
+    //: from its start, bpm), `bpm` being the tempo it starts at. Any other
+    //: engine is given the notes already at `bpm`.
+    std::vector<std::pair<double, double>> tempos;
 };
 
 //: A whole part, rests and all, from the song's first beat: for an engine
@@ -105,6 +109,7 @@ struct Part {
     double level = 1.0;
     double consonants = 1.0;
     int channel = 0;
+    std::vector<std::pair<double, double>> tempos;   // (beats from the start, bpm)
 };
 
 //: The rendered phrase. `stopped_short` says the engine ran out of room or
@@ -118,6 +123,19 @@ struct Sung {
     //: how many seconds before the phrase's first beat the samples begin
     double starts_before = 0.0;
 };
+
+//: How far into a phrase or part `beats` falls, in seconds, its tempo
+//: changes (beats from its start, bpm) and all.
+inline double seconds_into(double bpm, const std::vector<std::pair<double, double>> &tempos, double beats) {
+    double s = 0, at = 0;
+    for (const auto &c : tempos) {
+        if (c.first >= beats) break;
+        s += (c.first - at) * 60.0 / bpm;
+        at = c.first;
+        bpm = c.second;
+    }
+    return s + (beats - at) * 60.0 / bpm;
+}
 
 //: The vibrato depth control (0-127) a part sings with when its own setting
 //: is `base` and the mod wheel stands at `mod`.

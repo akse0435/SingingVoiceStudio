@@ -46,8 +46,16 @@ enum {
     VWSEQ_BREATH = 70
 };
 
+/* A change of tempo at a tick, as the song's tempo track has it. */
+typedef struct vwseq_tempo {
+    int32_t time;
+    int bpm;                        /* 10-250 */
+} vwseq_tempo;
+
 typedef struct vwseq_part {
     int bpm;                        /* 10-250, as a tempo event holds it */
+    const vwseq_tempo *tempos;      /* the changes after the start, in order; */
+    int tempo_count;                /* a song takes its first part's */
     int voice;                      /* the voice bank's own index */
     const vwseq_note *notes;        /* in time order */
     int note_count;

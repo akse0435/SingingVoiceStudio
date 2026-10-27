@@ -211,6 +211,7 @@ int collect(void *user, const int16_t *samples, size_t count) {
 struct SeqPart {
     std::vector<vwseq_note> notes;
     std::vector<vwseq_event> events;
+    std::vector<vwseq_tempo> tempos;
     vwseq_part p{};
     //: what of the level is finer than the track level's whole percent
     double residual = 1.0;
@@ -220,12 +221,37 @@ struct SeqPart {
 bool to_seq(const Part &part, int voice, SeqPart *sp) {
     if (part.notes.empty()) return false;
     // The sequencer's tempo is a whole number; a tempo between two is
-    // kept by counting ticks at the whole one.
-    int tempo = int(std::max(10L, std::min(250L, std::lround(part.bpm))));
-    double tick_scale = kTicksPerBeat * tempo / std::max(part.bpm, 1e-6);
+    // kept by counting ticks at the whole one. Tempo changes are whole, and
+    // go in as the song's own.
+    auto whole = [](double bpm) { return int(std::max(10L, std::min(250L, std::lround(bpm)))); };
+    int tempo = whole(part.bpm);
+    double tick_scale = part.tempos.empty() ? kTicksPerBeat * tempo / std::max(part.bpm, 1e-6) : kTicksPerBeat;
     auto ticks = [&](double beats) { return int32_t(std::llround(beats * tick_scale)); };
-    double tick_per_second = kTicksPerBeat * tempo / 60.0;
-    auto at_second = [&](double s) { return int32_t(std::llround(std::max(0.0, s) * tick_per_second)); };
+    struct Span {
+        double tick, second;
+        int bpm;
+    };
+    std::vector<Span> spans = {{0.0, 0.0, tempo}};
+    for (const auto &c : part.tempos) {
+        const Span &last = spans.back();
+        double tick = c.first * kTicksPerBeat;
+        if (tick <= last.tick) continue;
+        spans.push_back({tick, last.second + (tick - last.tick) * 60.0 / (kTicksPerBeat * last.bpm), whole(c.second)});
+        sp->tempos.push_back({int32_t(std::llround(tick)), spans.back().bpm});
+    }
+    auto span_at = [&](auto key, double v) {
+        size_t i = spans.size() - 1;
+        while (i > 0 && spans[i].*key > v) --i;
+        return spans[i];
+    };
+    auto at_second = [&](double s) {
+        Span sp_ = span_at(&Span::second, std::max(0.0, s));
+        return int32_t(std::llround(sp_.tick + (std::max(0.0, s) - sp_.second) * sp_.bpm * kTicksPerBeat / 60.0));
+    };
+    auto second_of = [&](double tick) {
+        Span sp_ = span_at(&Span::tick, tick);
+        return sp_.second + (tick - sp_.tick) * 60.0 / (kTicksPerBeat * sp_.bpm);
+    };
 
     // placed by where each note begins, so that nothing drifts
     std::vector<vwseq_note> &notes = sp->notes;
@@ -331,7 +357,9 @@ bool to_seq(const Part &part, int voice, SeqPart *sp) {
     p.event_count = int(ev.size());
     p.channel = part.channel;
     p.consonants = part.consonants;
-    p.max_seconds = end / tick_per_second + 10.0;
+    p.tempos = sp->tempos.data();
+    p.tempo_count = int(sp->tempos.size());
+    p.max_seconds = second_of(end) + 10.0;
 
     // the level as VocalWriter's track level, in whole percent, and what is
     // finer than that on the samples; a voice VocalWriter sang past full
@@ -369,8 +397,9 @@ public:
             part.notes.push_back(lead);
         }
         part.notes.insert(part.notes.end(), phrase.notes.begin(), phrase.notes.end());
+        part.tempos = phrase.tempos;
         Sung out = sing_part(part);
-        out.starts_before = phrase.room * 60.0 / std::max(phrase.bpm, 1e-6);
+        out.starts_before = seconds_into(phrase.bpm, phrase.tempos, phrase.room);
         return out;
     }
 

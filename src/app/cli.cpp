@@ -146,6 +146,7 @@ Song open_song(const std::string &path) {
     Song song = fresh_song();
     song.bpm = got.bpm;
     song.sig = got.sig;
+    if (!got.tempo_changes.empty()) song.tracks.push_back(tempo_track(got.tempo_changes));
     size_t total = 0;
     for (const auto &p : got.parts) {
         Track t;
@@ -154,8 +155,11 @@ Song open_song(const std::string &path) {
         total += p.notes.size();
         song.tracks.push_back(t);
     }
-    say("imported " + std::to_string(song.tracks.size()) + " track" + s_if(song.tracks.size()) + ", " +
-        std::to_string(total) + " notes, " + fmt_g(std::nearbyint(got.bpm)) + " bpm");
+    say("imported " + std::to_string(got.parts.size()) + " track" + s_if(got.parts.size()) + ", " +
+        std::to_string(total) + " notes, " + fmt_g(std::nearbyint(got.bpm)) + " bpm" +
+        (got.tempo_changes.empty() ? std::string()
+                                   : ", " + std::to_string(got.tempo_changes.size()) + " tempo change" +
+                                         s_if(got.tempo_changes.size()) + " on a Tempo track"));
     return song;
 }
 
@@ -200,7 +204,7 @@ std::string usage() {
            "\n"
            "how to sing it (each overrides what the file says):\n"
            "  --track NAME          sing only this track, by name or number; may be repeated\n"
-           "  --tempo BPM\n"
+           "  --tempo BPM           a steady tempo, the song's own changes left out\n"
            "  --voice NAME          sing every track with this voice, by name or number\n"
            "  --consonants PERCENT  consonant length, 10 to 100\n"
            "  --reverb ROOM,WET     room size and amount, each 0 to 100, as in 40,24\n"
@@ -344,12 +348,22 @@ int run_cli(const CliArgs &args) {
             out(buf);
         }
         size_t n = 0;
-        for (const Track &t : song.tracks) n += t.notes.size();
+        for (const Track &t : song.tracks)
+            for (const Note &x : t.notes) n += !x.controller;
+        Clock clock = song.clock();
         say(std::to_string(song.tracks.size()) + " track" + s_if(song.tracks.size()) + ", " + std::to_string(n) +
-            " notes, " + fmt_g(std::nearbyint(song.bpm)) + " bpm, " + format_sig(song.sig));
+            " notes, " + fmt_g(std::nearbyint(clock.bpm)) + " bpm" +
+            (clock.changes.empty() ? std::string()
+                                   : " and " + std::to_string(clock.changes.size()) + " tempo change" +
+                                         s_if(clock.changes.size())) +
+            ", " + format_sig(song.sig));
         if (args.output.empty() && args.tracks.empty() && args.save.empty()) return 0;
     }
-    if (args.has_tempo) song.bpm = args.tempo;
+    // a steady tempo: the song's own changes go too
+    if (args.has_tempo) {
+        song.bpm = args.tempo;
+        steady_tempo(song);
+    }
     if (args.has_consonants) song.consonants = std::max(10.0, std::min(100.0, args.consonants)) / 100.0;
     if (!args.reverb.empty()) {
         try {
@@ -379,16 +393,23 @@ int run_cli(const CliArgs &args) {
         return fail(e.what());
     }
     if (!args.save.empty()) {
+        // the tracks asked for, and any that only keep the tempo
         Song kept = song;
         kept.tracks.clear();
-        for (const Track *t : wanted) kept.tracks.push_back(*t);
+        for (const Track &t : song.tracks) {
+            bool tempo = false;
+            for (const Note &x : t.notes) tempo = tempo || (x.controller && x.tempo > 0);
+            if (std::find(wanted.begin(), wanted.end(), &t) != wanted.end() || (tempo && !sings(t)))
+                kept.tracks.push_back(t);
+        }
         try {
             save_project(args.save, kept);
         } catch (const std::exception &e) {
             return fail(std::string("could not write ") + args.save + ": " + e.what());
         }
         size_t n = 0;
-        for (const Track &t : kept.tracks) n += t.notes.size();
+        for (const Track &t : kept.tracks)
+            for (const Note &x : t.notes) n += !x.controller;
         say("saved " + args.save + ": " + std::to_string(kept.tracks.size()) + " track" + s_if(kept.tracks.size()) +
             ", " + std::to_string(n) + " notes");
     }

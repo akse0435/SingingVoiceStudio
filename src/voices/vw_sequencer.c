@@ -154,8 +154,13 @@ static unsigned char *write_song(const vwseq_part *parts, int count, const int *
         if (last > last_sung)
             last_sung = last;
     }
-    /* the tempo, and the end mark a beat after the last sung note */
+    /* the tempo and its changes, and the end mark a beat after the last
+       sung note */
     event(&tempo, 0, 0, 4, bpm >> 8, bpm & 0xff, 0, 0);
+    for (i = 0; i < parts[0].tempo_count; i++) {
+        int t = clamp(parts[0].tempos[i].bpm, 10, 250);
+        event(&tempo, 0, parts[0].tempos[i].time, 4, t >> 8, t & 0xff, 0, 0);
+    }
     event(&tempo, 0, last_sung + TICKS_PER_BEAT, 9, 0, 0, 0, 0);
     put(&tempo, kEnd, 4);
 

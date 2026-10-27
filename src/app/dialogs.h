@@ -154,6 +154,19 @@ private:
     std::vector<std::pair<const VoiceControl *, wxSpinCtrl *>> voice_ctrls_;
 };
 
+//: A controller: a change from where it stands in the track on. Its tempo
+//: is the whole song's, whichever track it is on.
+class ControllerDialog : public wxDialog {
+public:
+    ControllerDialog(wxWindow *parent, const Note &controller);
+    //: the controller as the fields have it; a blank field changes nothing
+    Note result() const;
+
+private:
+    Note note_;
+    wxTextCtrl *tempo_;
+};
+
 //: Where Panthera is, for the MacinTalk voices: a folder typed in or browsed
 //: to, or nothing, to look where Panthera's NVDA add-on puts it.
 class PantheraDialog : public wxDialog {

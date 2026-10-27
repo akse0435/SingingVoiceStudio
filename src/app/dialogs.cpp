@@ -607,7 +607,7 @@ SongSettingsDialog::SongSettingsDialog(wxWindow *parent, const Song &song, bool 
     : wxDialog(parent, wxID_ANY, "Song settings"), was_sig_(song.sig) {
     wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
     tempo_ = spin(this, 30, 250, int(song.bpm), 80);
-    labelled(this, outer, "Tempo", tempo_, 0, "beats per minute");
+    labelled(this, outer, "Tempo", tempo_, 0, "beats per minute at the start; a controller changes it");
     sig_ = new wxTextCtrl(this, wxID_ANY, W(format_sig(song.sig)), wxDefaultPosition, wxSize(60, -1));
     labelled(this, outer, "Time signature", sig_, 0, "as 4/4; it sets where the bars fall");
     consonants_ = spin(this, 10, 100, int(std::lrint(song.consonants * 100)), 80);
@@ -655,6 +655,29 @@ void SongSettingsDialog::apply(Song &song) const {
     song.voice = clean_voice(song.voice);
     song.reverb = {room_->GetValue(), wet_->GetValue()};
     song.anticipate = anticipate_->GetValue();
+}
+
+// -- ControllerDialog --------------------------------------------------------------------
+
+ControllerDialog::ControllerDialog(wxWindow *parent, const Note &controller)
+    : wxDialog(parent, wxID_ANY, "Controller"), note_(controller) {
+    wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
+    tempo_ = new wxTextCtrl(this, wxID_ANY, controller.tempo > 0 ? W(fmt_g(controller.tempo)) : wxString(),
+                            wxDefaultPosition, wxSize(80, -1));
+    labelled(this, outer, "Tempo change (applies to the entire song)", tempo_, 0,
+             "beats per minute from here on, 10 to 250; blank for no change");
+    outer->Add(buttons(this), 0, wxEXPAND | wxALL, 8);
+    SetSizerAndFit(outer);
+    tempo_->SetFocus();
+}
+
+Note ControllerDialog::result() const {
+    Note n = note_;
+    double bpm = 0;
+    n.tempo = read_number(tempo_->GetValue(), &bpm) && bpm > 0
+                  ? std::max(10.0, std::min(250.0, std::nearbyint(bpm * 1e3) / 1e3))
+                  : 0.0;
+    return n;
 }
 
 // -- TrackDialog --------------------------------------------------------------------------

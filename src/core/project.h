@@ -50,6 +50,12 @@ struct Note {
     //: The mod wheel across the note, attached to it the way the bend is, so
     //: moving or retiming the note takes it along. Empty is the wheel at rest.
     Mod mod;
+    //: A controller rather than a note: it takes no time and nobody sings
+    //: it, it changes what comes after it. `tempo` is the beats a minute
+    //: from here on, for the whole song whichever track it is on; 0 changes
+    //: nothing.
+    bool controller = false;
+    double tempo = 0;
 
     Note() = default;
     Note(std::vector<std::string> ph, int p = kDefaultPitch, double b = kDefaultBeats,
@@ -57,13 +63,15 @@ struct Note {
         : phonemes(std::move(ph)), pitch(p), beats(b), word(std::move(w)), bend(std::move(bd)),
           mod(std::move(md)) {}
 
+    static Note tempo_change(double bpm);
     std::string text() const;
     bool is_rest() const;
     //: what the list shows: a rest reads as one, not as a per cent sign
     std::string label() const;
     bool operator==(const Note &o) const {
         return phonemes == o.phonemes && pitch == o.pitch && beats == o.beats &&
-               word == o.word && bend == o.bend && mod == o.mod;
+               word == o.word && bend == o.bend && mod == o.mod && controller == o.controller &&
+               tempo == o.tempo;
     }
 };
 
@@ -114,8 +122,27 @@ struct Track {
     }
 };
 
+//: From `beat` on, counted from the song's start, the song goes at `bpm`.
+struct TempoChange {
+    double beat = 0;
+    double bpm = 120;
+    bool operator==(const TempoChange &o) const { return beat == o.beat && bpm == o.bpm; }
+};
+
+//: Where the beats fall in time: a tempo from the start, then its changes.
+struct Clock {
+    double bpm = 120;
+    std::vector<TempoChange> changes;   // in order, all after the first beat
+    double seconds(double beat) const;
+    double bpm_at(double beat) const;
+};
+
+//: The changes in order, one to a beat, none at the start or out of range.
+std::vector<TempoChange> clean_tempo_changes(std::vector<TempoChange> changes);
+
 //: Everything a song is, apart from the window's own state.
 struct Song {
+    //: the tempo it starts at; the tempo changes are controllers on its tracks
     double bpm = 120;
     Sig sig = kDefaultSig;
     double consonants = 1.0;          // a fraction
@@ -129,6 +156,10 @@ struct Song {
                tracks == o.tracks;
     }
     bool operator!=(const Song &o) const { return !(*this == o); }
+    //: the tempo and every track's tempo changes; where two tracks change it
+    //: at one beat, the one higher up wins, and one at the very start is the
+    //: tempo the song starts at
+    Clock clock() const;
 };
 
 //: A song begun afresh, a new one or one imported from MIDI: with the
@@ -137,6 +168,14 @@ struct Song {
 constexpr int kVocalWriterPortamento = 40;
 constexpr Reverb kVocalWriterReverb{40, 24};
 Song fresh_song();
+
+//: A track of rests holding the tempo changes, each at its beat: how an
+//: imported song brings its changes in, wherever they fall.
+Track tempo_track(const std::vector<TempoChange> &changes);
+//: whether a track has a note anybody sings
+bool sings(const Track &track);
+//: the song at its starting tempo throughout, every tempo change taken out
+void steady_tempo(Song &song);
 
 // -- what is shown --------------------------------------------------------
 
@@ -204,6 +243,8 @@ struct ImportedPart {
 };
 struct Imported {
     double bpm = 120;
+    //: the tempo changes after the start, in the file's beats
+    std::vector<TempoChange> tempo_changes;
     Sig sig = kDefaultSig;
     std::vector<ImportedPart> parts;
 };

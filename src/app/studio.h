@@ -135,6 +135,10 @@ private:
     void on_add_word(wxCommandEvent &);
     void on_add_note(wxCommandEvent &);
     void on_add_rest(wxCommandEvent &);
+    void on_add_controller(wxCommandEvent &);
+    std::string controller_said(int i);
+    std::vector<int> selected_notes();
+    const Note *note_before(int at);
     void on_edit(wxCommandEvent &);
     void on_remove(wxCommandEvent &);
 

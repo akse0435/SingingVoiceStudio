@@ -34,7 +34,7 @@ enum {
     ID_ADD_REST, ID_IMPORT, ID_EXPORT, ID_AUTO_PREVIEW, ID_PANTHERA, ID_EXPORT_TRACKS,
     ID_BAR_REST, ID_GOTO_BAR, ID_METRONOME, ID_PLAY_PAUSE, ID_PANES,
     ID_TRACK_NEW, ID_TRACK_BACKING, ID_TRACK_EDIT, ID_TRACK_REMOVE, ID_TRACK_MUTE, ID_TRACK_SOLO,
-    ID_TRACK_UP, ID_TRACK_DOWN, ID_PREVIEW_TIMER, ID_RECOVERY_TIMER,
+    ID_TRACK_UP, ID_TRACK_DOWN, ID_PREVIEW_TIMER, ID_RECOVERY_TIMER, ID_ADD_CONTROLLER,
 };
 
 //: A beat is a quarter note, so a sixteenth is a quarter of a beat: the step
@@ -227,6 +227,8 @@ void Studio::build_menu() {
     note->Append(ID_ADD_REST, K("Add &rest\tCtrl+R"), "Add a silent break of the same length");
     note->Append(ID_BAR_REST, K("Rest to the end of the &bar\tCtrl+Shift+R"),
                  "Add a rest long enough to reach the next bar line");
+    note->Append(ID_ADD_CONTROLLER, K("Add &controller...\tCtrl+Shift+C"),
+                 "A change from here on, taking no time: a tempo change applies to the entire song");
     note->Append(ID_EDIT, K("&Edit note...\tCtrl+E"), "Edit the selected note");
     note->AppendSeparator();
     // No tab, so no global accelerator: Ctrl+C belongs to whatever text field
@@ -328,6 +330,7 @@ void Studio::build_menu() {
     on(ID_ADD_NOTE, &Studio::on_add_note);
     on(ID_ADD_REST, &Studio::on_add_rest);
     on(ID_BAR_REST, &Studio::on_bar_rest);
+    on(ID_ADD_CONTROLLER, &Studio::on_add_controller);
     on(ID_GOTO_BAR, &Studio::on_goto_bar);
     on(ID_EDIT, &Studio::on_edit);
     on(wxID_CUT, &Studio::on_cut);
@@ -478,7 +481,7 @@ void Studio::preview_note(int i) {
 void Studio::preview_now(int i) {
     if (i < 0 || i >= int(notes().size()) || rendering_) return;
     const Note &note = notes()[size_t(i)];
-    if (note.phonemes.empty()) return;          // a rest has nothing to hear
+    if (note.phonemes.empty() || note.controller) return;   // nothing to hear
     stop_audio();
     rendering_ = true;
     mix(request(new std::vector<Note>{note}), [this](Mixed res) { heard(res); });
@@ -498,6 +501,8 @@ void Studio::on_keys(wxCommandEvent &) {
         "Ctrl+N  add a note after the selected note, or at the end",
         "Ctrl+R  add a rest, a silent break",
         "Ctrl+Shift+R  rest to the end of the bar",
+        "Ctrl+Shift+C  add a controller: a change from there on, such as a tempo change, which "
+        "applies to the entire song whichever track it is on",
         "Ctrl+G  go to a bar",
         "Ctrl+E  edit note",
         "Ctrl+D or Delete  remove note",
@@ -757,6 +762,11 @@ void Studio::on_track_backing(wxCommandEvent &) {
 
 std::string Studio::track_sound(const Track &t) const {
     if (t.is_backing()) return "backing track, " + base_name(t.audio);
+    // a track that sings nothing, as the tempo is kept on, has no voice to speak of
+    if (!sings(t)) {
+        for (const Note &n : t.notes)
+            if (n.controller && n.tempo > 0) return "tempo changes";
+    }
     return voice_name(track_voice_of(t));
 }
 
@@ -920,7 +930,7 @@ void Studio::on_bar_rest(wxCommandEvent &) {
         double pos = position(at);
         double left = span - std::fmod(pos, span);
         if (left < 1e-9 || std::fabs(left - span) < 1e-9) left = span;   // a whole bar
-        const Note *nearby = at ? &notes()[size_t(at - 1)] : last();
+        const Note *nearby = note_before(at);
         Note rest({kRest}, nearby ? nearby->pitch : kDefaultPitch, left);
         notes().insert(notes().begin() + at, rest);
         touch();
@@ -945,13 +955,8 @@ std::vector<std::string> Studio::bars() {
 void Studio::sync(int select) {
     list_->DeleteAllItems();
     for (size_t i = 0; i < notes().size(); ++i) {
-        const Note &n = notes()[i];
-        list_->InsertItem(long(i), W(n.label()));
-        list_->SetItem(long(i), 1, W(pitch_name(n.pitch)));
-        list_->SetItem(long(i), 2, W(length_text(n.beats)));
-        list_->SetItem(long(i), 3, W(n.word));
-        list_->SetItem(long(i), 4, W(describe_bend(n.bend)));
-        list_->SetItem(long(i), 5, W(describe_mod(n.mod)));
+        list_->InsertItem(long(i), "");
+        refresh_row(int(i));
     }
     bars_shown_.clear();
     refresh_bars();
@@ -977,6 +982,8 @@ void Studio::on_key(wxKeyEvent &evt) {
         on_play_stop(e);
     } else if (evt.ControlDown() && code == 'A') {
         on_select_all(e);
+    } else if (evt.ControlDown() && evt.ShiftDown() && code == 'C') {
+        on_add_controller(e);
     } else if (evt.ControlDown() && code == 'C') {
         on_copy(e);
     } else if (evt.ControlDown() && code == 'X') {
@@ -996,6 +1003,11 @@ void Studio::on_key(wxKeyEvent &evt) {
 void Studio::refresh_row(int i) {
     const Note &n = notes()[size_t(i)];
     list_->SetItem(i, 0, W(n.label()));
+    // a controller has no pitch, length or words of its own
+    if (n.controller) {
+        for (int c = 1; c <= 5; ++c) list_->SetItem(i, c, "");
+        return;
+    }
     list_->SetItem(i, 1, W(pitch_name(n.pitch)));
     list_->SetItem(i, 2, W(length_text(n.beats)));
     list_->SetItem(i, 3, W(n.word));
@@ -1017,13 +1029,28 @@ void Studio::refresh_bars() {
     }
 }
 
+//: The selected rows that are notes or rests; a controller has no pitch or
+//: length to change. Empty, and said, if there are none.
+std::vector<int> Studio::selected_notes() {
+    std::vector<int> rows;
+    for (int i : selected())
+        if (!notes()[size_t(i)].controller) rows.push_back(i);
+    if (rows.empty()) say(selected().empty() ? "select a note first" : "a controller has no pitch or length");
+    return rows;
+}
+
+//: The nearest note or rest at or before row `at - 1`, else the last: what
+//: a new one takes its pitch and length from.
+const Note *Studio::note_before(int at) {
+    for (int i = std::min(at, int(notes().size())) - 1; i >= 0; --i)
+        if (!notes()[size_t(i)].controller) return &notes()[size_t(i)];
+    return last();
+}
+
 void Studio::nudge_pitch(int by) {
     undoable("transpose notes", [&] {
-        std::vector<int> rows = selected();
-        if (rows.empty()) {
-            say("select a note first");
-            return;
-        }
+        std::vector<int> rows = selected_notes();
+        if (rows.empty()) return;
         for (int i : rows) {
             Note &n = notes()[size_t(i)];
             n.pitch = std::max(0, std::min(127, n.pitch + by));
@@ -1041,11 +1068,8 @@ void Studio::nudge_pitch(int by) {
 //: A sixteenth note longer or shorter.
 void Studio::nudge_length(bool up) {
     undoable("change note length", [&] {
-        std::vector<int> rows = selected();
-        if (rows.empty()) {
-            say("select a note first");
-            return;
-        }
+        std::vector<int> rows = selected_notes();
+        if (rows.empty()) return;
         int moved = 0;
         for (int i : rows) {
             Note &n = notes()[size_t(i)];
@@ -1075,11 +1099,8 @@ void Studio::nudge_length(bool up) {
 //: nudge leaves it, rather than being made as short as it can go.
 void Studio::scale_length(double factor) {
     undoable("change note length", [&] {
-        std::vector<int> rows = selected();
-        if (rows.empty()) {
-            say("select a note first");
-            return;
-        }
+        std::vector<int> rows = selected_notes();
+        if (rows.empty()) return;
         int moved = 0;
         for (int i : rows) {
             Note &n = notes()[size_t(i)];
@@ -1110,7 +1131,11 @@ void Studio::sync_lengths(const std::vector<int> &rows) {
     refresh_bars();
 }
 
-const Note *Studio::last() { return notes().empty() ? nullptr : &notes().back(); }
+const Note *Studio::last() {
+    for (auto it = notes().rbegin(); it != notes().rend(); ++it)
+        if (!it->controller) return &*it;
+    return nullptr;
+}
 
 void Studio::on_select_all(wxCommandEvent &) {
     if (notes().empty()) {
@@ -1239,10 +1264,7 @@ int Studio::insertion_point() {
 
 //: The note a new one takes its pitch and length from: the one it goes in
 //: after, or the last.
-const Note *Studio::insertion_neighbour() {
-    int at = insertion_point();
-    return at > 0 && at <= int(notes().size()) ? &notes()[size_t(at - 1)] : last();
-}
+const Note *Studio::insertion_neighbour() { return note_before(insertion_point()); }
 
 void Studio::on_add_word(wxCommandEvent &) {
     if (!takes_notes()) return;
@@ -1285,7 +1307,7 @@ void Studio::on_add_rest(wxCommandEvent &) {
     if (!takes_notes()) return;
     undoable("add rest", [&] {
         int i = selection();
-        const Note *nearby = i >= 0 ? &notes()[size_t(i)] : last();
+        const Note *nearby = i >= 0 ? note_before(i + 1) : last();
         Note rest({kRest}, nearby ? nearby->pitch : kDefaultPitch, nearby ? nearby->beats : kDefaultBeats);
         int at = i < 0 ? int(notes().size()) : i + 1;
         notes().insert(notes().begin() + at, rest);
@@ -1295,11 +1317,63 @@ void Studio::on_add_rest(wxCommandEvent &) {
     });
 }
 
+//: A controller: a change from here on, which takes no time. A tempo it sets
+//: is the whole song's.
+void Studio::on_add_controller(wxCommandEvent &) {
+    if (!takes_notes()) return;
+    undoable("add controller", [&] {
+        ControllerDialog dlg(this, Note::tempo_change(0));
+        if (dlg.ShowModal() != wxID_OK) return;
+        Note c = dlg.result();
+        if (c.tempo <= 0) {
+            say("nothing was filled in, so no controller was added");
+            return;
+        }
+        int at = insertion_point();
+        notes().insert(notes().begin() + at, c);
+        touch();
+        sync(at);
+        say(W("added a controller: " + controller_said(at)));
+    });
+}
+
+//: What a controller changes, where, and what that does to the song.
+std::string Studio::controller_said(int i) {
+    const Note &c = notes()[size_t(i)];
+    double at = position(i);
+    auto bb = bar_and_beat(at, signature());
+    std::string where = "bar " + std::to_string(bb.first) + " beat " + fmt_g(std::nearbyint(bb.second * 1000) / 1000);
+    if (c.tempo <= 0) return "nothing at " + where + ". Delete removes it";
+    std::string out = "tempo " + fmt_g(c.tempo) + " from " + where + ", for the whole song";
+    // the same beat changed elsewhere too: the track higher up wins
+    for (size_t k = 0; k < song_.tracks.size(); ++k) {
+        if (int(k) == current_) continue;
+        double b = 0;
+        for (const Note &n : song_.tracks[k].notes) {
+            if (n.controller && n.tempo > 0 && std::fabs(b - at) < 1e-6) {
+                out += ". " + song_.tracks[k].name + " changes it there too, and the track higher up wins";
+                return out;
+            }
+            b += n.beats;
+        }
+    }
+    return out;
+}
+
 void Studio::on_edit(wxCommandEvent &) {
     undoable("edit note", [&] {
         int i = selection();
         if (i < 0) {
             say("select a note first");
+            return;
+        }
+        if (notes()[size_t(i)].controller) {
+            ControllerDialog dlg(this, notes()[size_t(i)]);
+            if (dlg.ShowModal() != wxID_OK) return;
+            notes()[size_t(i)] = dlg.result();
+            touch();
+            sync(i);
+            say(W("controller: " + controller_said(i)));
             return;
         }
         NoteDialog dlg(this, this, &notes()[size_t(i)]);
@@ -1419,6 +1493,10 @@ void Studio::on_hear(wxCommandEvent &) {
         say("already rendering");
         return;
     }
+    if (notes()[size_t(i)].controller) {
+        say("a controller has nothing to hear");
+        return;
+    }
     stop_audio();
     rendering_ = true;
     mix(request(new std::vector<Note>{notes()[size_t(i)]}), [this](Mixed res) { heard(res); });
@@ -1494,7 +1572,7 @@ void Studio::start_playing(double start, bool quiet) {
         auto bb = bar_and_beat(start, signature());
         say(W(printf_s("rendering %s from bar %d beat %s, about %.1f seconds", plural(live.size(), "track").c_str(),
                        bb.first, fmt_g(std::nearbyint(bb.second * 100) / 100).c_str(),
-                       (total - start) * 60.0 / song_.bpm)));
+                       song_.clock().seconds(total) - song_.clock().seconds(start))));
     }
     mix(playback(start), [this, quiet](Mixed res) { played(res, quiet); });
 }
@@ -1879,6 +1957,8 @@ void Studio::on_import(wxCommandEvent &) {
     song.bpm = got.bpm;
     song.sig = got.sig;
     song.consonants = song_.consonants;
+    // the tempo changes on a track of their own, above the parts
+    if (!got.tempo_changes.empty()) song.tracks.push_back(tempo_track(got.tempo_changes));
     int program = track().program;
     for (const ImportedPart &p : got.parts) {
         Track t;
@@ -1892,6 +1972,11 @@ void Studio::on_import(wxCommandEvent &) {
     for (const auto &p : got.parts) total += p.notes.size();
     say(W("imported " + base_name(path) + ": " + plural(got.parts.size(), "track") + ", " + std::to_string(total) +
           " notes, " + fmt_g(std::nearbyint(got.bpm)) + " bpm, " + format_sig(got.sig)));
+    if (!got.tempo_changes.empty()) {
+        sync_tracks(1);
+        sync(0);
+        say(W(plural(got.tempo_changes.size(), "tempo change") + " on the Tempo track at the top"));
+    }
     bool any_pending = false, any_words = false;
     for (const auto &p : got.parts) {
         any_pending = any_pending || !p.pending.empty();
@@ -1930,7 +2015,10 @@ void Studio::imported_words(std::vector<ImportedPart> parts,
                             const std::map<std::string, std::vector<std::string>> &found, size_t pending) {
     undoable("pronounce imported words", [&] {
         int got = pronounce(parts, found);
-        for (size_t ti = 0; ti < song_.tracks.size() && ti < parts.size(); ++ti) song_.tracks[ti].notes = parts[ti].notes;
+        // the parts are the last tracks: a Tempo track may come first
+        size_t first = song_.tracks.size() > parts.size() ? song_.tracks.size() - parts.size() : 0;
+        for (size_t ti = 0; first + ti < song_.tracks.size() && ti < parts.size(); ++ti)
+            song_.tracks[first + ti].notes = parts[ti].notes;
         sync(0);
         touch();
         size_t missing = pending - size_t(got);
