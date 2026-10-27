@@ -349,7 +349,7 @@ void Studio::build_menu() {
 
     wxMenu *track = new wxMenu();
     track->Append(ID_TRACK_NEW, K("&New track\tCtrl+T"), "Add another part, with its own voice");
-    track->Append(ID_TRACK_BACKING, K("New &backing track...\tCtrl+Shift+B"),
+    track->Append(ID_TRACK_BACKING, K("Add &backing track...\tCtrl+Shift+B"),
                   "A sound file played under the voices");
     track->Append(ID_TRACK_EDIT, K("&Track settings... (Enter on a track)"), "Name, voice, volume and pan");
     track->Append(ID_TRACK_REMOVE, K("&Remove track (Delete on a track)"),

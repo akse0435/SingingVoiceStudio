@@ -49,7 +49,7 @@ rest the part sings with its own vibrato setting, and turning it up deepens it
 towards full. VocalWriter's voices get it as their own vibrato-depth control,
 the others through the shared pitch curve.
 
-**A backing track** (Track > New backing track, Ctrl+Shift+B) is a sound file
+**A backing track** (Track > Add backing track, Ctrl+Shift+B) is a sound file
 -- WAV, MP3, FLAC or Ogg Vorbis -- played under the voices: the band the song
 is sung over. It sits in the tracks list like any part, with its own volume,
 pan, mute and solo, and Enter on it sets its file and where it starts, in
