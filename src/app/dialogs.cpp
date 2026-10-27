@@ -687,6 +687,14 @@ NoteDialog::NoteDialog(wxWindow *parent, Studio *studio, const Note *note, const
     beats_ = new wxTextCtrl(this, wxID_ANY, W(fmt_g(note_.beats)), wxDefaultPosition, wxSize(90, -1));
     labelled(this, outer, "Beats", beats_, 0,
              played_ ? "to the next note; 0 plays it with the next one, as a chord" : "");
+    // VocalWriter keeps a velocity on each note, which only its voices and
+    // instruments hear as more than loudness: greyed for another engine
+    bool vocalwriter = uses_velocity(voice);
+    velocity_ = new wxTextCtrl(this, wxID_ANY, note_.velocity ? W(std::to_string(note_.velocity)) : wxString(),
+                               wxDefaultPosition, wxSize(90, -1));
+    labelled(this, outer, "Velocity", velocity_, 0,
+             "1 to 127, blank for the track's; VocalWriter's voices and the GM Soundbank only");
+    enable_labelled(velocity_, vocalwriter);
     // how long an instrument holds it, if not its beats
     hold_ = new wxTextCtrl(this, wxID_ANY, note_.hold > 0 ? W(fmt_g(note_.hold)) : wxString(), wxDefaultPosition,
                            wxSize(90, -1));
@@ -713,14 +721,7 @@ NoteDialog::NoteDialog(wxWindow *parent, Studio *studio, const Note *note, const
     mods->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) { on_points(kModCurve); });
     outer->Add(mods, 0, wxALL, 6);
 
-    // VocalWriter keeps a velocity and its controls on each note, which
-    // only its voices and instruments hear: greyed for another engine
-    bool vocalwriter = uses_velocity(voice);
-    velocity_ = new wxTextCtrl(this, wxID_ANY, note_.velocity ? W(std::to_string(note_.velocity)) : wxString(),
-                               wxDefaultPosition, wxSize(90, -1));
-    labelled(this, outer, "Velocity", velocity_, 0,
-             "1 to 127, blank for the track's; VocalWriter's voices and the GM Soundbank only");
-    enable_labelled(velocity_, vocalwriter);
+    // and its controls, greyed the same way
     wxButton *controls = new wxButton(this, wxID_ANY, "VocalWriter &controls...");
     controls->Bind(wxEVT_BUTTON, &NoteDialog::on_controls, this);
     controls->Enable(vocalwriter);
