@@ -698,10 +698,21 @@ void Mixer::keep(const std::string &key, std::shared_ptr<const std::vector<float
                  bool stopped_short, double starts_before, int channels) {
     phrases_[key] = {sung, stopped_short, ++clock_, starts_before, channels};
     phrase_bytes_ += sung->size() * sizeof(float);
-    while (phrase_bytes_ > kPhraseBytes && phrases_.size() > 1) {
+}
+
+// After a mix, not during it, or a song bigger than the store pushes out its
+// own parts before using them again. What the mix used stays, and the room
+// is the biggest mix and a quarter, so one note heard keeps the song.
+void Mixer::trim() {
+    size_t used = 0;
+    for (const auto &k : phrases_)
+        if (k.second.used >= mixing_since_) used += k.second.samples->size() * sizeof(float);
+    biggest_mix_ = std::max(biggest_mix_, used);
+    size_t room = std::max(kPhraseBytes, biggest_mix_ + biggest_mix_ / 4);
+    while (phrase_bytes_ > room && phrases_.size() > 1) {
         auto oldest = phrases_.end();
         for (auto it = phrases_.begin(); it != phrases_.end(); ++it)
-            if (it->first != key && (oldest == phrases_.end() || it->second.used < oldest->second.used))
+            if (it->second.used < mixing_since_ && (oldest == phrases_.end() || it->second.used < oldest->second.used))
                 oldest = it;
         if (oldest == phrases_.end()) break;
         phrase_bytes_ -= oldest->second.samples->size() * sizeof(float);
@@ -1049,6 +1060,7 @@ Mixed Mixer::mix_locked(const RenderRequest &req, bool whole) {
     RenderRequest core = req;
     core.metronome_bar.reset();
     std::string key = request_key(core) + (whole ? "whole" : "");
+    mixing_since_ = clock_ + 1;
     if (last_.ok && key == last_key_) {
         Mixed again = last_;
         again.cached = true;
@@ -1289,6 +1301,7 @@ Mixed Mixer::finished(const std::string &key, std::vector<float> out, int channe
     res.samples = std::make_shared<const std::vector<float>>(std::move(out));
     last_key_ = key;
     last_ = res;
+    trim();
     return res;
 }
 

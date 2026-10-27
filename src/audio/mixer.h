@@ -173,6 +173,12 @@ private:
     std::map<std::string, Kept> phrases_;
     size_t phrase_bytes_ = 0;
     unsigned long long clock_ = 0;
+    //: the clock when the mix in hand began: what it used since is kept
+    unsigned long long mixing_since_ = 0;
+    //: the most any one mix has used of the store, in bytes
+    size_t biggest_mix_ = 0;
+    //: the store back within its room, all but what the last mix used
+    void trim();
     //: and the last song mixed, so playing it again does nothing at all
     std::string last_key_;
     Mixed last_;
