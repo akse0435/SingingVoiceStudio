@@ -342,10 +342,12 @@ struct Imported {
 //: `close_rests`: the longest rest between two notes to close, in beats; 0
 //: keeps every rest. The tracks named in `played` are played by the GM
 //: Soundbank, chords and all; the rest are sung, and `remove_velocities`
-//: leaves their notes the track's velocity, none of their own.
+//: leaves their notes the track's velocity, none of their own. A sung
+//: part's program changes are changes of voice, to the one `programs` gives
+//: each number, as vocalwriter_program_voices does (-1 for none).
 Imported import_midi(const std::string &path, const std::vector<std::string> &names, double close_rests = 0,
                      const std::vector<std::string> &played = {}, bool remove_velocities = false,
-                     int lyrics_on = -1);
+                     int lyrics_on = -1, const std::vector<int> &programs = {});
 
 // -- tracks an instrument plays ---------------------------------------------
 

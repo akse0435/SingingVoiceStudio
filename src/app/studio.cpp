@@ -850,6 +850,11 @@ void Studio::set_program_map(const std::vector<int> &picks) {
         path.swap(vw_waiting_);
         import_vocalwriter(path);
     }
+    if (!midi_waiting_.empty() && !voices_.empty()) {
+        std::string path;
+        path.swap(midi_waiting_);
+        take_midi(path, false);
+    }
 }
 
 void Studio::set_voices(std::vector<VoiceListing> v) {
@@ -858,7 +863,7 @@ void Studio::set_voices(std::vector<VoiceListing> v) {
     resolve_voice_names(song_, voices_);
     sync_tracks(current_);        // the Voice column can now say
     // a MIDI file opened before it arrived comes in now
-    if (!midi_waiting_.empty() && !voices_.empty()) {
+    if (!midi_waiting_.empty() && !voices_.empty() && programs_known_) {
         std::string path;
         path.swap(midi_waiting_);
         take_midi(path, false);
@@ -2479,8 +2484,9 @@ void Studio::on_append(wxCommandEvent &) {
 //: A MIDI file's parts, chosen as Import asks: as a new song, or with
 //: `append` under this one.
 void Studio::take_midi(const std::string &path, bool append) {
-    // which parts the GM Soundbank can play is known once the voices are
-    if (voices_.empty()) {
+    // which parts the GM Soundbank can play is known once the voices are,
+    // and which voice a sung part's program changes to once the program map is
+    if (voices_.empty() || !programs_known_) {
         if (append) say("the voices have not loaded yet. Try again in a moment.");
         else midi_waiting_ = path;
         return;
@@ -2566,7 +2572,11 @@ void Studio::take_midi(const std::string &path, bool append) {
     }
     Imported got;
     try {
-        got = import_midi(path, names, rests_to_close(), played, settings_.remove_note_velocities, lyrics_on);
+        std::vector<int> programs(128, -1);
+        for (const auto &pv : program_map_)
+            if (pv.first >= 0 && pv.first < 128) programs[size_t(pv.first)] = pv.second;
+        got = import_midi(path, names, rests_to_close(), played, settings_.remove_note_velocities, lyrics_on,
+                          programs);
     } catch (const std::exception &e) {
         say(W(std::string("cannot import: ") + e.what()));
         return;

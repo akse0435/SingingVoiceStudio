@@ -141,7 +141,9 @@ the likeliest taken; `--sing-all` sings every part. Each track takes its volume 
 file, CC 7 by CC 11 with both at 127 being 100%, at its loudest, with
 VocalWriter's volume control against that where it changes, and its pan,
 CC 10, from the one at its first note, each change after that a controller
-before the note it comes at, sung or played. A MIDI file
+before the note it comes at, sung or played. A sung part's program changes
+after its first note are controllers too, changes of voice to the one
+VocalWriter's own program number picks. A MIDI file
 opened from the desktop or named on the command line comes in the same way.
 A syllable the file gives no note of its own is sung where it falls: one
 in the middle of a note ("the sea" on one note) divides it there, and one

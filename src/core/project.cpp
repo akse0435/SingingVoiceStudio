@@ -1107,9 +1107,35 @@ int midi_pan(const MidiTrack &track, Beat beat, std::vector<PlayedChange> &chang
     return pan;
 }
 
-//: Each "pan" change a controller before the first row that starts where it
-//: is or after, as lay_out_played puts an instrument's.
-void place_pans(std::vector<Note> &rows, const std::vector<PlayedChange> &changes) {
+//: Into `changes`, each program change after the track's first note that
+//: moves it, as "voice": the voice `programs` gives the number, where it
+//: gives one.
+template <class Beat>
+void midi_voices(const MidiTrack &track, Beat beat, const std::vector<int> &programs,
+                 std::vector<PlayedChange> &changes) {
+    long first = track.notes.empty() ? 0 : track.notes.front().tick;
+    for (const MidiNote &n : track.notes) first = std::min(first, n.tick);
+    auto all = track.programs;
+    std::stable_sort(all.begin(), all.end(),
+                     [](const std::pair<long, int> &a, const std::pair<long, int> &b) { return a.first < b.first; });
+    std::vector<std::pair<long, int>> later;     // the last at each tick
+    for (const auto &p : all) {
+        if (p.first <= first) continue;
+        if (!later.empty() && later.back().first == p.first) later.back().second = p.second;
+        else later.push_back(p);
+    }
+    int now = program_at_start(track);
+    for (const auto &p : later) {
+        if (p.second == now) continue;
+        now = p.second;
+        if (now >= 0 && size_t(now) < programs.size() && programs[size_t(now)] >= 0)
+            changes.push_back({beat(p.first), "voice", double(programs[size_t(now)])});
+    }
+}
+
+//: Each "voice" and "pan" change a controller before the first row that
+//: starts where it is or after, as lay_out_played puts an instrument's.
+void place_controllers(std::vector<Note> &rows, std::vector<PlayedChange> changes) {
     const double eps = 1e-9;
     std::vector<std::vector<Note>> before(rows.size() + 1);
     std::vector<double> starts;
@@ -1118,12 +1144,15 @@ void place_pans(std::vector<Note> &rows, const std::vector<PlayedChange> &change
         starts.push_back(at);
         at += n.beats;
     }
+    std::stable_sort(changes.begin(), changes.end(),
+                     [](const PlayedChange &a, const PlayedChange &b) { return a.beat < b.beat; });
     for (const PlayedChange &c : changes) {
-        if (c.name != "pan") continue;
+        if (c.name != "voice" && c.name != "pan") continue;
         size_t k = 0;
         while (k < rows.size() && starts[k] < c.beat - eps) ++k;
         Note change = Note::tempo_change(0);
-        change.pan = int(c.value);
+        if (c.name == "voice") change.voice_id = int(c.value);
+        else change.pan = int(c.value);
         before[k].push_back(change);
     }
     std::vector<Note> all;
@@ -1172,7 +1201,7 @@ void vocalwriter_controls(const MidiTrack &track, Beat beat, std::vector<PlayedC
 }
 
 ImportedPart from_midi(const MidiFile &midi, const MidiTrack &track, const std::string &name,
-                       double grid, double close_rests, int *closed) {
+                       double grid, double close_rests, int *closed, const std::vector<int> &programs) {
     double div = midi.division ? midi.division : 480;
     auto curve = bend_curve(track);
     // CC 1, the mod wheel, as it stands: already 0 to 127
@@ -1228,10 +1257,13 @@ ImportedPart from_midi(const MidiFile &midi, const MidiTrack &track, const std::
     part.volume = midi_volume(track, [&](long tick) { return double(tick) / div; }, volumes);
     vocalwriter_controls(track, [&](long tick) { return double(tick) / div; }, volumes);
     place_controls(part.notes, volumes);
-    // the pan, as an instrument's, its changes where the notes fall on the grid
-    std::vector<PlayedChange> pans;
-    part.pan = midi_pan(track, [&](long tick) { return double(edge(double(tick))) * step; }, pans);
-    place_pans(part.notes, pans);
+    // the pan, as an instrument's, and the program changes as changes of
+    // voice, each where the notes fall on the grid
+    std::vector<PlayedChange> changes;
+    auto on_grid = [&](long tick) { return double(edge(double(tick))) * step; };
+    part.pan = midi_pan(track, on_grid, changes);
+    midi_voices(track, on_grid, programs, changes);
+    place_controllers(part.notes, changes);
     part.pending = pending_words(part.notes);
     return part;
 }
@@ -1486,7 +1518,8 @@ std::vector<std::pair<std::string, int>> midi_tracks(const std::string &path) {
 }
 
 Imported import_midi(const std::string &path, const std::vector<std::string> &names, double close_rests,
-                     const std::vector<std::string> &played, bool remove_velocities, int lyrics_on) {
+                     const std::vector<std::string> &played, bool remove_velocities, int lyrics_on,
+                     const std::vector<int> &programs) {
     MidiFile midi = read_midi(path, lyrics_on);
     auto named = named_tracks(midi);
     if (named.empty()) throw std::runtime_error("this file has no notes in it");
@@ -1501,7 +1534,7 @@ Imported import_midi(const std::string &path, const std::vector<std::string> &na
             if (nt.first == want) track = nt.second;
         if (!track) throw std::runtime_error("no track named " + want);
         if (std::find(played.begin(), played.end(), want) == played.end()) {
-            out.parts.push_back(from_midi(midi, *track, want, grid, close_rests, &out.closed_rests));
+            out.parts.push_back(from_midi(midi, *track, want, grid, close_rests, &out.closed_rests, programs));
             if (remove_velocities)
                 for (Note &n : out.parts.back().notes) n.velocity = 0;
             continue;

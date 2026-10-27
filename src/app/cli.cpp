@@ -134,7 +134,7 @@ Song open_song(const std::string &path, double close_rests, bool sing_all, bool 
     Family *gm = Registry::get().family_of(kGmBase);
     if (!sing_all && gm && gm->available(&why)) played = parts_to_play(parts);
     else if (!sing_all) say("every part is sung: the GM Soundbank cannot play here (" + why + ")");
-    Imported got = import_midi(path, names, close_rests, played, remove_velocities);
+    Imported got = import_midi(path, names, close_rests, played, remove_velocities, -1, vocalwriter_program_voices());
     if (got.closed_rests) say(std::to_string(got.closed_rests) + " short rest" + s_if(size_t(got.closed_rests)) + " closed");
     std::vector<std::string> words;
     size_t pending = 0;
