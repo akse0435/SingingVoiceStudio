@@ -119,6 +119,17 @@ bool is_vowel(const std::string &symbol) {
     return v.count(symbol) > 0;
 }
 
+std::string first_sound(const std::string &vowel) {
+    static const std::map<std::string, std::string> first = {
+        {"EY", "EH"}, {"AR", "AA"}, {"AW", "AA"}, {"AY", "AA"}, {"IR", "IY"},
+        {"OR", "O"},  {"OY", "O"},  {"UR", "UH"}, {"XR", "EH"},
+    };
+    auto it = first.find(vowel);
+    return it == first.end() ? vowel : it->second;
+}
+
+std::string after_glide(const std::string &vowel) { return vowel == "YU" ? "UW" : vowel; }
+
 bool legal_onset(const std::vector<std::string> &syms) {
     if (syms.size() <= 1) return true;
     if (syms.size() == 2)

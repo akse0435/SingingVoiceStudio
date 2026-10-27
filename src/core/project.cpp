@@ -1581,23 +1581,6 @@ Imported import_midi(const std::string &path, const std::vector<std::string> &na
 
 namespace {
 
-//: The vowel a note holding on to `vowel` sings when the vowel's whole sound
-//: is left to the last note: a diphthong's first part, an r-coloured vowel's
-//: plain one. The vowel itself if it is neither.
-std::string first_sound(const std::string &vowel) {
-    static const std::map<std::string, std::string> first = {
-        {"EY", "EH"}, {"AR", "AA"}, {"AW", "AA"}, {"AY", "AA"}, {"IR", "IY"},
-        {"OR", "O"},  {"OY", "O"},  {"UR", "UH"}, {"XR", "EH"},
-    };
-    auto it = first.find(vowel);
-    return it == first.end() ? vowel : it->second;
-}
-
-//: The vowel the notes after the first sing when `vowel` opens on a glide
-//: that is sung once, on the first note: YU's y, so UW is held after it.
-//: The vowel itself if it has none.
-std::string after_glide(const std::string &vowel) { return vowel == "YU" ? "UW" : vowel; }
-
 //: One syllable sung over `share` notes, split at its vowel: each note after
 //: the first starts on it, as "s t AR", "AR t". With no vowel the notes after
 //: the first rest. `plain`: every note but the last holds the vowel's first

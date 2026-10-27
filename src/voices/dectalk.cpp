@@ -53,10 +53,10 @@
 // scale can: each phoneme takes the semitone nearest the bent pitch at its
 // start (after any portamento has arrived), and a new note number is sent
 // where that changes. A vowel that the bend moves to another semitone is
-// sung as two of itself, the second on the new note, as DECtalk sings a
-// vowel held over two notes. A bend held by whole semitones is sung
-// exactly, with DECtalk's glide into it; one smaller than half a semitone
-// is not heard.
+// sent again on the new note, as a vowel held over two notes is, the first
+// piece on its first sound (Plan::hold_plain). A bend held by whole
+// semitones is sung exactly, with DECtalk's glide into it; one smaller than
+// half a semitone is not heard.
 //
 // VocalWriter's phonemes are DECtalk's nearly one for one (the table below).
 // Every vowel, and syllabic l and n, is stressed, as a sung syllable is: an
@@ -639,6 +639,7 @@ public:
         shape();
         pitch();
         split();
+        hold_plain();
         choose_octave();
         build();
     }
@@ -761,6 +762,31 @@ private:
             out.push_back(cur);
         }
         placed_.swap(out);
+    }
+
+    // A vowel held over several notes, or cut by a bend, is sent once for
+    // each piece, and DECtalk sings each whole: EY over two as "ey ey"
+    // glides to its second part twice. So every piece but the last holds
+    // the vowel's first sound, "eh ey", and YU is whole on the first alone,
+    // "yu uw" (first_sound, after_glide), whatever the held vowel setting.
+    void hold_plain() {
+        for (size_t k = 0; k < placed_.size();) {
+            size_t j = k + 1;
+            if (placed_[k].ph->kind == kVowel)
+                while (j < placed_.size() && placed_[j].ph == placed_[k].ph) ++j;
+            std::string vw = placed_[k].ph->vw;
+            for (size_t i = k; j - k > 1 && i < j; ++i) {
+                Placed &p = placed_[i];
+                std::string sound = after_glide(vw) != vw ? (i > k ? after_glide(vw) : vw)
+                                                          : (i + 1 < j ? first_sound(vw) : vw);
+                // an r-coloured piece (shape) is left as it is
+                const DtPhone *q = dt_phone(sound);
+                if (sound == vw || !q || p.sym != p.ph->dt) continue;
+                p.ph = q;
+                p.sym = q->dt;
+            }
+            k = j;
+        }
     }
 
     // DECtalk sings from C2 to C5. A phrase that goes outside that is moved
