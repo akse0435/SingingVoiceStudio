@@ -2434,6 +2434,13 @@ void Studio::open_project(const std::string &path) {
     for (const Track &t : song_.tracks) n += int(t.notes.size());
     say(W("opened " + base_name(path) + ": " + plural(song_.tracks.size(), "track") + ", " + std::to_string(n) +
           " notes, " + fmt_g(bpm) + " bpm"));
+    to_tracks();
+}
+
+//: A song just come in starts in the tracks list, wherever the keyboard was;
+//: after the dialogs that brought it in have given the focus back.
+void Studio::to_tracks() {
+    CallAfter([this] { tracks_list_->SetFocus(); });
 }
 
 void Studio::on_save(wxCommandEvent &e) {
@@ -2690,6 +2697,7 @@ void Studio::take_midi(const std::string &path, bool append) {
             },
             true);
     }
+    to_tracks();
 }
 
 //: A VocalWriter song comes in whole: its tempo changes, voices, controls,
@@ -2728,6 +2736,7 @@ void Studio::import_vocalwriter(const std::string &path) {
         say(W(plural(clock.changes.size(), "tempo change") + " on the Tempo track at the top"));
     }
     for (const std::string &note : got.notes) say(W(note));
+    to_tracks();
 }
 
 //: Fill in the pronunciations for a MIDI that carried only lyrics.

@@ -118,6 +118,7 @@ private:
     void come_back();
     bool returning();
     void give_back_focus();
+    void to_tracks();
 
     // -- notes ------------------------------------------------------------
     int selection() const;
