@@ -208,6 +208,19 @@ private:
     std::vector<wxSizer *> groups_;
 };
 
+//: Whether a MIDI import closes the short rests between notes, and up to how long.
+class CloseRestsDialog : public wxDialog {
+public:
+    CloseRestsDialog(wxWindow *parent, bool on, double beats);
+    bool on() const { return on_->GetValue(); }
+    double beats() const;
+
+private:
+    wxCheckBox *on_;
+    wxTextCtrl *beats_;
+    double was_;
+};
+
 //: Where Panthera is, for the MacinTalk voices: a folder typed in or browsed
 //: to, or nothing, to look where Panthera's NVDA add-on puts it.
 class PantheraDialog : public wxDialog {

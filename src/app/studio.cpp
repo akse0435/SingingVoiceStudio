@@ -35,7 +35,7 @@ enum {
     ID_ADD_REST, ID_IMPORT, ID_EXPORT, ID_AUTO_PREVIEW, ID_PANTHERA, ID_EXPORT_TRACKS,
     ID_BAR_REST, ID_GOTO_BAR, ID_METRONOME, ID_PLAY_PAUSE, ID_PANES,
     ID_TRACK_NEW, ID_TRACK_BACKING, ID_TRACK_EDIT, ID_TRACK_REMOVE, ID_TRACK_MUTE, ID_TRACK_SOLO,
-    ID_TRACK_UP, ID_TRACK_DOWN, ID_PREVIEW_TIMER, ID_RECOVERY_TIMER, ID_ADD_CONTROLLER,
+    ID_TRACK_UP, ID_TRACK_DOWN, ID_PREVIEW_TIMER, ID_RECOVERY_TIMER, ID_ADD_CONTROLLER, ID_CLOSE_RESTS,
 };
 
 //: A beat is a quarter note, so a sixteenth is a quarter of a beat: the step
@@ -321,6 +321,8 @@ void Studio::build_menu() {
     mi_auto_preview_ = prefs->AppendCheckItem(ID_AUTO_PREVIEW, K("&Preview notes as they change\tCtrl+Shift+P"),
                                               "Hear a note whenever its pitch or length is nudged");
     mi_auto_preview_->Check(settings_.auto_preview);
+    prefs->Append(ID_CLOSE_RESTS, K("Close short &rests when importing MIDI...\tCtrl+Shift+I"),
+                  "Take out the short rests between notes when a MIDI file comes in");
     prefs->Append(ID_PANTHERA, K("Panthera &folder..."), "Where to find Panthera, for the MacinTalk voices");
     bar->Append(prefs, "&Settings");
     bar->Append(help, "&Help");
@@ -373,6 +375,7 @@ void Studio::build_menu() {
     on(wxID_PREFERENCES, &Studio::on_song_settings);
     on(ID_AUTO_PREVIEW, &Studio::on_auto_preview);
     on(ID_PANTHERA, &Studio::on_panthera);
+    on(ID_CLOSE_RESTS, &Studio::on_close_rests);
     Bind(wxEVT_MENU, [this](wxCommandEvent &) { Close(); }, wxID_EXIT);
 }
 
@@ -449,6 +452,22 @@ void Studio::on_auto_preview(wxCommandEvent &) {
     say(wxString("previewing notes as they change is ") + (on ? "on" : "off") +
         (kept ? "" : ", for this sitting only: the settings file could not be written"));
 }
+
+//: A setting of the program too: whether a MIDI import closes short rests.
+void Studio::on_close_rests(wxCommandEvent &) {
+    CloseRestsDialog dlg(this, settings_.close_rests, settings_.close_rests_beats);
+    if (dlg.ShowModal() != wxID_OK) return;
+    settings_.close_rests = dlg.on();
+    settings_.close_rests_beats = dlg.beats();
+    bool kept = save_settings(settings_);
+    say(W((settings_.close_rests ? "importing MIDI closes the rests between notes up to " +
+                                       beat_count(settings_.close_rests_beats) + " long"
+                                 : std::string("importing MIDI keeps every rest")) +
+          (kept ? "" : ", for this sitting only: the settings file could not be written")));
+}
+
+//: the longest rest a MIDI import closes, or 0 to keep them all
+double Studio::rests_to_close() const { return settings_.close_rests ? settings_.close_rests_beats : 0.0; }
 
 //: Where Panthera is. MacinTalk looks again at once, and what it finds is
 //: said: the voices it has now, or why it has none.
@@ -534,6 +553,7 @@ void Studio::on_keys(wxCommandEvent &) {
         "Ctrl+. stop",
         "Ctrl+O open a project, Ctrl+S save it",
         "Ctrl+I  import a MIDI file or a VocalWriter song",
+        "Ctrl+Shift+I  whether importing MIDI closes the short rests between notes",
         "Ctrl+Shift+S  export the whole song as one WAV",
         "Ctrl+Shift+T  export every track to its own WAV",
         "Enter on a note edits it",
@@ -1999,7 +2019,7 @@ void Studio::on_import(wxCommandEvent &) {
     }
     Imported got;
     try {
-        got = import_midi(path, names);
+        got = import_midi(path, names, rests_to_close());
     } catch (const std::exception &e) {
         say(W(std::string("cannot import: ") + e.what()));
         return;
@@ -2025,6 +2045,7 @@ void Studio::on_import(wxCommandEvent &) {
     for (const auto &p : got.parts) total += p.notes.size();
     say(W("imported " + base_name(path) + ": " + plural(got.parts.size(), "track") + ", " + std::to_string(total) +
           " notes, " + fmt_g(std::nearbyint(got.bpm)) + " bpm, " + format_sig(got.sig)));
+    if (got.closed_rests) say(W(plural(size_t(got.closed_rests), "short rest") + " closed"));
     if (!got.tempo_changes.empty()) {
         sync_tracks(1);
         sync(0);

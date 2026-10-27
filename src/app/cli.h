@@ -22,6 +22,7 @@ struct CliArgs {
     std::string reverb;
     int anticipate = -1;          // -1 unset, 0 off, 1 on
     double start = 0.0;
+    double close_rests = 0.0;     // beats; 0 keeps every rest of a MIDI import
     bool list_voices = false, list_tracks = false, version = false, quiet = false, help = false;
     std::vector<std::string> pronounce;
     std::string error;            // what was wrong with the command line

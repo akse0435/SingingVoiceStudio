@@ -273,8 +273,18 @@ struct Imported {
     std::vector<TempoChange> tempo_changes;
     Sig sig = kDefaultSig;
     std::vector<ImportedPart> parts;
+    //: how many short rests were closed (close_short_rests)
+    int closed_rests = 0;
 };
-Imported import_midi(const std::string &path, const std::vector<std::string> &names);
+//: `close_rests`: the longest rest between two notes to close, in beats; 0
+//: keeps every rest
+Imported import_midi(const std::string &path, const std::vector<std::string> &names, double close_rests = 0);
+
+//: The rests between two notes no longer than `longest` beats taken out, the
+//: note before each one held through it, its bend, wheel and controls
+//: stretched with it: a line the file has detached, sung legato. Returns how
+//: many were closed.
+int close_short_rests(std::vector<Note> &notes, double longest);
 
 //: Put looked-up pronunciations on the notes an import left blank. Returns
 //: how many words were pronounced. A word the dictionary does not know leaves

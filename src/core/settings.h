@@ -20,6 +20,10 @@ struct Settings {
     //: where Panthera is, for the MacinTalk voices, when it is not where its
     //: NVDA add-on puts it; empty to look only there (set_macintalk_folder)
     std::string panthera_folder;
+    //: close the short rests between notes when a MIDI file is imported,
+    //: those up to `close_rests_beats` long
+    bool close_rests = false;
+    double close_rests_beats = 0.125;
 };
 
 Settings load_settings();

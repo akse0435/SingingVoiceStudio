@@ -94,6 +94,14 @@ Instrument and karaoke tracks are left out, and a note says so. A song
 opened this way and exported to WAV is, sample for sample, VocalWriter
 singing its vocal tracks, and so is the project it is saved as.
 
+**Short rests** between two notes can be closed as a MIDI file comes in
+(Settings > Close short rests when importing MIDI, Ctrl+Shift+I, off until it
+is turned on; `--close-rests BEATS` on the command line): a rest no longer
+than the length set there, an eighth of a beat to begin with, is taken out
+and the note before it held on, its bend and wheel stretched with it, so a
+line the file has detached is sung legato. A VocalWriter song keeps its
+rests: it was made for VocalWriter already.
+
 Notes are written in VocalWriter's phoneme symbols whichever engine sings
 them; each engine translates (the tables are at the top of
 `src/voices/<engine>.cpp`). Add word uses VocalWriter's own dictionary.
@@ -293,6 +301,7 @@ Ctrl and Option for Alt, and Option+H to hear a note.
 | Ctrl+P / Ctrl+H / Ctrl+M / Ctrl+. | play from the start / hear one note / metronome / stop |
 | Ctrl+O / Ctrl+S | open and save a project |
 | Ctrl+I | import a MIDI file or a VocalWriter song |
+| Ctrl+Shift+I | whether importing MIDI closes the short rests between notes |
 | Ctrl+Shift+S / Ctrl+Shift+T | export one WAV / one WAV per track |
 
 ## From the command line

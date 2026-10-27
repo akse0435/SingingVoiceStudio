@@ -171,6 +171,8 @@ private:
                 std::function<void(RenderResult)> done);
     void on_auto_preview(wxCommandEvent &);
     void on_panthera(wxCommandEvent &);
+    void on_close_rests(wxCommandEvent &);
+    double rests_to_close() const;
     void preview_note(int i);
     void preview_now(int i);
 

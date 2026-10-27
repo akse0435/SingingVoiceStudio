@@ -732,6 +732,32 @@ double parse_end(const wxString &text, Sig sig) {
 
 // -- PantheraDialog --------------------------------------------------------------
 
+// -- CloseRestsDialog --------------------------------------------------------------------
+
+CloseRestsDialog::CloseRestsDialog(wxWindow *parent, bool on, double beats)
+    : wxDialog(parent, wxID_ANY, "Close short rests"), was_(beats) {
+    wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
+    on_ = new wxCheckBox(this, wxID_ANY, "&Close short rests when importing MIDI");
+    on_->SetValue(on);
+    on_->SetToolTip("A MIDI file often leaves a little gap between two notes. With this on, a rest between two "
+                    "notes no longer than the length below is taken out and the note before it held on, so the "
+                    "line is sung legato. A VocalWriter song is made for VocalWriter already and keeps its "
+                    "rests.");
+    outer->Add(on_, 0, wxALL, 6);
+    beats_ = new wxTextCtrl(this, wxID_ANY, W(fmt_g(beats)), wxDefaultPosition, wxSize(80, -1));
+    labelled(this, outer, "Longest rest to close", beats_, 0, "in beats; 0.125 is a thirty-second note");
+    enable_labelled(beats_, on);
+    on_->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent &) { enable_labelled(beats_, on_->GetValue()); });
+    outer->Add(buttons(this), 0, wxEXPAND | wxALL, 8);
+    SetSizerAndFit(outer);
+    on_->SetFocus();
+}
+
+double CloseRestsDialog::beats() const {
+    double v = 0;
+    return read_number(beats_->GetValue(), &v) && v > 0 ? v : was_;
+}
+
 PantheraDialog::PantheraDialog(wxWindow *parent, const std::string &folder)
     : wxDialog(parent, wxID_ANY, "Panthera folder") {
     wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);

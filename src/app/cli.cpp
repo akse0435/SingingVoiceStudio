@@ -122,7 +122,7 @@ bool is_midi(const std::string &path) {
 
 //: A project, a VocalWriter song or a MIDI file, the MIDI imported exactly as
 //: the window does it.
-Song open_song(const std::string &path) {
+Song open_song(const std::string &path, double close_rests) {
     if (is_vocalwriter_song(path)) {
         VwSongImport got = import_vocalwriter_song(path, vocalwriter_program_voices());
         for (const std::string &n : got.notes) say(n);
@@ -132,7 +132,8 @@ Song open_song(const std::string &path) {
     std::vector<std::string> names;
     for (const auto &p : midi_tracks(path)) names.push_back(p.first);
     if (names.empty()) throw std::runtime_error(base_name(path) + " has no notes in it");
-    Imported got = import_midi(path, names);
+    Imported got = import_midi(path, names, close_rests);
+    if (got.closed_rests) say(std::to_string(got.closed_rests) + " short rest" + s_if(size_t(got.closed_rests)) + " closed");
     std::vector<std::string> words;
     size_t pending = 0;
     for (const auto &p : got.parts)
@@ -199,7 +200,7 @@ bool render_to(Mixer &mixer, const RenderRequest &req, const std::string &path) 
 std::string usage() {
     return "usage: svs [FILE] [-o FILE] [--tracks FOLDER] [--save FILE] [--track NAME]...\n"
            "           [--tempo BPM] [--voice NAME] [--consonants PERCENT] [--reverb ROOM,WET]\n"
-           "           [--anticipate | --no-anticipate] [--from BEATS]\n"
+           "           [--anticipate | --no-anticipate] [--from BEATS] [--close-rests BEATS]\n"
            "           [--list-voices] [--list-tracks] [--pronounce WORD...] [--version] [-q]\n"
            "\n"
            "Sing a Singing Voice Studio project, a VocalWriter song (.trk) or a MIDI file.\n"
@@ -218,6 +219,9 @@ std::string usage() {
            "  --anticipate          sing a note's consonants before its beat\n"
            "  --no-anticipate       sing every note squarely on its beat\n"
            "  --from BEATS          start this many beats in\n"
+           "  --close-rests BEATS   on importing a MIDI file, close every rest between\n"
+           "                        two notes this long or shorter, the note before\n"
+           "                        held on\n"
            "\n"
            "what it can tell you:\n"
            "  --list-voices         every voice of every engine, numbered\n"
@@ -274,6 +278,7 @@ CliArgs parse_args(const std::vector<std::string> &argv) {
         else if (s == "--anticipate") a.anticipate = 1;
         else if (s == "--no-anticipate") a.anticipate = 0;
         else if (s == "--from") number(s, need(i, s), &a.start);
+        else if (s == "--close-rests") number(s, need(i, s), &a.close_rests);
         else if (s == "--list-voices") a.list_voices = true;
         else if (s == "--list-tracks") a.list_tracks = true;
         else if (s == "--version") a.version = true;
@@ -340,7 +345,7 @@ int run_cli(const CliArgs &args) {
 
     Song song;
     try {
-        song = open_song(args.file);
+        song = open_song(args.file, args.close_rests);
     } catch (const std::exception &e) {
         return fail("cannot open " + args.file + ": " + e.what());
     }

@@ -740,6 +740,44 @@ std::vector<Note> notes_from_clipboard(const std::string &text) {
 
 std::string song_fingerprint(const Song &song) { return song_doc(song).dump(); }
 
+int close_short_rests(std::vector<Note> &notes, double longest) {
+    if (longest <= 0) return 0;
+    // a note whose word is still to be looked up has no phonemes yet, and
+    // is no rest
+    auto rest = [](const Note &n) { return !n.controller && !n.phonemes.empty() && n.is_rest(); };
+    auto sung = [&](const Note &n) { return !n.controller && !rest(n); };
+    // a curve over the note, moved into the first `a` of `a + b` beats, and
+    // the rest's after it; a note without one was at rest, and holds there
+    auto stretch = [](Bend &mine, const Bend &theirs, double a, double b) {
+        double total = a + b;
+        if (mine.empty() && !theirs.empty()) mine = {{0.0, 0.0}, {1.0, 0.0}};
+        for (auto &p : mine) p.first = p.first * a / total;
+        for (const auto &p : theirs) mine.push_back({(a + p.first * b) / total, p.second});
+    };
+    std::vector<Note> out;
+    int closed = 0;
+    for (size_t i = 0; i < notes.size(); ++i) {
+        const Note &r = notes[i];
+        if (rest(r) && r.beats <= longest + 1e-9 && !out.empty() && sung(out.back()) &&
+            i + 1 < notes.size() && sung(notes[i + 1])) {
+            Note &n = out.back();
+            double a = n.beats, b = r.beats;
+            stretch(n.bend, r.bend, a, b);
+            stretch(n.mod, r.mod, a, b);
+            for (auto &c : n.controls)
+                for (auto &p : c.second) p.first = p.first * a / (a + b);
+            for (const auto &c : r.controls)
+                for (const auto &p : c.second) n.controls[c.first].push_back({(a + p.first * b) / (a + b), p.second});
+            n.beats = a + b;
+            ++closed;
+            continue;
+        }
+        out.push_back(r);
+    }
+    notes = out;
+    return closed;
+}
+
 Song fresh_song() {
     Song song;
     song.voice.portamento = kVocalWriterPortamento;
@@ -962,7 +1000,7 @@ void hold_vowels(std::vector<Note> &notes) {
 }
 
 ImportedPart from_midi(const MidiFile &midi, const MidiTrack &track, const std::string &name,
-                       double grid) {
+                       double grid, double close_rests, int *closed) {
     double div = midi.division ? midi.division : 480;
     auto curve = bend_curve(track);
     // CC 1, the mod wheel, as it stands: already 0 to 127
@@ -1007,6 +1045,7 @@ ImportedPart from_midi(const MidiFile &midi, const MidiTrack &track, const std::
                                   curve_over(wheel, n.tick, n.tick + span, kModEpsilon)));
         at += length;
     }
+    *closed += close_short_rests(part.notes, close_rests);
     hold_vowels(part.notes);
     part.pending = pending_words(part.notes);
     return part;
@@ -1021,7 +1060,7 @@ std::vector<std::pair<std::string, int>> midi_tracks(const std::string &path) {
     return out;
 }
 
-Imported import_midi(const std::string &path, const std::vector<std::string> &names) {
+Imported import_midi(const std::string &path, const std::vector<std::string> &names, double close_rests) {
     MidiFile midi = read_midi(path);
     auto named = named_tracks(midi);
     if (named.empty()) throw std::runtime_error("this file has no notes in it");
@@ -1035,7 +1074,7 @@ Imported import_midi(const std::string &path, const std::vector<std::string> &na
         for (const auto &nt : named)
             if (nt.first == want) track = nt.second;
         if (!track) throw std::runtime_error("no track named " + want);
-        out.parts.push_back(from_midi(midi, *track, want, grid));
+        out.parts.push_back(from_midi(midi, *track, want, grid, close_rests, &out.closed_rests));
     }
     return out;
 }
