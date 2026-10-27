@@ -795,7 +795,9 @@ void Studio::on_keys(wxCommandEvent &) {
         is_mac() ? "Option+H  hear the selected note" : "Ctrl+H  hear the selected note",
         "Ctrl+M  metronome on or off, for playing only",
         "Ctrl+. stop",
+        "Ctrl+Shift+N  start an empty song",
         "Ctrl+O open a project, Ctrl+S save it",
+        "Ctrl+,  song settings: tempo, time signature, consonants, reverb, voice controls",
         "Ctrl+I  import a MIDI file or a VocalWriter song. The parts without words are played by "
         "the GM Soundbank, VocalWriter's own instruments, as VocalWriter played them",
         "Ctrl+Shift+A  append a MIDI file: its parts under the song's tracks, its tempo and time signature in "
