@@ -252,9 +252,11 @@ struct DtPhone {
 // the vowels VocalWriter has none for (EY, AE + r are er; OW + r is or).
 // VocalWriter's O, bOy's first part, is DECtalk's ow: the start of DECtalk's
 // oy is nearest ow (by its first two formants), and DECtalk's ow, unlike its
-// ay or ey, drifts only a little. QX, a longer glottal stop, is q held
-// longer. DECtalk dips the pitch for a glottal stop (q, and tx), as it does
-// when it speaks.
+// ay or ey, drifts only a little. DECtalk dips the pitch about an octave for
+// its glottal stops (q, and tx), as it does when it speaks, so neither is
+// sent: VocalWriter's Q (QX a longer one), the t of "jitter" in its
+// dictionary, is sung as DECtalk's flap, dx, as DECtalk says the word, and
+// TX, the t of "it", as DECtalk's t.
 const DtPhone kPhones[] = {
     {"IY", "iy", kVowel, true, "ir"},
     {"IH", "ih", kVowel, true, "ir"},
@@ -308,9 +310,9 @@ const DtPhone kPhones[] = {
     {"g", "g", kStop, false, nullptr},
     {"CH", "ch", kStop, false, nullptr},
     {"JH", "jh", kStop, false, nullptr},
-    {"TX", "tx", kStop, false, nullptr},     // the t of "it"
-    {"Q", "q", kStop, false, nullptr},       // glottal stop
-    {"QX", "q", kStop, false, nullptr},      // a longer one
+    {"TX", "t", kStop, false, nullptr},      // the t of "it", sung as t
+    {"Q", "dx", kVoiced, false, nullptr},    // glottal stop, sung as a flap
+    {"QX", "dx", kVoiced, false, nullptr},   // a longer one
     {"DD", "dx", kVoiced, false, nullptr},   // flap, beTTer
     {"O", "ow", kVowel, true, "or"},         // bOy's first part
 };
