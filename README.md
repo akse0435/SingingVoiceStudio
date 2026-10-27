@@ -139,7 +139,9 @@ could sing them Import then asks which one does, in a box that starts on the
 first; one of them sings them unasked. On the command line the same,
 the likeliest taken; `--sing-all` sings every part. Each track takes its volume from the
 file, CC 7 by CC 11 with both at 127 being 100%, at its loudest, with
-VocalWriter's volume control against that where it changes. A MIDI file
+VocalWriter's volume control against that where it changes, and its pan,
+CC 10, from the one at its first note, each change after that a controller
+before the note it comes at, sung or played. A MIDI file
 opened from the desktop or named on the command line comes in the same way.
 A syllable the file gives no note of its own is sung where it falls: one
 in the middle of a note ("the sea" on one note) divides it there, and one

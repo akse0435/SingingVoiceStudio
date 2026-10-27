@@ -970,18 +970,22 @@ std::string repeated(const std::vector<std::string> &pieces) {
 //: repeated piece looked up once. The pieces keep their hyphens, for a word
 //: the dictionary only knows in pieces (Lexicon::phonemes). A note with no
 //: lyric that holds on to the word before it (see hold_vowels) goes with
-//: that word.
+//: that word. A controller among them is passed over.
 std::vector<std::pair<std::string, std::vector<int>>> pending_words(const std::vector<Note> &rows) {
     std::vector<std::pair<std::string, std::vector<int>>> pending;
     std::vector<int> run;
     std::string letters;
     std::vector<std::string> pieces;
+    int before = -1;    // the row before, controllers left out
     for (size_t i = 0; i < rows.size(); ++i) {
         const Note &r = rows[i];
+        if (r.controller) continue;
+        int was = before;
+        before = int(i);
         if (!r.phonemes.empty()) continue;
         if (r.word.empty()) {
             if (!run.empty()) run.push_back(int(i));
-            else if (!pending.empty() && pending.back().second.back() + 1 == int(i))
+            else if (!pending.empty() && pending.back().second.back() == was)
                 pending.back().second.push_back(int(i));
             continue;
         }
@@ -1078,6 +1082,58 @@ int midi_volume(const MidiTrack &track, Beat beat, std::vector<PlayedChange> &ch
     return levels.empty() ? 100 : level_volume(loudest);
 }
 
+//: The track's pan at its first note, -100 to 100, and into `changes` each
+//: one after it that moves it, as "pan": a controller.
+template <class Beat>
+int midi_pan(const MidiTrack &track, Beat beat, std::vector<PlayedChange> &changes) {
+    auto as_pan = [](int v) { return std::max(-100, std::min(100, int(std::lrint((v - 64) * 100.0 / 63.0)))); };
+    long first = track.notes.empty() ? 0 : track.notes.front().tick;
+    for (const MidiNote &n : track.notes) first = std::min(first, n.tick);
+    auto pans = track.pans;
+    std::stable_sort(pans.begin(), pans.end(),
+                     [](const std::pair<long, int> &a, const std::pair<long, int> &b) { return a.first < b.first; });
+    int pan = 0;
+    std::vector<std::pair<long, int>> later;     // the last at each tick
+    for (const auto &p : pans) {
+        if (p.first <= first) pan = as_pan(p.second);
+        else if (!later.empty() && later.back().first == p.first) later.back().second = as_pan(p.second);
+        else later.push_back({p.first, as_pan(p.second)});
+    }
+    int now = pan;
+    for (const auto &p : later) {
+        if (p.second != now) changes.push_back({beat(p.first), "pan", double(p.second)});
+        now = p.second;
+    }
+    return pan;
+}
+
+//: Each "pan" change a controller before the first row that starts where it
+//: is or after, as lay_out_played puts an instrument's.
+void place_pans(std::vector<Note> &rows, const std::vector<PlayedChange> &changes) {
+    const double eps = 1e-9;
+    std::vector<std::vector<Note>> before(rows.size() + 1);
+    std::vector<double> starts;
+    double at = 0;
+    for (const Note &n : rows) {
+        starts.push_back(at);
+        at += n.beats;
+    }
+    for (const PlayedChange &c : changes) {
+        if (c.name != "pan") continue;
+        size_t k = 0;
+        while (k < rows.size() && starts[k] < c.beat - eps) ++k;
+        Note change = Note::tempo_change(0);
+        change.pan = int(c.value);
+        before[k].push_back(change);
+    }
+    std::vector<Note> all;
+    for (size_t k = 0; k <= rows.size(); ++k) {
+        all.insert(all.end(), before[k].begin(), before[k].end());
+        if (k < rows.size()) all.push_back(rows[k]);
+    }
+    rows = all;
+}
+
 //: Each change onto the row taking time it falls in, at its place there, as
 //: lay_out_played puts an instrument's.
 void place_controls(std::vector<Note> &rows, std::vector<PlayedChange> changes) {
@@ -1172,6 +1228,10 @@ ImportedPart from_midi(const MidiFile &midi, const MidiTrack &track, const std::
     part.volume = midi_volume(track, [&](long tick) { return double(tick) / div; }, volumes);
     vocalwriter_controls(track, [&](long tick) { return double(tick) / div; }, volumes);
     place_controls(part.notes, volumes);
+    // the pan, as an instrument's, its changes where the notes fall on the grid
+    std::vector<PlayedChange> pans;
+    part.pan = midi_pan(track, [&](long tick) { return double(edge(double(tick))) * step; }, pans);
+    place_pans(part.notes, pans);
     part.pending = pending_words(part.notes);
     return part;
 }
@@ -1222,6 +1282,7 @@ ImportedPart from_midi_played(const MidiFile &midi, const MidiTrack &track, cons
     std::vector<PlayedChange> changes;
     // the volume, CC 7 by CC 11
     int volume = midi_volume(track, beat, changes);
+    int pan = midi_pan(track, beat, changes);
     for (const auto &v : track.sustains) changes.push_back({beat(v.first), "sustain", v.second <= 63 ? 0.0 : 127.0});
     for (const auto &r : track.bend_range) changes.push_back({beat(r.first), "bend_range", double(std::max(0, std::min(12, r.second)))});
     for (const auto &b : bend_curve(track)) changes.push_back({beat(b.first), "", round_to(b.second, 4)});
@@ -1242,18 +1303,8 @@ ImportedPart from_midi_played(const MidiFile &midi, const MidiTrack &track, cons
     part.notes = lay_out_played(notes, changes);
     part.velocity = common_velocity(part.notes);
     part.voice_id = drums ? kGmDrums : kGmBase + program;
-    // the pan before the first note, which VocalWriter left out
-    if (!track.pans.empty()) {
-        long first = track.notes.empty() ? 0 : track.notes.front().tick;
-        for (const MidiNote &n : track.notes) first = std::min(first, n.tick);
-        auto pans = track.pans;
-        std::stable_sort(pans.begin(), pans.end(),
-                         [](const std::pair<long, int> &a, const std::pair<long, int> &b) { return a.first < b.first; });
-        int pan = pans.front().second;       // or the first, if all come later
-        for (const auto &p : pans)
-            if (p.first <= first) pan = p.second;
-        part.pan = std::max(-100, std::min(100, int(std::lrint((pan - 64) * 100.0 / 63.0))));
-    }
+    // the pan, which VocalWriter left out
+    part.pan = pan;
     return part;
 }
 
@@ -1295,10 +1346,8 @@ Track imported_track(const ImportedPart &part) {
     t.notes = part.notes;
     t.velocity = part.velocity;
     t.volume = part.volume;
-    if (part.played) {
-        t.voice_id = part.voice_id;
-        t.pan = part.pan;
-    }
+    t.pan = part.pan;
+    if (part.played) t.voice_id = part.voice_id;
     return t;
 }
 
@@ -1355,7 +1404,7 @@ std::vector<Note> lay_out_played(std::vector<PlayedNote> notes, std::vector<Play
     // a rest reaching any controls after the last note
     double last = at;
     for (const PlayedChange &c : changes)
-        if (c.name != "voice") last = std::max(last, c.beat);
+        if (c.name != "voice" && c.name != "pan") last = std::max(last, c.beat);
     if (last > at + eps) rest(at, last - at, rows.back().pitch);
 
     // the controls and the bend go on the rows that take time
@@ -1375,7 +1424,7 @@ std::vector<Note> lay_out_played(std::vector<PlayedNote> notes, std::vector<Play
     };
     if (!spans.empty()) {
         for (const PlayedChange &c : changes) {
-            if (c.name.empty() || c.name == "voice") continue;
+            if (c.name.empty() || c.name == "voice" || c.name == "pan") continue;
             size_t k = spans[span_of(c.beat)];
             // every one, even a repeat, as VocalWriter sends it
             rows[k].controls[c.name].push_back({position(k, c.beat), c.value});
@@ -1410,14 +1459,15 @@ std::vector<Note> lay_out_played(std::vector<PlayedNote> notes, std::vector<Play
             held = was;
         }
     }
-    // each change of instrument a controller before its notes
+    // each change of instrument or pan a controller before its notes
     std::vector<std::vector<Note>> before(rows.size() + 1);
     for (const PlayedChange &c : changes) {
-        if (c.name != "voice") continue;
+        if (c.name != "voice" && c.name != "pan") continue;
         size_t k = 0;
         while (k < rows.size() && starts[k] < c.beat - eps) ++k;
         Note change = Note::tempo_change(0);
-        change.voice_id = int(c.value);
+        if (c.name == "voice") change.voice_id = int(c.value);
+        else change.pan = int(c.value);
         before[k].push_back(change);
     }
     std::vector<Note> all;

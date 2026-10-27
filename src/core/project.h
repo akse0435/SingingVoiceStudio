@@ -318,11 +318,12 @@ struct ImportedPart {
     std::vector<Note> notes;
     //: words still to be looked up: (word, [note index...])
     std::vector<std::pair<std::string, std::vector<int>>> pending;
-    //: played by the GM Soundbank rather than sung, with this instrument and pan
+    //: played by the GM Soundbank rather than sung, with this instrument
     bool played = false;
     std::optional<int> voice_id;
     //: the velocity most of the notes have; a note keeps its own if it differs
     int velocity = kDefaultVelocity;
+    //: at the first note; a change after it is a controller
     int pan = 0;
     //: per cent, CC 7 by CC 11 (see midi_volume)
     int volume = 100;
@@ -354,7 +355,8 @@ struct PlayedNote {
     int pitch = 60, velocity = 0;
 };
 //: A change from `beat` on: a note control ("volume", "sustain",
-//: "bend_range", "detune"), "" for the bend in semitones, or "voice".
+//: "bend_range", "detune"), "" for the bend in semitones, "voice", or "pan"
+//: (-100 to 100).
 struct PlayedChange {
     double beat = 0;
     std::string name;
@@ -363,7 +365,7 @@ struct PlayedChange {
 //: The notes as rows in order of start: a chord's notes but the last at 0
 //: beats, each held as long as it sounds, a rest wherever nothing sounds for
 //: `rest_gap` beats. The controls and the bend go on the rows they fall in,
-//: a change of instrument is a controller.
+//: a change of instrument or pan is a controller.
 std::vector<Note> lay_out_played(std::vector<PlayedNote> notes, std::vector<PlayedChange> changes,
                                  double rest_gap = 0.25);
 //: The commonest velocity, for the track; notes keep theirs only if it differs.
