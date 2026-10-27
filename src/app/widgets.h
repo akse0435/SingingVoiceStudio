@@ -66,6 +66,8 @@ public:
 #endif
     std::vector<int> SelectedRows() const;
     int FirstSelected() const;
+    //: the row the keyboard is on, or -1
+    int FocusedRow() const;
     void SelectRow(int index, bool on = true);
     void FocusRow(int index);
 

@@ -182,7 +182,8 @@ void Studio::build() {
 
     // The tracks come before the notes, so that Tab runs down the window in
     // the order the song is put together: which part, then what it sings.
-    tracks_list_ = new ReportList(p, wxLC_REPORT | wxLC_SINGLE_SEL, wxSize(-1, 110));
+    // Not single-select: several tracks are removed at once.
+    tracks_list_ = new ReportList(p, wxLC_REPORT, wxSize(-1, 110));
     const std::pair<const char *, int> track_columns[] = {
         {"Track", 150}, {"Voice", 160}, {"Volume", 70}, {"Pan", 90}, {"State", 90}};
     int c = 0;
@@ -259,7 +260,7 @@ void Studio::build_menu() {
                   "A sound file played under the voices");
     track->Append(ID_TRACK_EDIT, K("&Track settings... (Enter on a track)"), "Name, voice, volume and pan");
     track->Append(ID_TRACK_REMOVE, K("&Remove track (Delete on a track)"),
-                  "Remove the selected track and everything in it");
+                  "Remove the selected tracks and everything in them");
     track->AppendSeparator();
     // No tab, so no accelerator: S and M would be unusable in every text field.
     track->Append(ID_TRACK_MUTE, K("&Mute or unmute (M on a track)"), "Silence this track");
@@ -591,7 +592,7 @@ void Studio::on_keys(wxCommandEvent &) {
         "Ctrl+Shift+B  add a backing track: a sound file played under the voices",
         "Enter on a track  its name, voice, volume and pan, or a backing track's file and where it starts",
         "M on a track  mute it, S  solo it",
-        "Delete on a track  remove it",
+        "Delete on a track  remove it, or every selected track: Shift with the arrow keys selects more than one",
         "Ctrl+Up or Ctrl+Down on a track  reorder the parts",
         "Ctrl+W  add a word after the selected note, or at the end",
         "Ctrl+N  add a note after the selected note, or at the end",
@@ -781,7 +782,7 @@ void Studio::sync_tracks(int select) {
 
 //: Moving down the tracks list changes what the notes list shows.
 void Studio::on_track_chosen() {
-    int i = tracks_list_->FirstSelected();
+    int i = track_at();
     if (switching_ || i == current_ || i < 0 || i >= int(song_.tracks.size())) return;
     track().cursor = std::max(0, selection());
     current_ = i;
@@ -812,8 +813,12 @@ void Studio::on_track_key(wxKeyEvent &evt) {
         evt.Skip();
 }
 
+//: The track the keyboard is on, when several are selected; else the
+//: selected one, else the one the notes list shows.
 int Studio::track_at() const {
-    int i = tracks_list_->FirstSelected();
+    std::vector<int> rows = tracks_list_->SelectedRows();
+    int i = tracks_list_->FocusedRow();
+    if (std::find(rows.begin(), rows.end(), i) == rows.end()) i = rows.empty() ? -1 : rows[0];
     return (i >= 0 && i < int(song_.tracks.size())) ? i : current_;
 }
 
@@ -957,27 +962,38 @@ void Studio::on_track_edit(wxCommandEvent &) {
     });
 }
 
+//: Delete on a track: the selected tracks, one or several.
 void Studio::on_track_remove(wxCommandEvent &) {
     undoable("remove track", [&] {
         if (song_.tracks.size() == 1) {
             say("a song needs at least one track");
             return;
         }
-        int i = track_at();
-        Track t = song_.tracks[size_t(i)];
-        if (!t.notes.empty()) {
-            int answer = wxMessageBox(W("Remove " + t.name + " and the " + plural(t.notes.size(), "note") + " in it?"),
-                                      kAppName, wxYES_NO | wxICON_QUESTION, this);
+        std::vector<int> rows;
+        for (int r : tracks_list_->SelectedRows())
+            if (r >= 0 && r < int(song_.tracks.size())) rows.push_back(r);
+        if (rows.empty()) rows = {track_at()};
+        if (rows.size() >= song_.tracks.size()) {
+            say("a song needs at least one track, so not every track can be removed");
+            return;
+        }
+        size_t notes_in = 0;
+        for (int r : rows) notes_in += song_.tracks[size_t(r)].notes.size();
+        std::string what = rows.size() == 1 ? song_.tracks[size_t(rows[0])].name : plural(rows.size(), "track");
+        if (notes_in) {
+            std::string ask = rows.size() == 1 ? "Remove " + what + " and the " + plural(notes_in, "note") + " in it?"
+                                               : "Remove the " + what + " and the " + plural(notes_in, "note") + " in them?";
+            int answer = wxMessageBox(W(ask), kAppName, wxYES_NO | wxICON_QUESTION, this);
             if (answer != wxYES) {
-                say(W("kept " + t.name));
+                say(W("kept " + (rows.size() == 1 ? what : "the " + what)));
                 return;
             }
         }
-        song_.tracks.erase(song_.tracks.begin() + i);
+        for (auto it = rows.rbegin(); it != rows.rend(); ++it) song_.tracks.erase(song_.tracks.begin() + *it);
         touch();
-        sync_tracks(std::min(i, int(song_.tracks.size()) - 1));
+        sync_tracks(std::min(rows[0], int(song_.tracks.size()) - 1));
         sync(track().cursor);
-        say(W("removed " + t.name + ", " + plural(song_.tracks.size(), "track") + " left"));
+        say(W("removed " + what + ", " + plural(song_.tracks.size(), "track") + " left"));
     });
 }
 

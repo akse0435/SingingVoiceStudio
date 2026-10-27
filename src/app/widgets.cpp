@@ -57,6 +57,10 @@ int ReportList::FirstSelected() const {
     return int(GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED));
 }
 
+int ReportList::FocusedRow() const {
+    return int(GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_FOCUSED));
+}
+
 void ReportList::SelectRow(int index, bool on) {
     if (index < 0 || index >= GetItemCount()) return;
     SetItemState(index, on ? wxLIST_STATE_SELECTED : 0, wxLIST_STATE_SELECTED);
@@ -127,6 +131,11 @@ std::vector<int> ReportList::SelectedRows() const {
 int ReportList::FirstSelected() const {
     std::vector<int> rows = SelectedRows();
     return rows.empty() ? -1 : rows[0];
+}
+
+int ReportList::FocusedRow() const {
+    wxDataViewItem item = GetCurrentItem();
+    return item.IsOk() ? ItemToRow(item) : -1;
 }
 
 // The editor drives everything from the keyboard, so where the selection is

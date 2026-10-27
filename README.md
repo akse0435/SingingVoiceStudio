@@ -345,7 +345,7 @@ Ctrl and Option for Alt, and Option+H to hear a note.
 | Ctrl+Shift+B | add a backing track, a sound file played under the voices |
 | Enter on a track | its name, voice, volume, pan and voice controls; a backing track's file and where it starts |
 | M / S on a track | mute / solo |
-| Delete on a track | remove it |
+| Delete on a track | remove it, or every selected track |
 | Ctrl+Up / Ctrl+Down | reorder the parts, or move a note |
 | Ctrl+W / Ctrl+N / Ctrl+R | add a word / a note / a rest, after the selected note |
 | Ctrl+Shift+R | a rest to the end of the bar |
