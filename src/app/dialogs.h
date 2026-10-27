@@ -51,8 +51,9 @@ class AddWordDialog : public wxDialog, Alive {
 public:
     AddWordDialog(wxWindow *parent, Studio *studio, int pitch, double beats);
     //: Add word to existing notes: the word goes on `existing`, the notes
-    //: that sound from the cursor on, each keeping all but what it sings
-    AddWordDialog(wxWindow *parent, Studio *studio, std::vector<Note> existing);
+    //: that sound from the cursor on, each keeping all but what it sings.
+    //: `text`: Add text, words divided by spaces put on them one after another.
+    AddWordDialog(wxWindow *parent, Studio *studio, std::vector<Note> existing, bool text = false);
     std::vector<Note> result() const { return rows_; }
 
 private:
@@ -62,8 +63,12 @@ private:
     std::vector<std::string> pieces() const;
     void on_look(wxCommandEvent &);
     void looked(const std::string &word, int wanted, const std::vector<std::string> &phones);
+    void looked_text(std::vector<TextWord> words, std::map<std::string, std::vector<std::string>> found);
+    bool ready() const { return !phonemes_.empty() || !words_.empty(); }
+    void show_count();
     double value_beats() const;
-    void build_rows();
+    void build_rows(int select = 0);
+    void edit_word(int i);
     void sync(int select = 0);
     void refresh_row(int i);
     void on_count(wxSpinEvent &);
@@ -75,6 +80,11 @@ private:
     Studio *studio_;
     int pitch_;
     std::vector<Note> existing_;
+    //: whether it is Add text, and the text's words once looked up
+    bool text_ = false;
+    std::vector<TextWord> words_;
+    //: the notes each word goes on, as Notes to use spreads them (text_shares)
+    std::vector<int> shares_;
     std::vector<std::string> phonemes_;
     std::vector<Note> rows_;
     wxTextCtrl *word_, *beats_ = nullptr;

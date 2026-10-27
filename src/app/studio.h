@@ -155,6 +155,7 @@ private:
     const Note *insertion_neighbour();
     void on_add_word(wxCommandEvent &);
     void on_add_word_existing(wxCommandEvent &);
+    void on_add_text(wxCommandEvent &);
     void on_add_note(wxCommandEvent &);
     void on_add_rest(wxCommandEvent &);
     void on_add_controller(wxCommandEvent &);

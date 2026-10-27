@@ -1814,6 +1814,101 @@ std::vector<std::vector<std::string>> word_on_notes(const std::vector<std::strin
     return out;
 }
 
+std::string TextWord::key() const {
+    std::string out;
+    for (const std::string &p : pieces) out += p;
+    return out;
+}
+
+std::vector<TextWord> text_words(const std::string &text) {
+    // a tag in square brackets left out, a space in its place; an unclosed
+    // bracket is just a character
+    std::string kept;
+    for (size_t i = 0; i < text.size(); ++i) {
+        size_t close = text[i] == '[' ? text.find(']', i) : std::string::npos;
+        if (close == std::string::npos) {
+            kept.push_back(text[i]);
+            continue;
+        }
+        kept.push_back(' ');
+        i = close;
+    }
+    std::vector<TextWord> out;
+    std::istringstream in(kept);
+    std::string token;
+    while (in >> token) {
+        TextWord w;
+        w.pieces.emplace_back();
+        for (unsigned char c : token) {
+            if (c == '-' && !w.pieces.back().empty()) w.pieces.emplace_back();
+            else if (std::isalpha(c) || c == '\'') w.pieces.back().push_back(char(c));
+        }
+        if (w.pieces.back().empty()) w.pieces.pop_back();
+        if (w.pieces.empty()) continue;
+        for (size_t i = 0; i < w.pieces.size(); ++i) {
+            w.word += w.pieces[i];
+            if (i + 1 < w.pieces.size()) w.pieces[i] += '-';
+        }
+        out.push_back(w);
+    }
+    return out;
+}
+
+int text_word_notes(const TextWord &w) {
+    if (w.pieces.size() > 1) return int(w.pieces.size());
+    std::vector<std::string> sounds;
+    for (const std::string &p : w.phonemes)
+        if (p != kSyllableBreak) sounds.push_back(p);
+    return std::max(1, int(syllabify(sounds).size()));
+}
+
+void text_looked_up(std::vector<TextWord> &words) {
+    for (size_t i = 0; i < words.size(); ++i) {
+        TextWord &w = words[i];
+        w.notes = text_word_notes(w);
+        // "the" before a vowel is "thee"; YU starts with a y
+        if (lower(w.word) == "the" && !w.phonemes.empty() && i + 1 < words.size()) {
+            const auto &next = words[i + 1].phonemes;
+            auto first = std::find_if(next.begin(), next.end(), [](const std::string &p) { return p != kSyllableBreak; });
+            if (first != next.end() && is_vowel(*first) && *first != "YU") w.phonemes = {"DH", "IY"};
+        }
+    }
+}
+
+std::vector<int> text_shares(const std::vector<TextWord> &words, int count) {
+    int n = int(words.size()), want = 0;
+    std::vector<int> share;
+    for (const TextWord &w : words) {
+        share.push_back(std::max(1, w.notes));
+        want += share.back();
+    }
+    if (count >= want) {
+        int over = count - want;
+        for (int i = 0; i < n; ++i) share[size_t(i)] += over / n + (i < over % n ? 1 : 0);
+    } else {
+        int left = std::max(count, 0);
+        for (int &s : share) {
+            s = std::min(s, left);
+            left -= s;
+        }
+    }
+    return share;
+}
+
+std::vector<std::pair<std::vector<std::string>, std::string>> text_on_notes(const std::vector<TextWord> &words,
+                                                                            const std::vector<int> &shares,
+                                                                            bool plain) {
+    std::vector<std::pair<std::vector<std::string>, std::string>> out;
+    for (size_t i = 0; i < words.size() && i < shares.size() && shares[i] > 0; ++i) {
+        const TextWord &w = words[i];
+        int k = shares[i];
+        auto groups = w.phonemes.empty() ? std::vector<std::vector<std::string>>(size_t(k), {kDefaultPhoneme})
+                                         : word_on_notes(w.phonemes, w.pieces, k, plain);
+        for (size_t j = 0; j < groups.size(); ++j) out.push_back({groups[j], j == 0 ? w.word : ""});
+    }
+    return out;
+}
+
 int pronounce(std::vector<ImportedPart> &parts,
               const std::map<std::string, std::vector<std::string>> &found, bool plain_held) {
     int got = 0;

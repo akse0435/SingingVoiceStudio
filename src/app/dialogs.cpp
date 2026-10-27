@@ -103,22 +103,79 @@ void PhonemePicker::on_preview(wxCommandEvent &) {
 
 // -- AddWordDialog ---------------------------------------------------------------
 
+namespace {
+
+//: phonemes as a note shows them, a syllable break as a full stop
+std::string spaced(const std::vector<std::string> &phonemes) {
+    std::string out;
+    for (const std::string &p : phonemes) out += (out.empty() ? "" : " ") + p;
+    return out;
+}
+
+//: One word of Add text: the phonemes it sings and how many notes it goes on.
+class TextWordDialog : public wxDialog {
+public:
+    TextWordDialog(wxWindow *parent, const TextWord &w, int notes, int most)
+        : wxDialog(parent, wxID_ANY, W(w.word)) {
+        wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
+        phon_ = new wxTextCtrl(this, wxID_ANY, W(spaced(w.phonemes)), wxDefaultPosition, wxSize(260, -1));
+        labelled(this, outer, "Phonemes", phon_, 1, "separated by spaces, a full stop between syllables");
+        select_on_focus(phon_);
+        count_ = new wxSpinCtrl(this, wxID_ANY, "", wxDefaultPosition, wxSize(80, -1), wxSP_ARROW_KEYS, 1,
+                                std::max(1, most), notes);
+        labelled(this, outer, "Notes to use", count_);
+        outer->Add(buttons(this), 0, wxEXPAND | wxALL, 8);
+        SetSizerAndFit(outer);
+        phon_->SetFocus();
+    }
+    std::vector<std::string> phonemes() const {
+        std::vector<std::string> out;
+        wxStringTokenizer tok(phon_->GetValue(), " \t\r\n", wxTOKEN_STRTOK);
+        while (tok.HasMoreTokens()) out.push_back(U(tok.GetNextToken()));
+        return out;
+    }
+    int notes() const { return count_->GetValue(); }
+
+private:
+    wxTextCtrl *phon_;
+    wxSpinCtrl *count_;
+};
+
+}  // namespace
+
 AddWordDialog::AddWordDialog(wxWindow *parent, Studio *studio, int pitch, double beats)
     : wxDialog(parent, wxID_ANY, "Add word"), studio_(studio), pitch_(pitch) {
     build(beats);
 }
 
-AddWordDialog::AddWordDialog(wxWindow *parent, Studio *studio, std::vector<Note> existing)
-    : wxDialog(parent, wxID_ANY, "Add word to existing notes"), studio_(studio), pitch_(kDefaultPitch),
-      existing_(std::move(existing)) {
+AddWordDialog::AddWordDialog(wxWindow *parent, Studio *studio, std::vector<Note> existing, bool text)
+    : wxDialog(parent, wxID_ANY, text ? "Add text" : "Add word to existing notes"), studio_(studio),
+      pitch_(kDefaultPitch), existing_(std::move(existing)), text_(text) {
     build(kDefaultBeats);
 }
 
 void AddWordDialog::build(double beats) {
     wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
-    word_ = new wxTextCtrl(this, wxID_ANY, "", wxDefaultPosition, wxSize(220, -1), wxTE_PROCESS_ENTER);
+    if (text_) {
+        // several lines, pasted at once; Enter looks it up, Shift+Enter
+        // starts a new line
+        word_ = new wxTextCtrl(this, wxID_ANY, "", wxDefaultPosition, wxSize(380, 90),
+                               wxTE_MULTILINE | wxTE_PROCESS_ENTER);
+        word_->Bind(wxEVT_KEY_DOWN, [this](wxKeyEvent &e) {
+            int code = e.GetKeyCode();
+            if ((code == WXK_RETURN || code == WXK_NUMPAD_ENTER) && e.ShiftDown() && !e.ControlDown() &&
+                !e.AltDown())
+                word_->WriteText("\n");
+            else
+                e.Skip();
+        });
+        labelled(this, outer, "Text", word_, 1,
+                 "words divided by spaces, a hyphen where a word's notes divide, Shift+Enter for a new line");
+    } else {
+        word_ = new wxTextCtrl(this, wxID_ANY, "", wxDefaultPosition, wxSize(220, -1), wxTE_PROCESS_ENTER);
+        labelled(this, outer, "Word", word_, 1, "a hyphen marks where the notes divide, as in dai-sy");
+    }
     word_->Bind(wxEVT_TEXT_ENTER, &AddWordDialog::on_look, this);
-    labelled(this, outer, "Word", word_, 1, "a hyphen marks where the notes divide, as in dai-sy");
 
     wxBoxSizer *row = new wxBoxSizer(wxHORIZONTAL);
     wxButton *look = new wxButton(this, wxID_ANY, "&Look up");
@@ -135,6 +192,9 @@ void AddWordDialog::build(double beats) {
     // no hint here: a spin control's edit box takes its name from the
     // caption as written, so the name has to stand on its own
     labelled(this, outer, "Notes to use", count_);
+    // not there until something is looked up: a number typed before then
+    // went nowhere (show_count)
+    outer->Hide(count_->GetContainingSizer());
     // the existing notes keep their own lengths
     if (existing_.empty()) {
         beats_ = new wxTextCtrl(this, wxID_ANY, W(fmt_g(beats)), wxDefaultPosition, wxSize(80, -1),
@@ -145,15 +205,22 @@ void AddWordDialog::build(double beats) {
     }
 
     list_ = new ReportList(this, wxLC_REPORT | wxLC_SINGLE_SEL, wxSize(380, 140));
-    list_->InsertColumn(0, "Phonemes", wxLIST_FORMAT_LEFT, 165);
-    list_->InsertColumn(1, "Pitch", wxLIST_FORMAT_LEFT, 55);
-    list_->InsertColumn(2, "Beats", wxLIST_FORMAT_LEFT, 150);
+    if (text_) {
+        // the words, each opened with Enter (edit_word)
+        list_->InsertColumn(0, "Word", wxLIST_FORMAT_LEFT, 110);
+        list_->InsertColumn(1, "Phonemes", wxLIST_FORMAT_LEFT, 190);
+        list_->InsertColumn(2, "Notes", wxLIST_FORMAT_LEFT, 70);
+    } else {
+        list_->InsertColumn(0, "Phonemes", wxLIST_FORMAT_LEFT, 165);
+        list_->InsertColumn(1, "Pitch", wxLIST_FORMAT_LEFT, 55);
+        list_->InsertColumn(2, "Beats", wxLIST_FORMAT_LEFT, 150);
+    }
     list_->OnActivated([this] {
         wxCommandEvent e;
         on_edit(e);
     });
     list_->OnKey([this](wxKeyEvent &e) { on_key(e); });
-    caption(this, outer, "Notes for this word", list_);
+    caption(this, outer, text_ ? "Words of this text" : "Notes for this word", list_);
 
     outer->Add(buttons(this), 0, wxEXPAND | wxALL, 8);
     ok_ = wxDynamicCast(FindWindow(wxID_OK), wxButton);
@@ -202,6 +269,25 @@ std::vector<std::string> AddWordDialog::pieces() const {
 }
 
 void AddWordDialog::on_look(wxCommandEvent &) {
+    if (text_) {
+        std::vector<TextWord> words = text_words(raw());
+        if (words.empty()) {
+            studio_->say("type some words first");
+            return;
+        }
+        std::vector<std::string> keys;
+        for (const TextWord &w : words)
+            if (std::find(keys.begin(), keys.end(), w.key()) == keys.end()) keys.push_back(w.key());
+        studio_->say("looking up " + std::to_string(words.size()) + (words.size() == 1 ? " word" : " words"));
+        auto alive = token();
+        studio_->lookup(
+            keys,
+            [this, alive, words](std::map<std::string, std::vector<std::string>> res) {
+                if (auto a = alive.lock(); a && *a) looked_text(words, std::move(res));
+            },
+            true);
+        return;
+    }
     auto [word, wanted] = typed();
     if (word.empty()) {
         studio_->say("type a word first");
@@ -240,11 +326,73 @@ void AddWordDialog::looked(const std::string &word, int wanted, const std::vecto
     build_rows();
     hear_->Enable();
     if (ok_) ok_->Enable();
+    show_count();
     std::string joined;
     for (const auto &p : sounds) joined += (joined.empty() ? "" : " ") + p;
     studio_->say(W(word + " is " + joined + ", " + std::to_string(n) + " syllable" +
                    (n == 1 ? "" : "s")));
     count_->SetFocus();
+}
+
+//: Add text's words looked up: Notes to use set to the notes they take, at
+//: most those from the cursor on.
+void AddWordDialog::looked_text(std::vector<TextWord> words, std::map<std::string, std::vector<std::string>> found) {
+    std::vector<std::string> missing;
+    for (TextWord &w : words) {
+        w.phonemes = found[w.key()];
+        if (w.phonemes.empty() && std::find(missing.begin(), missing.end(), w.word) == missing.end())
+            missing.push_back(w.word);
+    }
+    text_looked_up(words);
+    int want = 0;
+    for (const TextWord &w : words) want += w.notes;
+    words_ = std::move(words);
+    int most = std::max(1, int(existing_.size()));
+    count_->SetRange(1, most);
+    count_->SetValue(std::min(want, most));
+    build_rows();
+    hear_->Enable();
+    if (ok_) ok_->Enable();
+    show_count();
+    std::string said = std::to_string(words_.size()) + (words_.size() == 1 ? " word" : " words") + " on " +
+                       std::to_string(rows_.size()) + (rows_.size() == 1 ? " note" : " notes");
+    if (want > most)
+        said += ", of the " + std::to_string(want) + " the text takes: there are no more from the cursor on";
+    if (!missing.empty()) {
+        said += ". Not in the dictionary, sung on " + std::string(kDefaultPhoneme) + ":";
+        for (size_t i = 0; i < missing.size(); ++i) said += (i ? ", " : " ") + missing[i];
+    }
+    studio_->say(W(said));
+    count_->SetFocus();
+}
+
+//: A word of Add text opened: its phonemes and its notes. What Notes to use
+//: has spread is kept as each word's own, and Notes to use becomes their sum.
+void AddWordDialog::edit_word(int i) {
+    if (i < 0 || i >= int(words_.size())) return;
+    int most = std::max(1, int(existing_.size()));
+    TextWord &w = words_[size_t(i)];
+    TextWordDialog dlg(this, w, shares_[size_t(i)] > 0 ? shares_[size_t(i)] : w.notes, most);
+    if (dlg.ShowModal() != wxID_OK) return;
+    for (size_t k = 0; k < words_.size(); ++k)
+        if (shares_[k] > 0) words_[k].notes = shares_[k];
+    w.phonemes = dlg.phonemes();
+    w.notes = dlg.notes();
+    int want = 0;
+    for (const TextWord &x : words_) want += x.notes;
+    count_->SetValue(std::min(want, most));
+    build_rows(i);
+    studio_->say(W(w.word + ", " + (w.phonemes.empty() ? std::string(kDefaultPhoneme) : spaced(w.phonemes)) +
+                   ", on " + std::to_string(w.notes) + (w.notes == 1 ? " note" : " notes") + "; Notes to use " +
+                   std::to_string(count_->GetValue())));
+}
+
+//: Notes to use put in the dialog, the first time something is looked up.
+void AddWordDialog::show_count() {
+    wxSizer *row = count_->GetContainingSizer();
+    if (!row || count_->IsShown()) return;
+    GetSizer()->Show(row, true);
+    GetSizer()->Fit(this);
 }
 
 double AddWordDialog::value_beats() const {
@@ -253,7 +401,20 @@ double AddWordDialog::value_beats() const {
     return std::max(0.05, v);
 }
 
-void AddWordDialog::build_rows() {
+void AddWordDialog::build_rows(int select) {
+    if (text_) {
+        shares_ = text_shares(words_, count_->GetValue());
+        auto notes = text_on_notes(words_, shares_, studio_->plain_held());
+        rows_.clear();
+        for (size_t i = 0; i < notes.size() && i < existing_.size(); ++i) {
+            Note n = existing_[i];
+            n.phonemes = notes[i].first;
+            n.word = notes[i].second;
+            rows_.push_back(n);
+        }
+        sync(select);
+        return;
+    }
     std::string word = typed().first;
     auto groups = word_on_notes(phonemes_, pieces(), count_->GetValue(), studio_->plain_held());
     double b = value_beats();
@@ -273,13 +434,22 @@ void AddWordDialog::build_rows() {
 
 void AddWordDialog::sync(int select) {
     list_->DeleteAllItems();
-    for (size_t i = 0; i < rows_.size(); ++i) {
+    // Add text lists its words, Add word its notes
+    for (size_t i = 0; text_ && i < words_.size(); ++i) {
+        int k = i < shares_.size() ? shares_[i] : 0;
+        list_->InsertItem(long(i), W(words_[i].word));
+        list_->SetItem(long(i), 1, W(words_[i].phonemes.empty() ? "not found, " + std::string(kDefaultPhoneme)
+                                                                 : spaced(words_[i].phonemes)));
+        list_->SetItem(long(i), 2, k > 0 ? W(std::to_string(k)) : wxString("none, the notes ran out"));
+    }
+    for (size_t i = 0; !text_ && i < rows_.size(); ++i) {
         list_->InsertItem(long(i), W(rows_[i].label()));
         list_->SetItem(long(i), 1, W(pitch_name(rows_[i].pitch)));
         list_->SetItem(long(i), 2, W(fmt_g(rows_[i].beats)));
     }
-    if (!rows_.empty()) {
-        int i = std::min(std::max(select, 0), int(rows_.size()) - 1);
+    size_t shown = text_ ? words_.size() : rows_.size();
+    if (shown > 0) {
+        int i = std::min(std::max(select, 0), int(shown) - 1);
         list_->SelectRow(i);
         list_->FocusRow(i);
     }
@@ -293,8 +463,17 @@ void AddWordDialog::refresh_row(int i) {
 }
 
 void AddWordDialog::on_count(wxSpinEvent &) {
-    if (phonemes_.empty()) return;
+    if (!ready()) return;
     build_rows();
+    if (text_) {
+        // a whole text is too long to hear: where it gets to instead
+        std::string last;
+        for (const Note &n : rows_)
+            if (!n.word.empty()) last = n.word;
+        studio_->say(W(std::to_string(rows_.size()) + (rows_.size() == 1 ? " note" : " notes") + ", as far as " +
+                       last));
+        return;
+    }
     std::string all;
     for (const Note &n : rows_) all += (all.empty() ? "" : ", ") + n.text();
     studio_->say(W(std::to_string(rows_.size()) + " note" + (rows_.size() == 1 ? "" : "s") + ": " + all));
@@ -302,7 +481,7 @@ void AddWordDialog::on_count(wxSpinEvent &) {
 
 void AddWordDialog::on_beats(wxEvent &evt) {
     evt.Skip();
-    if (phonemes_.empty()) return;
+    if (!ready()) return;
     double b = value_beats();
     for (size_t i = 0; i < rows_.size(); ++i) {
         rows_[i].beats = b;
@@ -313,6 +492,11 @@ void AddWordDialog::on_beats(wxEvent &evt) {
 void AddWordDialog::on_key(wxKeyEvent &evt) {
     int code = evt.GetKeyCode();
     int i = list_->FirstSelected();
+    if (text_) {
+        if ((code == WXK_RETURN || code == WXK_NUMPAD_ENTER) && i >= 0) edit_word(i);
+        else evt.Skip();
+        return;
+    }
     if (evt.AltDown() && i >= 0 &&
         (code == WXK_UP || code == WXK_DOWN || code == WXK_LEFT || code == WXK_RIGHT)) {
         Note &n = rows_[size_t(i)];
@@ -344,6 +528,10 @@ void AddWordDialog::on_key(wxKeyEvent &evt) {
 void AddWordDialog::on_edit(wxCommandEvent &) {
     int i = list_->FirstSelected();
     if (i < 0) return;
+    if (text_) {
+        edit_word(i);
+        return;
+    }
     NoteDialog dlg(this, studio_, &rows_[size_t(i)]);
     if (dlg.ShowModal() != wxID_OK) return;
     rows_[size_t(i)] = dlg.result();
@@ -354,7 +542,7 @@ void AddWordDialog::on_preview(wxCommandEvent &) {
     hear_->Disable();
     std::string all;
     for (const Note &n : rows_) all += (all.empty() ? "" : ", ") + n.text();
-    studio_->say("previewing " + W(all));
+    studio_->say(text_ ? W("previewing the text") : "previewing " + W(all));
     auto alive = token();
     wxButton *b = hear_;
     studio_->preview(rows_, [alive, b]() {

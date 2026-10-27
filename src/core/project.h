@@ -395,6 +395,43 @@ std::vector<std::vector<std::string>> word_on_notes(const std::vector<std::strin
                                                     const std::vector<std::string> &pieces, int count,
                                                     bool plain = false);
 
+//: A word of a text for Add text: its letters, the pieces its hyphens make
+//: ("did-", "n't"), its phonemes with the syllables marked (empty if not
+//: found), and how many notes it goes on.
+struct TextWord {
+    std::string word;
+    std::vector<std::string> pieces;
+    std::vector<std::string> phonemes;
+    int notes = 1;
+    //: what it is looked up by: the pieces as typed, "did-n't"
+    std::string key() const;
+};
+
+//: The words of `text`, divided where it has white space; a stretch with no
+//: letter in it is no word. A tag in square brackets, "[Verse 1]", is left
+//: out; words in round ones, a backing part's, are kept.
+std::vector<TextWord> text_words(const std::string &text);
+
+//: How many notes a word of a text takes by itself: one a piece if it was
+//: typed in pieces, else one a syllable, or one if it was not found.
+int text_word_notes(const TextWord &w);
+
+//: The words of a text looked up: each on as many notes as it takes
+//: (text_word_notes), and "the" before a vowel "thee".
+void text_looked_up(std::vector<TextWord> &words);
+
+//: How many notes each word goes on with `count` in all: its own, the first
+//: words one more each where there are notes over; with too few, the words
+//: in order until they run out, the last on what is left, the rest on none.
+std::vector<int> text_shares(const std::vector<TextWord> &words, int count);
+
+//: The phonemes and the word of each note the words go on, `shares` of
+//: them each (text_shares), laid out as word_on_notes does, `plain` as on
+//: import; a word with no phonemes sings kDefaultPhoneme.
+std::vector<std::pair<std::vector<std::string>, std::string>> text_on_notes(const std::vector<TextWord> &words,
+                                                                            const std::vector<int> &shares,
+                                                                            bool plain = false);
+
 //: Put looked-up pronunciations on the notes an import left blank. Returns
 //: how many words were pronounced. A word the dictionary does not know leaves
 //: its notes singing kDefaultPhoneme. `plain_held`: a vowel held over several

@@ -230,12 +230,27 @@ them; each engine translates (the tables are at the top of
 `src/voices/<engine>.cpp`). Add word uses VocalWriter's own dictionary,
 and lays a word over as many notes as are asked for: as its hyphens divide
 it, "did-n't" on two, or a syllable to a note, or with more notes than
-syllables each split at its vowel, "night" on two as n AY, AY t.
+syllables each split at its vowel, "night" on two as n AY, AY t. Notes to
+use comes into the dialog once the word is looked up, starting on its
+syllables or the pieces its hyphens make.
 Note > Add word to existing notes (Ctrl+Shift+W) looks a word up the same
 way and puts it on the notes already in the track, from the one the cursor
 is on, rests and controllers passed over; each keeps its pitch, length and
 the rest, so a melody can be given its words without typing a phoneme. The
 cursor then goes on to the note after, ready for the next word.
+Note > Add text (Ctrl+Shift+X) does the same with a whole text at once, its
+words divided by spaces, as long as it is and pasted lines and all (Enter
+looks it up, Shift+Enter begins a new line): each word is looked up and
+given its notes one after another, as many as its hyphens or syllables ask,
+and the list shows the words, each with its phonemes and its notes. Enter on
+one opens its Phonemes and its Notes to use, and Notes to use above the
+list follows, the notes of every word added up. That starts on what they
+come to, no more than there are from the cursor to the end of the track;
+set higher, the first words take a note more each, and set lower, the words
+at the end are left off. A word not in the dictionary sings AA, and "the"
+before a vowel is "thee". A tag in square brackets, [Verse 1] or [Harp], is
+left out, while words in round ones, a backing part's, are sung. A text
+only ever goes on notes already there.
 
 ## Data you supply
 
@@ -416,6 +431,7 @@ Ctrl and Option for Alt, and Option+H to hear a note.
 | Ctrl+Up / Ctrl+Down | reorder the parts, or move a note |
 | Ctrl+W / Ctrl+N / Ctrl+R | add a word / a note / a rest, after the selected note |
 | Ctrl+Shift+W | add a word to the notes already there, from the selected one on |
+| Ctrl+Shift+X | add a text to the notes already there, from the selected one on |
 | Ctrl+Shift+R | a rest to the end of the bar |
 | Ctrl+Shift+C | add a controller: a tempo change for the entire song |
 | Ctrl+E, or Enter on a note | edit it, including its pitch bend |
