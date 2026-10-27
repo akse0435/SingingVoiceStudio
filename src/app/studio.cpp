@@ -37,7 +37,7 @@ enum {
     ID_BAR_REST, ID_GOTO_BAR, ID_METRONOME, ID_PLAY_PAUSE, ID_PANES,
     ID_TRACK_NEW, ID_TRACK_BACKING, ID_TRACK_EDIT, ID_TRACK_REMOVE, ID_TRACK_MUTE, ID_TRACK_SOLO,
     ID_TRACK_UP, ID_TRACK_DOWN, ID_PREVIEW_TIMER, ID_RECOVERY_TIMER, ID_ADD_CONTROLLER, ID_CLOSE_RESTS,
-    ID_REMOVE_VELOCITIES, ID_APPEND, ID_OWN_PATH, ID_PLAIN_HELD,
+    ID_REMOVE_VELOCITIES, ID_APPEND, ID_OWN_PATH, ID_PLAIN_HELD, ID_FOLLOW, ID_FOLLOW_TIMER,
 };
 
 //: A beat is a quarter note, so a sixteenth is a quarter of a beat: the step
@@ -50,6 +50,8 @@ const double kMinBeats = 0.125;
 const int kRecoveryWait = 2500;
 //: how long the nudging has to stop before a note is previewed
 const int kPreviewWait = 180;
+//: how often the cursors are moved on while the song plays and follows
+const int kFollowStep = 40;
 
 const int kMaxUndo = 100;
 
@@ -131,7 +133,8 @@ std::optional<double> stepped_length(double beats, bool up) {
 Studio::Studio(const std::string &path)
     : wxFrame(nullptr, wxID_ANY, kAppName, wxDefaultPosition, wxSize(720, 560)),
       preview_timer_(this, ID_PREVIEW_TIMER),
-      recovery_timer_(this, ID_RECOVERY_TIMER) {
+      recovery_timer_(this, ID_RECOVERY_TIMER),
+      follow_timer_(this, ID_FOLLOW_TIMER) {
     song_ = fresh_song();
     Track first;
     first.name = "Voice 1";
@@ -149,6 +152,7 @@ Studio::Studio(const std::string &path)
     build_menu();
     Bind(wxEVT_TIMER, [this](wxTimerEvent &) { preview_now(preview_row_); }, ID_PREVIEW_TIMER);
     Bind(wxEVT_TIMER, [this](wxTimerEvent &) { write_copy(); }, ID_RECOVERY_TIMER);
+    Bind(wxEVT_TIMER, [this](wxTimerEvent &) { follow(); }, ID_FOLLOW_TIMER);
 
     // The engines answer in order, so the cheap things are asked for first.
     worker_->ask<std::vector<VoiceListing>>([] { return Registry::get().voices(); },
@@ -338,6 +342,10 @@ void Studio::build_menu() {
         "The vowel's whole sound on the last note alone: \"day\" over three notes is d EH, EH, EY rather than d EY, EY, "
         "EY; YU on the first alone, \"few\" as f YU, UW, UW");
     mi_plain_held_->Check(settings_.plain_held_vowels);
+    mi_follow_ = prefs->AppendCheckItem(ID_FOLLOW, K("&Notes follow playback\tCtrl+Shift+F"),
+                                        "While the song plays, every track's cursor moves to the note being sung, "
+                                        "and stays there when it stops");
+    mi_follow_->Check(settings_.follow_playback);
     mi_own_path_ = prefs->AppendCheckItem(ID_OWN_PATH, K("Sing VocalWriter's voices through its own &sequencer\tCtrl+Shift+O"),
                                           "Sample for sample as VocalWriter 2.0 sang them; otherwise phrase by phrase, "
                                           "as the other engines sing");
@@ -399,6 +407,7 @@ void Studio::build_menu() {
     on(ID_REMOVE_VELOCITIES, &Studio::on_remove_velocities);
     on(ID_OWN_PATH, &Studio::on_own_path);
     on(ID_PLAIN_HELD, &Studio::on_plain_held);
+    on(ID_FOLLOW, &Studio::on_follow);
     Bind(wxEVT_MENU, [this](wxCommandEvent &) { Close(); }, wxID_EXIT);
 }
 
@@ -501,6 +510,45 @@ void Studio::on_remove_velocities(wxCommandEvent &) {
     say(wxString(on ? "importing MIDI removes the note velocities from the sung tracks"
                     : "importing MIDI keeps every note's velocity") +
         (kept ? "" : ", for this sitting only: the settings file could not be written"));
+}
+
+//: A setting of the program too: whether the cursors follow the song as it plays.
+void Studio::on_follow(wxCommandEvent &) {
+    bool on = mi_follow_->IsChecked();
+    settings_.follow_playback = on;
+    bool kept = save_settings(settings_);
+    if (on && following_ && player_.playing()) follow_timer_.Start(kFollowStep);
+    if (!on) follow_timer_.Stop();
+    say(wxString(on ? "the notes follow playback: every track's cursor moves to the note being sung"
+                    : "the notes stay where they are while the song plays") +
+        (kept ? "" : ", for this sitting only: the settings file could not be written"));
+}
+
+//: Every track's cursor onto the row being sung, the notes list's too: the
+//: last row starting at or before the beat the song has reached. When the
+//: song stops, they stay where it got to.
+void Studio::follow() {
+    if (!following_ || !player_.playing()) {
+        follow_timer_.Stop();
+        return;
+    }
+    double beat = play_clock_.beat_at(play_clock_.seconds(play_from_) + player_.seconds());
+    for (size_t k = 0; k < song_.tracks.size(); ++k) {
+        const std::vector<Note> &all = song_.tracks[k].notes;
+        if (all.empty()) continue;
+        int row = 0;
+        double at = 0;
+        for (size_t i = 0; i < all.size() && at <= beat + 1e-9; ++i) {
+            row = int(i);
+            at += all[i].beats;
+        }
+        if (int(k) != current_) {
+            song_.tracks[k].cursor = row;
+            continue;
+        }
+        std::vector<int> rows = selected();
+        if (rows.size() != 1 || rows[0] != row) select_only({row});
+    }
 }
 
 //: A setting of the program too: whether a vowel a MIDI import holds over
@@ -633,6 +681,8 @@ void Studio::on_keys(wxCommandEvent &) {
         "Ctrl+Shift+E  whether importing MIDI removes the note velocities from the sung tracks",
         "Ctrl+Shift+D  whether importing MIDI sings a vowel held over several notes on its first sound until "
         "the last of them: day over three notes as d EH, EH, EY",
+        "Ctrl+Shift+F  whether every track's cursor follows the note being sung while the song plays, staying "
+        "where it got to when it stops",
         "Ctrl+Shift+O  whether VocalWriter's voices are sung through its own sequencer, sample for sample as "
         "VocalWriter 2.0 sang them, or phrase by phrase as the other engines sing",
         "Ctrl+Shift+S  export the whole song as one WAV",
@@ -1796,6 +1846,7 @@ void Studio::start_playing(double start, bool quiet) {
     // but where the cursor is is where the notes are)
     if (start >= total - 1e-9) start = 0.0;
     stop_audio();          // the file cannot be written while it plays
+    play_from_ = start;
     rendering_ = true;
     mi_play_->Enable(false);
     if (!quiet && backed) {
@@ -1835,6 +1886,10 @@ void Studio::played(const Mixed &res, bool quiet) {
     else if (!loud.empty())
         say(W(loud.substr(2)));
     play_audio(res, quiet);
+    // the song, not a note heard on its own, is what the cursors follow
+    play_clock_ = song_.clock();
+    following_ = player_.playing();
+    if (following_ && settings_.follow_playback) follow_timer_.Start(kFollowStep);
 }
 
 //: Straight from memory to the sound card.
@@ -1847,7 +1902,10 @@ void Studio::play_audio(const Mixed &res, bool quiet) {
     if (!player_.play(res.samples, res.channels)) say("cannot play: no sound device would open");
 }
 
-void Studio::stop_audio() { player_.stop(); }
+void Studio::stop_audio() {
+    player_.stop();
+    following_ = false;
+}
 
 //: Another song came in: what plays stops, and one on its way is not played.
 void Studio::drop_playback() {
@@ -2422,6 +2480,7 @@ void Studio::on_close(wxCloseEvent &evt) {
     stop_audio();
     preview_timer_.Stop();
     recovery_timer_.Stop();
+    follow_timer_.Stop();
     worker_->close();
     // closing properly is what says the kept copy is not needed
     recovery_clear();

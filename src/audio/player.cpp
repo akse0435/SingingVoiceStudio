@@ -85,6 +85,8 @@ void Player::stop() {
     if (impl_->opened && ma_device_is_started(&impl_->device)) ma_device_stop(&impl_->device);
 }
 
+double Player::seconds() const { return double(impl_->frame) / kSampleRate; }
+
 bool Player::playing() {
     if (!impl_->done) return true;
     // finished by itself: let the device go quiet rather than run on silence

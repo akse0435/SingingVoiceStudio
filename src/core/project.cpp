@@ -1664,6 +1664,18 @@ double Clock::seconds(double beat) const {
     return s + (beat - at) * 60.0 / std::max(now, 1e-6);
 }
 
+double Clock::beat_at(double secs) const {
+    double s = 0, at = 0, now = bpm;
+    for (const TempoChange &c : changes) {
+        double span = (c.beat - at) * 60.0 / std::max(now, 1e-6);
+        if (s + span >= secs) break;
+        s += span;
+        at = c.beat;
+        now = c.bpm;
+    }
+    return at + (secs - s) * std::max(now, 1e-6) / 60.0;
+}
+
 double Clock::bpm_at(double beat) const {
     double now = bpm;
     for (const TempoChange &c : changes)

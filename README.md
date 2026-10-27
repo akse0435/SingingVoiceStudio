@@ -362,6 +362,7 @@ Ctrl and Option for Alt, and Option+H to hear a note.
 | Ctrl+, | song settings |
 | Ctrl+Shift+P | hear a note whenever it is nudged |
 | Space | play from the cursor, or stop |
+| Ctrl+Shift+F | whether every track's cursor follows the note being sung, and stays where it got to when stopped |
 | Ctrl+P / Ctrl+H / Ctrl+M / Ctrl+. | play from the start / hear one note / metronome / stop |
 | Ctrl+O / Ctrl+S | open and save a project |
 | Ctrl+I | import a MIDI file or a VocalWriter song |

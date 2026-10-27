@@ -174,6 +174,8 @@ struct Clock {
     double bpm = 120;
     std::vector<TempoChange> changes;   // in order, all after the first beat
     double seconds(double beat) const;
+    //: the beat `seconds` into the song: seconds() turned round
+    double beat_at(double seconds) const;
     double bpm_at(double beat) const;
 };
 

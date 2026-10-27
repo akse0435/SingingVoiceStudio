@@ -180,6 +180,8 @@ private:
     void on_remove_velocities(wxCommandEvent &);
     void on_own_path(wxCommandEvent &);
     void on_plain_held(wxCommandEvent &);
+    void on_follow(wxCommandEvent &);
+    void follow();
     void preview_note(int i);
     void preview_now(int i);
 
@@ -253,7 +255,11 @@ private:
     std::string path_;
     bool dirty_ = false;
     Settings settings_;
-    wxTimer preview_timer_, recovery_timer_;
+    wxTimer preview_timer_, recovery_timer_, follow_timer_;
+    //: what is playing, for the cursors to follow: the song from a beat, on its clock
+    bool following_ = false;
+    double play_from_ = 0;
+    Clock play_clock_;
     int preview_row_ = -1;
     std::unique_ptr<Worker> worker_;
     std::shared_ptr<Mixer> mixer_;
@@ -270,6 +276,7 @@ private:
     wxMenuItem *mi_remove_velocities_ = nullptr;
     wxMenuItem *mi_own_path_ = nullptr;
     wxMenuItem *mi_plain_held_ = nullptr;
+    wxMenuItem *mi_follow_ = nullptr;
     wxMenuItem *mi_undo_ = nullptr;
     wxMenuItem *mi_redo_ = nullptr;
     bool relabel_pending_ = false;

@@ -25,6 +25,8 @@ public:
     void stop();
     //: Whether a sound is still playing.
     bool playing();
+    //: How far into the sound the device has been given, in seconds.
+    double seconds() const;
 
 private:
     struct Impl;

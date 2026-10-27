@@ -33,6 +33,8 @@ struct Settings {
     //: a vowel an imported MIDI file holds over several notes sings its
     //: first sound until the last of them (pronounce, `plain_held`)
     bool plain_held_vowels = false;
+    //: while the song plays, every track's cursor moves to the note sung
+    bool follow_playback = false;
 };
 
 Settings load_settings();
