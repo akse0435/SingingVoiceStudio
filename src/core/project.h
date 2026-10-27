@@ -125,6 +125,13 @@ struct Song {
     bool operator!=(const Song &o) const { return !(*this == o); }
 };
 
+//: A song begun afresh, a new one or one imported from MIDI: with the
+//: portamento and reverb VocalWriter's own songs have. A project that says
+//: nothing of them still means none, as VocalWriter Studio wrote it.
+constexpr int kVocalWriterPortamento = 40;
+constexpr Reverb kVocalWriterReverb{40, 24};
+Song fresh_song();
+
 // -- what is shown --------------------------------------------------------
 
 std::string file_name(const std::string &text, const std::string &fallback = "track");

@@ -29,7 +29,9 @@ byte. The other engines are handed the same notes, the same phoneme timings
 and one shared pitch curve (written note, bend, detune, portamento, vibrato),
 each in its own terms: DECtalk a pitch per phoneme in Hz, the SSI-263 its
 inflection register every 32 samples, Microsoft's vocoder twenty pitch knots
-per acoustic unit.
+per acoustic unit. A new song, and one imported from MIDI, starts with the
+portamento and reverb VocalWriter's own songs have: a portamento of 40, and
+reverb room 40 at 24 per cent.
 
 **The mod wheel** sits beside pitch bend on every note -- two fields in the
 note editor, Mod points for the whole curve, a Mod column in the list, CC 1

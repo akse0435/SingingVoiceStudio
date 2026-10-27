@@ -129,6 +129,7 @@ Studio::Studio(const std::string &path)
     : wxFrame(nullptr, wxID_ANY, kAppName, wxDefaultPosition, wxSize(720, 560)),
       preview_timer_(this, ID_PREVIEW_TIMER),
       recovery_timer_(this, ID_RECOVERY_TIMER) {
+    song_ = fresh_song();
     Track first;
     first.name = "Voice 1";
     song_.tracks.push_back(first);
@@ -1865,7 +1866,7 @@ void Studio::on_import(wxCommandEvent &) {
     }
     // as the original: the imported song keeps the consonant length, and
     // starts its voice controls, reverb and timing afresh
-    Song song;
+    Song song = fresh_song();
     song.bpm = got.bpm;
     song.sig = got.sig;
     song.consonants = song_.consonants;

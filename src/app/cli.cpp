@@ -143,7 +143,7 @@ Song open_song(const std::string &path) {
             say(std::to_string(shortfall) + " word" + s_if(shortfall) + " not in the dictionary; those notes sing " +
                 kDefaultPhoneme);
     }
-    Song song;
+    Song song = fresh_song();
     song.bpm = got.bpm;
     song.sig = got.sig;
     size_t total = 0;

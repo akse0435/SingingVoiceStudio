@@ -43,7 +43,8 @@ inline const VoiceControl *voice_controls(size_t *count) {
         {"detune", "Speech_Detune", 0, -8192, 8191, "Detune", "a shade sharp or flat",
          &VoiceStyle::detune},
         {"portamento", "Speech_Portamento", 0, 0, 127, "Portamento",
-         "glide between notes; 0 goes straight there", &VoiceStyle::portamento},
+         "glide between notes; 0 goes straight there, VocalWriter used 40",
+         &VoiceStyle::portamento},
     };
     *count = sizeof table / sizeof table[0];
     return table;

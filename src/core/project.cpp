@@ -597,6 +597,13 @@ std::vector<Note> notes_from_clipboard(const std::string &text) {
 
 std::string song_fingerprint(const Song &song) { return song_doc(song).dump(); }
 
+Song fresh_song() {
+    Song song;
+    song.voice.portamento = kVocalWriterPortamento;
+    song.reverb = kVocalWriterReverb;
+    return song;
+}
+
 // -- MIDI ---------------------------------------------------------------------
 
 namespace {
