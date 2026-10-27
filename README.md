@@ -23,13 +23,18 @@ Everything renders through one path. A part is cut into phrases at its rests,
 the consonants are moved in front of the beat so the vowel lands on it, each
 phrase is sung by the part's voice and placed where the score puts it, and the
 parts are panned and mixed, the ones sharing a reverb setting through one room.
-VocalWriter's voices are sung through VocalWriter 2.0's own play path -- its
-parser places the consonants and its sequencer sings the track -- so a part
-exported to WAV is, sample for sample, what VocalWriter 2.0 sang, and a song
-VocalWriter's voices sing every part of is exported as VocalWriter played
-it: all the parts at once, through its reverb. Playing, a phrase is sung on
-its own, which comes very near. A project saved here is the
-same file byte for byte as VocalWriter Studio's. The other engines are handed the same notes, the same phoneme timings
+VocalWriter's voices get exactly the calls VocalWriter Studio made -- a song
+sung by them here is the same file, sample for sample, as the Python
+VocalWriter Studio renders -- and the song settings shape them as they shape
+the other engines. **Settings > Sing VocalWriter's voices through its own
+sequencer** (Ctrl+Shift+O, off until it is turned on) sings them through
+VocalWriter 2.0's own play path instead -- its parser places the consonants
+and its sequencer sings the track -- so a part exported to WAV is, sample for
+sample, what VocalWriter 2.0 sang, and a song VocalWriter's voices sing every
+part of is exported as VocalWriter played it: all the parts at once, through
+its reverb. Playing, a phrase is then sung on its own, which comes very near.
+The command line sings them the way the window was last set to. A project
+saved here is the same file byte for byte as VocalWriter Studio's. The other engines are handed the same notes, the same phoneme timings
 and one shared pitch curve (written note, bend, detune, portamento, vibrato),
 each in its own terms: DECtalk a pitch per phoneme in Hz, the SSI-263 its
 inflection register every 32 samples, Microsoft's vocoder twenty pitch knots
@@ -77,14 +82,18 @@ and on a rest the pitch the next note's first consonants are sung at (Edit
 note, VocalWriter controls). Only VocalWriter's voices sing them, the
 velocity too -- to another engine a velocity would only be loudness, which a
 track's volume is -- so they are greyed for a note another engine sings. The
+bend range and the rest's pitch are its sequencer's: sung phrase by phrase,
+a bend is sung in semitones whatever the range, and the consonants are placed
+as for every other engine. The
 volume is the exception: where another engine sings, the mix follows it. A
 track's velocity, which its notes follow unless they have their own, is 114
 to begin with, VocalWriter's: its notes window put a new note in at 90%.
 
 **A voice change** is a controller too: from where it stands, the track
 sings with another voice, any engine's. A track that only ever changes
-between VocalWriter's voices is sung as VocalWriter sang one, the change
-being its program change; one that goes from engine to engine is sung phrase
+between VocalWriter's voices is sung, with its own sequencer turned on, as
+VocalWriter sang one, the change being its program change; one that goes
+from engine to engine is sung phrase
 by phrase, each phrase cut where the voice changes and sung by the voice in
 force. A controller sets VocalWriter's controls as well, from where it stands
 on, as a note sets them from a point inside it.
@@ -110,9 +119,9 @@ one. Each instrument track comes in played by the GM Soundbank, with its
 notes, velocities, program changes and controls, the drum track on the drum
 kit. The song's tempo changes come in on a Tempo track at the top, as a MIDI
 file's do, with its reverb and its end (File > Song settings, Song end).
-The karaoke track is left out. A song opened this way and exported to WAV is,
-sample for sample, VocalWriter playing it, and so is the project it is saved
-as. Its songs turn a track up past 100% now and then, so a track's volume
+The karaoke track is left out. With VocalWriter's own sequencer turned on
+(above), a song opened this way and exported to WAV is, sample for sample,
+VocalWriter playing it, and so is the project it is saved as. Its songs turn a track up past 100% now and then, so a track's volume
 goes to 200%.
 
 **A MIDI file's instruments** come in on the GM Soundbank, as VocalWriter
@@ -346,6 +355,7 @@ Ctrl and Option for Alt, and Option+H to hear a note.
 | Ctrl+Shift+M | append a MIDI file under the song's tracks |
 | Ctrl+Shift+I | whether importing MIDI closes the short rests between notes |
 | Ctrl+Shift+E | whether importing MIDI removes the note velocities from the sung tracks |
+| Ctrl+Shift+O | whether VocalWriter's voices are sung through its own sequencer |
 | Ctrl+Shift+S / Ctrl+Shift+T | export one WAV / one WAV per track |
 
 ## From the command line

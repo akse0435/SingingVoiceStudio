@@ -37,7 +37,7 @@ enum {
     ID_BAR_REST, ID_GOTO_BAR, ID_METRONOME, ID_PLAY_PAUSE, ID_PANES,
     ID_TRACK_NEW, ID_TRACK_BACKING, ID_TRACK_EDIT, ID_TRACK_REMOVE, ID_TRACK_MUTE, ID_TRACK_SOLO,
     ID_TRACK_UP, ID_TRACK_DOWN, ID_PREVIEW_TIMER, ID_RECOVERY_TIMER, ID_ADD_CONTROLLER, ID_CLOSE_RESTS,
-    ID_REMOVE_VELOCITIES, ID_APPEND,
+    ID_REMOVE_VELOCITIES, ID_APPEND, ID_OWN_PATH,
 };
 
 //: A beat is a quarter note, so a sixteenth is a quarter of a beat: the step
@@ -139,6 +139,7 @@ Studio::Studio(const std::string &path)
     settings_ = load_settings();
     // before anything asks the engines for their voices
     set_macintalk_folder(settings_.panthera_folder);
+    set_vocalwriter_own_path(settings_.vocalwriter_own_path);
     mixer_ = std::make_shared<Mixer>();
     worker_ = std::make_unique<Worker>(this);
     worker_->on_error = [this](const std::string &msg) { say("engine error: " + W(msg)); };
@@ -331,6 +332,10 @@ void Studio::build_menu() {
         prefs->AppendCheckItem(ID_REMOVE_VELOCITIES, K("Remove note &velocities from sung tracks when importing MIDI\tCtrl+Shift+E"),
                                "Give the sung parts of a MIDI file the track's velocity alone");
     mi_remove_velocities_->Check(settings_.remove_note_velocities);
+    mi_own_path_ = prefs->AppendCheckItem(ID_OWN_PATH, K("Sing VocalWriter's voices through its own &sequencer\tCtrl+Shift+O"),
+                                          "Sample for sample as VocalWriter 2.0 sang them; otherwise phrase by phrase, "
+                                          "as the other engines sing");
+    mi_own_path_->Check(settings_.vocalwriter_own_path);
     prefs->Append(ID_PANTHERA, K("Panthera &folder..."), "Where to find Panthera, for the MacinTalk voices");
     bar->Append(prefs, "&Settings");
     bar->Append(help, "&Help");
@@ -386,6 +391,7 @@ void Studio::build_menu() {
     on(ID_PANTHERA, &Studio::on_panthera);
     on(ID_CLOSE_RESTS, &Studio::on_close_rests);
     on(ID_REMOVE_VELOCITIES, &Studio::on_remove_velocities);
+    on(ID_OWN_PATH, &Studio::on_own_path);
     Bind(wxEVT_MENU, [this](wxCommandEvent &) { Close(); }, wxID_EXIT);
 }
 
@@ -490,6 +496,22 @@ void Studio::on_remove_velocities(wxCommandEvent &) {
         (kept ? "" : ", for this sitting only: the settings file could not be written"));
 }
 
+//: A setting of the program too: whether VocalWriter's voices are sung
+//: through its own sequencer. Changed on the engines' thread, between two
+//: renders, so no song is sung half one way and half the other.
+void Studio::on_own_path(wxCommandEvent &) {
+    bool on = mi_own_path_->IsChecked();
+    settings_.vocalwriter_own_path = on;
+    bool kept = save_settings(settings_);
+    worker_->ask<bool>([on] {
+        set_vocalwriter_own_path(on);
+        return on;
+    }, [](bool) {});
+    say(wxString(on ? "VocalWriter's voices are sung through its own sequencer, as VocalWriter 2.0 sang them"
+                    : "VocalWriter's voices are sung phrase by phrase, as the other engines sing") +
+        (kept ? "" : ", for this sitting only: the settings file could not be written"));
+}
+
 //: Where Panthera is. MacinTalk looks again at once, and what it finds is
 //: said: the voices it has now, or why it has none.
 void Studio::on_panthera(wxCommandEvent &) {
@@ -591,6 +613,8 @@ void Studio::on_keys(wxCommandEvent &) {
         "place of the song's",
         "Ctrl+Shift+I  whether importing MIDI closes the short rests between notes",
         "Ctrl+Shift+E  whether importing MIDI removes the note velocities from the sung tracks",
+        "Ctrl+Shift+O  whether VocalWriter's voices are sung through its own sequencer, sample for sample as "
+        "VocalWriter 2.0 sang them, or phrase by phrase as the other engines sing",
         "Ctrl+Shift+S  export the whole song as one WAV",
         "Ctrl+Shift+T  export every track to its own WAV",
         "Enter on a note edits it",

@@ -170,7 +170,8 @@ private:
 //: and sounding as long as the note.
 std::vector<Note> chord_rows(const Note &note, const std::vector<int> &pitches);
 //: Whether a note control (kNoteControls) reaches a voice: the volume
-//: reaches every voice; all but the pedal reach VocalWriter's voices; the
+//: reaches every voice; all but the pedal reach VocalWriter's voices, the
+//: bend range and the rest's pitch only through its own sequencer; the
 //: pedal, bend range and detune reach its instruments.
 bool control_reaches(const std::string &key, int voice);
 //: A voice's name without its engine's: "Betty", "Cello" for "GM Cello".

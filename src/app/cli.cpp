@@ -312,8 +312,11 @@ bool wants_console(const CliArgs &a) {
 
 int run_cli(const CliArgs &args) {
     g_quiet = args.quiet;
-    // Panthera where the window was told it is
-    set_macintalk_folder(load_settings().panthera_folder);
+    // Panthera where the window was told it is, and VocalWriter's voices
+    // sung the way the window sings them
+    Settings settings = load_settings();
+    set_macintalk_folder(settings.panthera_folder);
+    set_vocalwriter_own_path(settings.vocalwriter_own_path);
     if (args.help) {
         out(usage());
         return 0;

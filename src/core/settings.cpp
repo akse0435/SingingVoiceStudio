@@ -57,6 +57,8 @@ Settings load_settings() {
         s.close_rests_beats = std::max(0.0, doc["close_rests_beats"].get<double>());
     if (doc.contains("remove_note_velocities") && doc["remove_note_velocities"].is_boolean())
         s.remove_note_velocities = doc["remove_note_velocities"].get<bool>();
+    if (doc.contains("vocalwriter_own_path") && doc["vocalwriter_own_path"].is_boolean())
+        s.vocalwriter_own_path = doc["vocalwriter_own_path"].get<bool>();
     return s;
 }
 
@@ -68,6 +70,7 @@ bool save_settings(const Settings &s) {
     doc["close_rests"] = s.close_rests;
     doc["close_rests_beats"] = s.close_rests_beats;
     doc["remove_note_velocities"] = s.remove_note_velocities;
+    doc["vocalwriter_own_path"] = s.vocalwriter_own_path;
     return write_text(in_folder("settings.json"), doc.dump(1) + "\n");
 }
 

@@ -12,6 +12,7 @@
 #include "core/paths.h"
 #include "core/phonology.h"
 #include "voices/registry.h"
+#include "voices/vocalwriter.h"
 
 namespace svs {
 
@@ -585,7 +586,9 @@ std::vector<Note> chord_rows(const Note &note, const std::vector<int> &pitches) 
 bool control_reaches(const std::string &key, int voice) {
     // the mix follows the volume where an engine does not
     if (key == "volume") return true;
-    if (is_vocalwriter_voice(voice)) return key != "sustain";
+    // the bend range and the rest's pitch are VocalWriter's sequencer's
+    if (is_vocalwriter_voice(voice))
+        return key != "sustain" && (vocalwriter_own_path() || (key != "bend_range" && key != "lead_pitch"));
     if (is_gm_voice(voice)) return key == "volume" || key == "sustain" || key == "bend_range" || key == "detune";
     return false;
 }

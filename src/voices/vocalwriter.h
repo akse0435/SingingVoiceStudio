@@ -57,6 +57,13 @@ private:
     std::mutex mu_;
 };
 
+//: Whether VocalWriter's voices are sung through VocalWriter 2.0's own play
+//: path, its parser and sequencer, so that a part comes out sample for sample
+//: as VocalWriter sang it; otherwise they are sung phrase by phrase, as every
+//: other engine is and as VocalWriter Studio sang them. Off to begin with.
+void set_vocalwriter_own_path(bool on);
+bool vocalwriter_own_path();
+
 //: Which voice each old program number picks, for songs written down as
 //: program changes. -1 where there is none.
 std::vector<int> vocalwriter_program_voices();

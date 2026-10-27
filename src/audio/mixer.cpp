@@ -273,6 +273,8 @@ std::string request_key(const RenderRequest &r) {
     num(r.reverb.first);
     num(r.reverb.second);
     num(r.anticipate);
+    // VocalWriter's voices sound otherwise through its own play path
+    num(vocalwriter_own_path());
     for (const PartRequest &t : r.tracks) {
         k += "|T";
         num(t.voice_id);
@@ -763,15 +765,9 @@ std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double
         phrase.any_bends = !bends.empty();
         double sum = 0;                               // the phrase's beats
         for (const auto *e : run.notes) sum += e->beats;
-        if (own) {
-            // VocalWriter keeps the song's tempo changes itself
-            phrase.consonants = consonants;
-            // a beat of rest even where nothing comes before it, without which
-            // the engine skips the first note's consonants
-            phrase.room = run.at - was_over > 1e-9 ? std::min(run.at - was_over, 1.0) : 1.0;
-            phrase.channel = t.channel;
-            double from = run.at - phrase.room;
-            phrase.bpm = clock.bpm_at(from);
+        // VocalWriter's voices hear its controls, sung phrase by phrase or not
+        bool hears = own || is_vocalwriter_voice(voice);
+        if (hears) {
             // what the controllers and the notes before it set, the last of
             // each, which the phrase starts with; and the controllers inside it
             std::map<std::string, std::pair<double, double>> last;   // (beat, value)
@@ -795,6 +791,16 @@ std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double
                 note_beat += e.beats;
             }
             for (const auto &l : last) phrase.held[l.first] = l.second.second;
+        }
+        if (own) {
+            // VocalWriter keeps the song's tempo changes itself
+            phrase.consonants = consonants;
+            // a beat of rest even where nothing comes before it, without which
+            // the engine skips the first note's consonants
+            phrase.room = run.at - was_over > 1e-9 ? std::min(run.at - was_over, 1.0) : 1.0;
+            phrase.channel = t.channel;
+            double from = run.at - phrase.room;
+            phrase.bpm = clock.bpm_at(from);
             for (const TempoChange &c : clock.changes)
                 if (c.beat > from) phrase.tempos.push_back({c.beat - from, c.bpm});
         } else {
@@ -814,8 +820,35 @@ std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double
             n.durations_ms = syllable_lengths(n.phonemes, n.beats * 60000.0 / bpm, consonants);
             n.word = e->word;
             n.hold = e->hold;
-            if (own) n.controls = e->controls;
+            if (hears) n.controls = e->controls;
             phrase.notes.push_back(n);
+        }
+        if (hears && !own) {
+            // Phrase by phrase the controls go on the notes, each where it
+            // falls: the ones standing at the start on the first, ahead of
+            // its own, and each controller's on the note it comes in.
+            auto put = [](NoteControls &on, const std::string &name, double at, double value) {
+                auto &pts = on[name];
+                auto it = std::lower_bound(pts.begin(), pts.end(), at,
+                                           [](const std::pair<double, double> &p, double a) { return p.first < a; });
+                pts.insert(it, {at, value});
+            };
+            for (const auto &h : phrase.held) put(phrase.notes.front().controls, h.first, 0.0, h.second);
+            for (const ControlAt &c : phrase.controls) {
+                double start = 0;
+                for (size_t k = 0; k < run.notes.size(); ++k) {
+                    double beats = run.notes[k]->beats;
+                    if (k + 1 < run.notes.size() && c.beat >= start + beats - 1e-9) {
+                        start += beats;
+                        continue;
+                    }
+                    double at = beats > 0 ? (c.beat - start) / beats : 0.0;
+                    put(phrase.notes[k].controls, c.name, std::max(0.0, std::min(1.0, at)), c.value);
+                    break;
+                }
+            }
+            phrase.held.clear();
+            phrase.controls.clear();
         }
         double lead = early && !own ? anticipate(phrase.notes, bpm, consonants, run.at - was_over) : 0.0;
         was_over = run.at + sum - lead;

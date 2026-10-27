@@ -27,6 +27,9 @@ struct Settings {
     //: remove the notes' own velocities from the sung tracks of an imported
     //: MIDI file, so they take the track's
     bool remove_note_velocities = false;
+    //: sing VocalWriter's voices through VocalWriter 2.0's own play path
+    //: rather than phrase by phrase (set_vocalwriter_own_path)
+    bool vocalwriter_own_path = false;
 };
 
 Settings load_settings();
