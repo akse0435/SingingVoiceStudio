@@ -238,9 +238,10 @@ struct DtPhone {
 
 // VocalWriter's fifty-seven phonemes in DECtalk's arpabet, from
 // include\usa_phon.tab: iy ih ey eh ae aa ay aw ah ao ow oy uh uw rr yu ax ix
-// ir er ar or ur, w yx r ll hx rx lx, m n nx el en, f v th dh s z sh zh, p b
-// t d k g dx tx q ch jh. They are written in full (yx, not y; ll, not l):
-// DECtalk reads a one-letter abbreviation it does not know as text. The
+// ir er ar or ur, w yx r l hx rx lx, m n nx el en, f v th dh s z sh zh, p b
+// t d k g dx tx q ch jh. They are written as the table has them (yx, not y):
+// DECtalk reads a one-letter abbreviation it does not know as text, and a
+// doubled letter as two phonemes, the first at DECtalk's own length. The
 // diphthongs (ey ay oy aw ow yu) and the r-coloured vowels (ir er ar or ur,
 // and rr) are DECtalk's own, sung whole, long or short; held long, DECtalk's
 // diphthong reaches its second vowel within about a third of a second and
@@ -288,7 +289,7 @@ const DtPhone kPhones[] = {
     {"w", "w", kSonorant, false, nullptr},
     {"y", "yx", kSonorant, false, nullptr},
     {"r", "r", kSonorant, false, nullptr},   // rx after a vowel, see Plan::shape
-    {"l", "ll", kSonorant, false, nullptr},  // DECtalk makes it lx after a vowel
+    {"l", "l", kSonorant, false, nullptr},  // DECtalk makes it lx after a vowel
     {"h", "hx", kUnvoiced, false, nullptr},
     {"m", "m", kSonorant, false, nullptr},
     {"n", "n", kSonorant, false, nullptr},
