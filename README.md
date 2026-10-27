@@ -2,8 +2,7 @@
 
 VocalWriter Studio rebuilt in C++ and wxWidgets, with more singers in it, for
 Windows and macOS. The window, the menus, the keys, the dialogs, the messages
-and the project files are VocalWriter Studio's own (see
-`C:\stuff\VocalWriter\app`); what is new is that a track can be sung by any of
+and the project files are derived from VocalWriter Studio; what is new is that a track can be sung by any of
 five synthesisers, or played by VocalWriter's own General MIDI instruments:
 
 | engine | voices | numbers | what it is |
