@@ -138,6 +138,12 @@ the likeliest taken; `--sing-all` sings every part. Each track takes its volume 
 file, CC 7 by CC 11 with both at 127 being 100%, at its loudest, with
 VocalWriter's volume control against that where it changes. A MIDI file
 opened from the desktop or named on the command line comes in the same way.
+A syllable the file gives no note of its own is sung where it falls: one
+in the middle of a note ("the sea" on one note) divides it there, and one
+in a rest ("to" before "see") has a note from there to the next, at that
+note's pitch. Where the note is bent from one pitch to the next as the
+syllable comes, it is divided where the bend arrives, so the syllable starts
+on its own pitch.
 
 **Append MIDI** (File > Append MIDI, Ctrl+Shift+M) puts the parts of a MIDI
 file under the song's own tracks, chosen as Import chooses them; its tempo

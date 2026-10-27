@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <deque>
@@ -308,10 +309,44 @@ std::vector<int> pair_up(const std::vector<MidiNote> &notes,
     return out;
 }
 
+//: Whether a piece of lyric is a syllable of its own: it has a vowel letter,
+//: and if it `continues` a word, it does not open on one, unlike the "xt" of
+//: "ne", "xt" or the "ed" of "lov", "ed". A word starting ("a ") stands alone.
+bool own_syllable(const std::string &piece, bool continues) {
+    std::string t;
+    for (unsigned char c : piece)
+        if (std::isalpha(c)) t.push_back(char(std::tolower(c)));
+    if (t.empty() || t.find_first_of("aeiouy") == std::string::npos) return false;
+    return !continues || std::string("aeiou").find(t[0]) == std::string::npos;
+}
+
+//: Where a bend under a syllable at `t` arrives: the end of the run of
+//: moving bend events, inside the note from `from` to `to`, that `t` falls in
+//: or lies within a 16th of. `t` itself if there is none.
+long bend_arrives(const std::vector<std::pair<long, int>> &bends, long from, long to, long t, double div) {
+    const long step = std::lround(div / 8), near = std::lround(div / 4);
+    std::vector<std::pair<long, int>> in;
+    for (const auto &b : bends)
+        if (b.first >= from && b.first < to) in.push_back(b);
+    std::stable_sort(in.begin(), in.end(),
+                     [](const std::pair<long, int> &x, const std::pair<long, int> &y) { return x.first < y.first; });
+    for (size_t i = 0; i < in.size();) {
+        // a glide: events no more than a 32nd apart, the value changing
+        size_t j = i;
+        while (j + 1 < in.size() && in[j + 1].first - in[j].first <= step) ++j;
+        bool moves = false;
+        for (size_t k = i; k < j; ++k) moves = moves || in[k + 1].second != in[k].second;
+        if (moves && t >= in[i].first - near && t <= in[j].first + near) return in[j].first;
+        i = j + 1;
+    }
+    return t;
+}
+
 //: The words onto the notes. VocalWriter's own exports write a note's word
 //: as a Text event and its phonemes as a Lyric event, both on the note;
 //: everyone else writes the sung syllable as a Lyric event, near enough.
-void put_words(std::vector<MidiNote> &notes, const RawTrack &trk, double div) {
+void put_words(std::vector<MidiNote> &notes, const std::vector<std::pair<long, int>> &bends, const RawTrack &trk,
+               double div) {
     std::map<long, std::string> text_at, lyric_at;
     for (const auto &e : trk.texts) text_at[e.first] = e.second;
     for (const auto &e : trk.lyrics) lyric_at[e.first] += e.second;
@@ -330,11 +365,55 @@ void put_words(std::vector<MidiNote> &notes, const RawTrack &trk, double div) {
     auto syls = syllables(rest);
     int exact;
     std::vector<int> at = pair_up(notes, syls, div, &exact);
+    // A syllable of its own left without a note is given one where it is
+    // sung: a file that sings "the sea" on one note has the note divided at
+    // "sea", and one that leaves "to" in a rest has a note for it there, at
+    // the pitch of the note after, up to that note. Too short a piece is not
+    // made, and the syllable is left to the merging below. A note bent from
+    // one pitch to the next as the syllable comes is divided where the bend
+    // arrives, so the syllable starts on its own pitch ("the" on C#4 gliding
+    // down, "sea" on B3).
+    const long shortest = std::lround(div / 16);
+    std::vector<MidiNote> made;
+    for (size_t s = 0; s < syls.size(); ++s) {
+        bool continues = s > 0 && syls[s - 1].second.back() == '-';
+        if (at[s] >= 0 || !own_syllable(syls[s].second, continues)) continue;
+        long t = syls[s].first;
+        MidiNote *on = nullptr, *next = nullptr;
+        auto look = [&](MidiNote &n) {
+            if (n.tick < t && n.tick + n.duration > t && (!on || n.tick >= on->tick)) on = &n;
+            if (n.tick > t && (!next || n.tick < next->tick)) next = &n;
+        };
+        for (MidiNote &n : notes) look(n);
+        for (MidiNote &n : made) look(n);
+        MidiNote piece;
+        piece.tick = t;
+        piece.text = syls[s].second;
+        if (on) {
+            long end = on->tick + on->duration;
+            long at_bend = bend_arrives(bends, on->tick, end, t, div);
+            if (at_bend - on->tick >= shortest && end - at_bend >= shortest) t = piece.tick = at_bend;
+            if (t - on->tick < shortest || end - t < shortest) continue;
+            piece.pitch = on->pitch;
+            piece.velocity = on->velocity;
+            piece.duration = end - t;
+            on->duration = t - on->tick;
+        } else if (next) {
+            if (next->tick - t < shortest) continue;
+            piece.pitch = next->pitch;
+            piece.velocity = next->velocity;
+            piece.duration = next->tick - t;
+        } else {
+            continue;
+        }
+        made.push_back(piece);
+        at[s] = -2;
+    }
     // A piece left without a note is part of the syllable it runs on into,
     // or of the one that runs on into it: a karaoke file lights up "ne" and
     // then "xt " on one note, or "ha" on its note and "nd " a little later.
     for (size_t s = 0; s < syls.size(); ++s) {
-        if (at[s] >= 0) continue;
+        if (at[s] != -1) continue;
         std::string &w = syls[s].second;
         if (s + 1 < syls.size() && w.back() == '-') {
             syls[s + 1].second = w.substr(0, w.size() - 1) + syls[s + 1].second;
@@ -345,6 +424,10 @@ void put_words(std::vector<MidiNote> &notes, const RawTrack &trk, double div) {
     }
     for (size_t s = 0; s < syls.size(); ++s)
         if (at[s] >= 0 && notes[size_t(at[s])].text.empty()) notes[size_t(at[s])].text = syls[s].second;
+    notes.insert(notes.end(), made.begin(), made.end());
+    std::stable_sort(notes.begin(), notes.end(), [](const MidiNote &x, const MidiNote &y) {
+        return x.tick != y.tick ? x.tick < y.tick : x.pitch < y.pitch;
+    });
 }
 
 //: Which channel a track's lyrics are sung on: the one most syllables fall
@@ -434,7 +517,7 @@ MidiFile read_midi(const std::string &path, int lyrics_on) {
             t.name = trk.name;
             t.tempos = trk.tempos;
             t.time_sigs = trk.time_sigs;
-            put_words(t.notes, trk, div);
+            put_words(t.notes, t.bends, trk, div);
             mf.tracks.push_back(t);
             continue;
         }
@@ -458,7 +541,7 @@ MidiFile read_midi(const std::string &path, int lyrics_on) {
         for (int ch : used) {
             MidiTrack t = trk.channel[ch];
             t.name = mf.format == 0 ? "" : trk.name;
-            if (ch == sung) put_words(t.notes, trk, div);
+            if (ch == sung) put_words(t.notes, t.bends, trk, div);
             mf.tracks.push_back(t);
         }
     }
