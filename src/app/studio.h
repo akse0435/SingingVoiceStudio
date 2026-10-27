@@ -196,6 +196,7 @@ private:
     void on_close_rests(wxCommandEvent &);
     double rests_to_close() const;
     void on_remove_velocities(wxCommandEvent &);
+    void on_remove_volumes(wxCommandEvent &);
     void on_own_path(wxCommandEvent &);
     void on_plain_held(wxCommandEvent &);
     void on_octave_instruments(wxCommandEvent &);
@@ -306,6 +307,7 @@ private:
     wxMenuItem *mi_metronome_ = nullptr;
     wxMenuItem *mi_auto_preview_ = nullptr;
     wxMenuItem *mi_remove_velocities_ = nullptr;
+    wxMenuItem *mi_remove_volumes_ = nullptr;
     wxMenuItem *mi_own_path_ = nullptr;
     wxMenuItem *mi_plain_held_ = nullptr;
     wxMenuItem *mi_octave_instruments_ = nullptr;

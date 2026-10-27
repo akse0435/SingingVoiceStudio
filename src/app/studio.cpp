@@ -44,7 +44,7 @@ enum {
     ID_TRACK_NEW, ID_TRACK_BACKING, ID_TRACK_EDIT, ID_TRACK_REMOVE, ID_TRACK_MUTE, ID_TRACK_SOLO,
     ID_TRACK_UP, ID_TRACK_DOWN, ID_PREVIEW_TIMER, ID_RECOVERY_TIMER, ID_ADD_CONTROLLER, ID_CLOSE_RESTS,
     ID_REMOVE_VELOCITIES, ID_APPEND, ID_OWN_PATH, ID_PLAIN_HELD, ID_FOLLOW, ID_FOLLOW_TIMER, ID_EXPORT_TIMER,
-    ID_EXPORT_MIDI, ID_ADD_WORD_EXISTING, ID_OCTAVE_INSTRUMENTS, ID_ADD_TEXT,
+    ID_EXPORT_MIDI, ID_ADD_WORD_EXISTING, ID_OCTAVE_INSTRUMENTS, ID_ADD_TEXT, ID_REMOVE_VOLUMES,
 };
 
 //: A beat is a quarter note, so a sixteenth is a quarter of a beat: the step
@@ -428,6 +428,10 @@ void Studio::build_menu() {
         prefs->AppendCheckItem(ID_REMOVE_VELOCITIES, K("Remove note &velocities from sung tracks when importing MIDI\tCtrl+Shift+E"),
                                "Give the sung parts of a MIDI file the track's velocity alone");
     mi_remove_velocities_->Check(settings_.remove_note_velocities);
+    mi_remove_volumes_ = prefs->AppendCheckItem(
+        ID_REMOVE_VOLUMES, K("Remove volume &changes from sung tracks when importing MIDI\tCtrl+Shift+L"),
+        "Give the sung parts of a MIDI file the track's volume alone, without the swells on their notes");
+    mi_remove_volumes_->Check(settings_.remove_volume_changes);
     mi_plain_held_ = prefs->AppendCheckItem(
         ID_PLAIN_HELD,
         K("Sing a vowel &held over several notes on its first sound when importing MIDI or adding a word\tCtrl+Shift+D"),
@@ -507,6 +511,7 @@ void Studio::build_menu() {
     on(ID_PANTHERA, &Studio::on_panthera);
     on(ID_CLOSE_RESTS, &Studio::on_close_rests);
     on(ID_REMOVE_VELOCITIES, &Studio::on_remove_velocities);
+    on(ID_REMOVE_VOLUMES, &Studio::on_remove_volumes);
     on(ID_OWN_PATH, &Studio::on_own_path);
     on(ID_PLAIN_HELD, &Studio::on_plain_held);
     on(ID_OCTAVE_INSTRUMENTS, &Studio::on_octave_instruments);
@@ -616,6 +621,17 @@ void Studio::on_remove_velocities(wxCommandEvent &) {
     bool kept = save_settings(settings_);
     say(wxString(on ? "importing MIDI removes the note velocities from the sung tracks"
                     : "importing MIDI keeps every note's velocity") +
+        (kept ? "" : ", for this sitting only: the settings file could not be written"));
+}
+
+//: A setting of the program too: whether a MIDI import removes the volume
+//: changes from the sung tracks' notes.
+void Studio::on_remove_volumes(wxCommandEvent &) {
+    bool on = mi_remove_volumes_->IsChecked();
+    settings_.remove_volume_changes = on;
+    bool kept = save_settings(settings_);
+    say(wxString(on ? "importing MIDI removes the volume changes from the sung tracks, leaving the track's volume"
+                    : "importing MIDI keeps the volume changes on the sung tracks") +
         (kept ? "" : ", for this sitting only: the settings file could not be written"));
 }
 
@@ -804,6 +820,7 @@ void Studio::on_keys(wxCommandEvent &) {
         "place of the song's",
         "Ctrl+Shift+I  whether importing MIDI closes the short rests between notes",
         "Ctrl+Shift+E  whether importing MIDI removes the note velocities from the sung tracks",
+        "Ctrl+Shift+L  whether importing MIDI removes the volume changes from the sung tracks",
         "Ctrl+Shift+D  whether importing MIDI and adding a word sing a vowel held over several notes on its "
         "first sound until the last of them: day over three notes as d EH, EH, EY",
         "Ctrl+Shift+O  whether importing MIDI transposes the instruments the soundbank has an octave off by an "
@@ -2686,7 +2703,8 @@ void Studio::take_midi(const std::string &path, bool append) {
         for (const auto &pv : program_map_)
             if (pv.first >= 0 && pv.first < 128) programs[size_t(pv.first)] = pv.second;
         got = import_midi(path, names, rests_to_close(), played, settings_.remove_note_velocities, lyrics_on,
-                          programs, settings_.close_word_rests, settings_.octave_instruments);
+                          programs, settings_.close_word_rests, settings_.octave_instruments,
+                          settings_.remove_volume_changes);
     } catch (const std::exception &e) {
         say(W(std::string("cannot import: ") + e.what()));
         return;

@@ -225,7 +225,12 @@ VocalWriter took them in: the one most of a track's notes have is the
 track's, and a note keeps its own where it differs. Settings > Remove note
 velocities from sung tracks when importing MIDI (Ctrl+Shift+E, off until it
 is turned on; `--remove-velocities` on the command line) leaves the sung
-tracks with the track's alone. A VocalWriter song keeps them all.
+tracks with the track's alone. A VocalWriter song keeps them all. In the
+same way Settings > Remove volume changes from sung tracks when importing
+MIDI (Ctrl+Shift+L, off until it is turned on; `--remove-volumes` on the
+command line) leaves the sung tracks the track's volume without the changes
+on their notes, for a file that swells and fades its melody on every phrase
+as an instrument would.
 
 Notes are written in VocalWriter's phoneme symbols whichever engine sings
 them; each engine translates (the tables are at the top of
@@ -458,6 +463,7 @@ Ctrl and Option for Alt, and Option+H to hear a note.
 | Ctrl+Shift+A | append a MIDI file under the song's tracks |
 | Ctrl+Shift+I | whether importing MIDI closes the short rests between notes |
 | Ctrl+Shift+E | whether importing MIDI removes the note velocities from the sung tracks |
+| Ctrl+Shift+L | whether importing MIDI removes the volume changes from the sung tracks |
 | Ctrl+Shift+D | whether importing MIDI and adding a word sing a vowel held over several notes on its first sound |
 | Ctrl+Shift+O | whether importing MIDI transposes the instruments the soundbank has an octave off by an octave |
 | Ctrl+Shift+V | whether VocalWriter's voices are sung through its own sequencer |

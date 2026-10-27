@@ -1550,7 +1550,8 @@ std::vector<std::pair<std::string, int>> midi_tracks(const std::string &path) {
 
 Imported import_midi(const std::string &path, const std::vector<std::string> &names, double close_rests,
                      const std::vector<std::string> &played, bool remove_velocities, int lyrics_on,
-                     const std::vector<int> &programs, bool close_word_rests, bool octaves) {
+                     const std::vector<int> &programs, bool close_word_rests, bool octaves,
+                     bool remove_volumes) {
     MidiFile midi = read_midi(path, lyrics_on);
     auto named = named_tracks(midi);
     if (named.empty()) throw std::runtime_error("this file has no notes in it");
@@ -1569,6 +1570,8 @@ Imported import_midi(const std::string &path, const std::vector<std::string> &na
                 from_midi(midi, *track, want, grid, close_rests, &out.closed_rests, programs, close_word_rests));
             if (remove_velocities)
                 for (Note &n : out.parts.back().notes) n.velocity = 0;
+            if (remove_volumes)
+                for (Note &n : out.parts.back().notes) n.controls.erase("volume");
             continue;
         }
         out.parts.push_back(from_midi_played(midi, *track, want, octaves));

@@ -118,7 +118,7 @@ Reverb parse_reverb(const std::string &text) {
 //: A project, a VocalWriter song or a MIDI file, the MIDI imported exactly as
 //: the window does it.
 Song open_song(const std::string &path, double close_rests, bool sing_all, bool remove_velocities,
-               bool plain_held, bool close_word_rests, bool octaves) {
+               bool remove_volumes, bool plain_held, bool close_word_rests, bool octaves) {
     if (is_vocalwriter_song(path)) {
         VwSongImport got = import_vocalwriter_song(path, vocalwriter_program_voices());
         for (const std::string &n : got.notes) say(n);
@@ -135,7 +135,7 @@ Song open_song(const std::string &path, double close_rests, bool sing_all, bool 
     if (!sing_all && gm && gm->available(&why)) played = parts_to_play(parts);
     else if (!sing_all) say("every part is sung: the GM Soundbank cannot play here (" + why + ")");
     Imported got = import_midi(path, names, close_rests, played, remove_velocities, -1, vocalwriter_program_voices(),
-                               close_word_rests, octaves);
+                               close_word_rests, octaves, remove_volumes);
     if (got.closed_rests) say(std::to_string(got.closed_rests) + " short rest" + s_if(size_t(got.closed_rests)) + " closed");
     std::vector<std::string> words;
     size_t pending = 0;
@@ -204,7 +204,7 @@ std::string usage() {
     return "usage: svs [FILE] [-o FILE] [--tracks FOLDER] [--save FILE] [--track NAME]...\n"
            "           [--tempo BPM] [--voice NAME] [--consonants PERCENT] [--reverb ROOM,WET]\n"
            "           [--anticipate | --no-anticipate] [--from BEATS] [--close-rests BEATS]\n"
-           "           [--sing-all] [--remove-velocities]\n"
+           "           [--sing-all] [--remove-velocities] [--remove-volumes]\n"
            "           [--list-voices] [--list-tracks] [--pronounce WORD...] [--version] [-q]\n"
            "\n"
            "Sing a Singing Voice Studio project, a VocalWriter song (.trk) or a MIDI file.\n"
@@ -234,6 +234,8 @@ std::string usage() {
            "                        Soundbank, VocalWriter's own instruments\n"
            "  --remove-velocities   on importing a MIDI file, remove the note velocities\n"
            "                        from the sung parts, so they take the track's\n"
+           "  --remove-volumes      on importing a MIDI file, remove the volume changes\n"
+           "                        from the sung parts, so they keep the track's\n"
            "\n"
            "what it can tell you:\n"
            "  --list-voices         every voice of every engine, numbered\n"
@@ -293,6 +295,7 @@ CliArgs parse_args(const std::vector<std::string> &argv) {
         else if (s == "--close-rests") number(s, need(i, s), &a.close_rests);
         else if (s == "--sing-all") a.sing_all = true;
         else if (s == "--remove-velocities") a.remove_velocities = true;
+        else if (s == "--remove-volumes") a.remove_volumes = true;
         else if (s == "--list-voices") a.list_voices = true;
         else if (s == "--list-tracks") a.list_tracks = true;
         else if (s == "--version") a.version = true;
@@ -362,7 +365,7 @@ int run_cli(const CliArgs &args) {
 
     Song song;
     try {
-        song = open_song(args.file, args.close_rests, args.sing_all, args.remove_velocities,
+        song = open_song(args.file, args.close_rests, args.sing_all, args.remove_velocities, args.remove_volumes,
                          settings.plain_held_vowels, settings.close_word_rests, settings.octave_instruments);
     } catch (const std::exception &e) {
         return fail("cannot open " + args.file + ": " + e.what());
