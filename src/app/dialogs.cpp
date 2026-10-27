@@ -995,13 +995,15 @@ std::vector<int> ImportPartsDialog::chosen() const {
     return out;
 }
 
-LyricTrackDialog::LyricTrackDialog(wxWindow *parent, const wxArrayString &parts)
+LyricTrackDialog::LyricTrackDialog(wxWindow *parent, const wxArrayString &parts, bool lyrics)
     : wxDialog(parent, wxID_ANY, "Import MIDI") {
     wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
     wxStaticText *about = new wxStaticText(
         this, wxID_ANY,
-        "The lyrics in this file could belong to any of these tracks. Which track are they sung on? That track "
-        "is the one that sings.");
+        lyrics ? wxString("The lyrics in this file could belong to any of these tracks. Which track are they "
+                          "sung on? That track is the one that sings.")
+               : W(std::string("This file has no lyrics. Which track is sung? It sings ") + kDefaultPhoneme +
+                   " on every note until words are put on it, and the others are played by the GM Soundbank."));
     about->Wrap(380);
     outer->Add(about, 0, wxALL, 8);
     choice_ = new wxChoice(this, wxID_ANY, wxDefaultPosition, wxSize(300, -1), parts);

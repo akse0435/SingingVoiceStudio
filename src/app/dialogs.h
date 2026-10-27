@@ -265,10 +265,11 @@ private:
 };
 
 //: Which track a type 0 MIDI file's lyrics are sung on: one of `parts`,
-//: chosen in a box that starts on the first.
+//: chosen in a box that starts on the first. Without `lyrics`, which track
+//: is sung in a file that has none.
 class LyricTrackDialog : public wxDialog {
 public:
-    LyricTrackDialog(wxWindow *parent, const wxArrayString &parts);
+    LyricTrackDialog(wxWindow *parent, const wxArrayString &parts, bool lyrics = true);
     int chosen() const { return choice_->GetSelection(); }
 
 private:
