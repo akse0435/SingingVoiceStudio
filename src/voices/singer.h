@@ -176,6 +176,21 @@ inline double effective_vibrato(int base, double mod) {
     return base + (127.0 - base) * m / 127.0;
 }
 
+//: How an export is followed: an engine that sings a whole part or song in
+//: one go says, as it sings, how many seconds of it it has sung, and stops
+//: when told to. The renderer sets it, on the thread that sings, around
+//: such a call; null the rest of the time.
+class SingWatch {
+public:
+    virtual ~SingWatch() = default;
+    //: false to stop singing
+    virtual bool sung(double seconds) = 0;
+};
+inline SingWatch *&sing_watch() {
+    thread_local SingWatch *watch = nullptr;
+    return watch;
+}
+
 class Singer {
 public:
     virtual ~Singer() = default;

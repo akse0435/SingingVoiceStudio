@@ -613,6 +613,34 @@ const size_t kFilesKept = 4;
 
 }  // namespace
 
+//: An export being followed: the share of the whole the part being sung
+//: stands for, and how long that part is, so that how far into it the
+//: singing has got is how far the export has.
+struct Mixer::Watch : SingWatch {
+    std::function<bool(double)> report;
+    double base = 0, span = 1;
+    double length = 1;           // seconds
+    int shown = -1;              // the last thousandth reported
+    bool stop = false;
+    //: `fraction` of the way through the current share; false once given up
+    bool at(double fraction) {
+        if (stop) return false;
+        int k = int(1000 * (base + span * std::max(0.0, std::min(1.0, fraction))));
+        if (k != shown) {
+            shown = k;
+            if (!report(k / 1000.0)) stop = true;
+        }
+        return !stop;
+    }
+    bool sung(double seconds) override { return at(seconds / std::max(length, 1e-6)); }
+};
+
+//: The watch on the singing thread for as long as it lives, if there is one.
+struct Watching {
+    explicit Watching(SingWatch *w) { sing_watch() = w; }
+    ~Watching() { sing_watch() = nullptr; }
+};
+
 // The renders used to be WAV files in a cache folder, which nothing emptied;
 // they are kept in memory now, so whatever an older copy of the program left
 // in the temporary folder is cleared away the first time this one starts.
@@ -705,6 +733,7 @@ std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double
     for (const auto &c : t.voices) ch = played(c.second) ? 2 : ch;
     *channels = ch;
     std::vector<float> out(size_t(round_half_even(length * kSampleRate)) * size_t(ch), 0.0f);
+    if (watch_) watch_->length = length;
 
     // VocalWriter's sequencer places the consonants before the beats itself,
     // and an export is sung as the whole track, as VocalWriter sang it; an
@@ -732,7 +761,17 @@ std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double
                 *error = "cannot sing " + Registry::get().voice_name(t.voice_id) + ": " + err;
                 return out;
             }
-            Sung y = singer->sing_part(part);
+            Sung y;
+            {
+                // the part from the song's start, the export from the cursor
+                if (watch_) watch_->length = std::max(length + start_s, 1e-6);
+                Watching on(watch_);
+                y = singer->sing_part(part);
+            }
+            if (watch_ && watch_->stop) {
+                *error = "the export was cancelled";        // half a part is never kept
+                return out;
+            }
             if (!y.error.empty()) {
                 *error = Registry::get().voice_name(t.voice_id) + ": " + y.error;
                 return out;
@@ -911,6 +950,10 @@ std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double
         }
         if (own) from_s = run_s - before;
         lay(out, ch, round_half_even((from_s - start_s) * kSampleRate), *sung, sung_ch);
+        if (watch_ && !watch_->at((end_s - start_s) / length)) {
+            *error = "the export was cancelled";
+            return out;
+        }
     }
     return out;
 }
@@ -927,11 +970,22 @@ Mixed Mixer::mix(const RenderRequest &req) {
     return res;
 }
 
-RenderResult Mixer::render(const RenderRequest &req, const std::string &out_path) {
+RenderResult Mixer::render(const RenderRequest &req, const std::string &out_path,
+                           std::function<bool(double)> progress) {
     Mixed m;
     {
         std::lock_guard<std::mutex> lock(mu_);
+        Watch watch;
+        watch.report = progress;
+        watch_ = progress ? &watch : nullptr;
         m = mix_locked(req, true);
+        watch_ = nullptr;
+        // the last chance to give it up, before the file is written
+        if (m.ok && progress && !progress(0.99)) {
+            m.ok = false;
+            m.cancelled = true;
+            m.error = "the export was cancelled";
+        }
     }
     RenderResult res;
     res.ok = m.ok;
@@ -940,6 +994,7 @@ RenderResult Mixer::render(const RenderRequest &req, const std::string &out_path
     res.peak = m.peak;
     res.cached = m.cached;
     res.stopped_short = m.stopped_short;
+    res.cancelled = m.cancelled;
     res.path = out_path;
     if (!m.ok) return res;
     std::vector<float> y = *m.samples;
@@ -971,10 +1026,21 @@ Mixed Mixer::mix_locked(const RenderRequest &req, bool whole) {
         return res;
     }
     bool stopped = false;
+    auto cancelled = [&] {
+        res.cancelled = true;
+        res.error = "the export was cancelled";
+        return res;
+    };
     if (whole) {
         std::vector<float> out;
         int channels = 1;
-        if (sung_together(req, &out, &channels)) {
+        if (watch_) {
+            watch_->base = 0;
+            watch_->span = 0.97;
+        }
+        bool together = sung_together(req, &out, &channels);
+        if (watch_ && watch_->stop) return cancelled();
+        if (together) {
             double peak = 0;
             for (float v : out) peak = std::max(peak, double(std::fabs(v)));
             if (!add_backings(req, out, channels, peak, &res.error)) return res;
@@ -989,8 +1055,14 @@ Mixed Mixer::mix_locked(const RenderRequest &req, bool whole) {
     for (size_t k = 0; k < req.tracks.size(); ++k) {
         const PartRequest &t = req.tracks[k];
         std::string err;
+        if (watch_) {
+            // each track an equal share of the singing, which is most of it
+            watch_->base = 0.8 * double(k) / double(req.tracks.size());
+            watch_->span = 0.8 / double(req.tracks.size());
+        }
         ys[k] = track(t, req.clock(), req.end, req.consonants, req.start, req.anticipate, whole, &stopped, &err,
                       &chans[k]);
+        if (watch_ && watch_->stop) return cancelled();
         if (!err.empty()) {
             res.error = err;
             return res;
@@ -1069,9 +1141,18 @@ Mixed Mixer::mix_locked(const RenderRequest &req, bool whole) {
                 for (float &v : m.room) v = float(v / peak);
             }
         std::vector<std::vector<float>> done;
-        for (Mix &m : mixes) {
+        for (size_t gi = 0; gi < mixes.size(); ++gi) {
+            Mix &m = mixes[gi];
             std::vector<float> wet = m.room;
-            bool reverbed = m.rev.second > 0 && vocalwriter_reverb(wet, m.rev.first, m.rev.second);
+            std::function<bool(double)> going;
+            if (watch_) {
+                // the rooms, after the singing, the next share
+                watch_->base = 0.8 + 0.17 * double(gi) / double(mixes.size());
+                watch_->span = 0.17 / double(mixes.size());
+                going = [this](double f) { return watch_->at(f); };
+            }
+            bool reverbed = m.rev.second > 0 && vocalwriter_reverb(wet, m.rev.first, m.rev.second, going);
+            if (watch_ && watch_->stop) return cancelled();
             if (!reverbed) wet = m.room;
             // the panning added back, at the gain the dry signal is mixed in with
             double dry = reverbed ? 1.0 - m.rev.second / 100.0 : 1.0;
@@ -1130,7 +1211,21 @@ bool Mixer::sung_together(const RenderRequest &req, std::vector<float> *out, int
     } else {
         std::vector<float> stereo;
         std::string err;
-        if (!vocalwriter_song(parts, rev.first, rev.second, &stereo, &err)) return false;
+        bool ok;
+        {
+            if (watch_) {
+                double beats = 0;
+                for (const PartRequest &t : req.tracks) {
+                    double b = 0;
+                    for (const auto &n : t.notes) b += n.beats;
+                    beats = std::max(beats, b);
+                }
+                watch_->length = std::max(req.clock().seconds(beats) + kTailSeconds, 1e-6);
+            }
+            Watching on(watch_);
+            ok = vocalwriter_song(parts, rev.first, rev.second, &stereo, &err);
+        }
+        if (!ok || (watch_ && watch_->stop)) return false;
         sung = std::make_shared<const std::vector<float>>(std::move(stereo));
         keep(key, sung, false, 0.0);
     }

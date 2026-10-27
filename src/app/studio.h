@@ -11,6 +11,7 @@
 // conveyed by colour or position alone.
 #pragma once
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <optional>
@@ -18,6 +19,8 @@
 #include <vector>
 
 #include <wx/wx.h>
+
+class wxProgressDialog;
 
 #include "app/widgets.h"
 #include "app/worker.h"
@@ -166,7 +169,10 @@ private:
     void stop_audio();
     void drop_playback();
     void on_stop(wxCommandEvent &);
+    std::string song_name() const;
     void on_export(wxCommandEvent &);
+    void export_progress(double done);
+    void exported(const RenderResult &res, const std::string &path);
     void on_export_tracks(wxCommandEvent &);
     void export_track(std::shared_ptr<std::vector<std::pair<Track, std::string>>> jobs, size_t i,
                       int written);
@@ -255,7 +261,13 @@ private:
     std::string path_;
     bool dirty_ = false;
     Settings settings_;
-    wxTimer preview_timer_, recovery_timer_, follow_timer_;
+    wxTimer preview_timer_, recovery_timer_, follow_timer_, export_timer_;
+    //: an export's progress window, while there is one, and its Cancel
+    wxProgressDialog *exporting_ = nullptr;
+    std::shared_ptr<std::atomic<bool>> export_cancel_;
+    int export_shown_ = 0;       // thousandths
+    //: the name of the file the song was imported from, for a song not yet saved
+    std::string import_name_;
     //: what is playing, for the cursors to follow: the song from a beat, on its clock
     bool following_ = false;
     double play_from_ = 0;

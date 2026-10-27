@@ -10,6 +10,7 @@
 // renders once.
 #pragma once
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -88,6 +89,8 @@ struct Mixed {
     //: nothing was sung: the same song had just been mixed
     bool cached = false;
     bool stopped_short = false;
+    //: given up part of the way, as an export can be
+    bool cancelled = false;
 };
 
 //: The same, written to a WAV file: an export.
@@ -99,6 +102,8 @@ struct RenderResult {
     std::string path;
     bool cached = false;
     bool stopped_short = false;
+    //: given up part of the way: nothing was written
+    bool cancelled = false;
 };
 
 //: The song as the renderer wants it: `parts` are the tracks to sing and
@@ -113,9 +118,16 @@ public:
     //: Only phrases not sung before are sung: the rest come from memory.
     Mixed mix(const RenderRequest &req);
     //: The song written to `out`, as 16-bit PCM: what Export does.
-    RenderResult render(const RenderRequest &req, const std::string &out);
+    //: `progress`, if given, is told how far it has got, 0 to 1, on this
+    //: thread as it goes, and returns false to give it up: then nothing is
+    //: written, and nothing half sung is kept.
+    RenderResult render(const RenderRequest &req, const std::string &out,
+                        std::function<bool(double)> progress = {});
 
 private:
+    //: an export being followed, while render has one
+    struct Watch;
+    Watch *watch_ = nullptr;
     //: `whole`: an export, which an engine that keeps its own time sings
     //: part by part rather than phrase by phrase
     Mixed mix_locked(const RenderRequest &req, bool whole = false);

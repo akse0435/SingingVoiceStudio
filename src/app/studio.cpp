@@ -11,6 +11,7 @@
 #include <wx/clipbrd.h>
 #include <wx/dirdlg.h>
 #include <wx/filedlg.h>
+#include <wx/progdlg.h>
 #include <wx/textdlg.h>
 
 #ifdef __WXMSW__
@@ -41,7 +42,7 @@ enum {
     ID_BAR_REST, ID_GOTO_BAR, ID_METRONOME, ID_PLAY_PAUSE, ID_PANES,
     ID_TRACK_NEW, ID_TRACK_BACKING, ID_TRACK_EDIT, ID_TRACK_REMOVE, ID_TRACK_MUTE, ID_TRACK_SOLO,
     ID_TRACK_UP, ID_TRACK_DOWN, ID_PREVIEW_TIMER, ID_RECOVERY_TIMER, ID_ADD_CONTROLLER, ID_CLOSE_RESTS,
-    ID_REMOVE_VELOCITIES, ID_APPEND, ID_OWN_PATH, ID_PLAIN_HELD, ID_FOLLOW, ID_FOLLOW_TIMER,
+    ID_REMOVE_VELOCITIES, ID_APPEND, ID_OWN_PATH, ID_PLAIN_HELD, ID_FOLLOW, ID_FOLLOW_TIMER, ID_EXPORT_TIMER,
 };
 
 //: A beat is a quarter note, so a sixteenth is a quarter of a beat: the step
@@ -56,6 +57,8 @@ const int kRecoveryWait = 2500;
 const int kPreviewWait = 180;
 //: how often the cursors are moved on while the song plays and follows
 const int kFollowStep = 40;
+//: how often an export's progress window looks to see whether it was cancelled
+const int kExportPoll = 200;
 
 const int kMaxUndo = 100;
 
@@ -147,7 +150,8 @@ Studio::Studio(const std::string &path)
     : wxFrame(nullptr, wxID_ANY, kAppName, wxDefaultPosition, wxSize(720, 560)),
       preview_timer_(this, ID_PREVIEW_TIMER),
       recovery_timer_(this, ID_RECOVERY_TIMER),
-      follow_timer_(this, ID_FOLLOW_TIMER) {
+      follow_timer_(this, ID_FOLLOW_TIMER),
+      export_timer_(this, ID_EXPORT_TIMER) {
     song_ = fresh_song();
     Track first;
     first.name = "Voice 1";
@@ -166,6 +170,7 @@ Studio::Studio(const std::string &path)
     Bind(wxEVT_TIMER, [this](wxTimerEvent &) { preview_now(preview_row_); }, ID_PREVIEW_TIMER);
     Bind(wxEVT_TIMER, [this](wxTimerEvent &) { write_copy(); }, ID_RECOVERY_TIMER);
     Bind(wxEVT_TIMER, [this](wxTimerEvent &) { follow(); }, ID_FOLLOW_TIMER);
+    Bind(wxEVT_TIMER, [this](wxTimerEvent &) { export_progress(-1); }, ID_EXPORT_TIMER);
 
     // The engines answer in order, so the cheap things are asked for first.
     worker_->ask<std::vector<VoiceListing>>([] { return Registry::get().voices(); },
@@ -1932,20 +1937,78 @@ void Studio::on_stop(wxCommandEvent &) {
     say("stopped");
 }
 
+//: The name a file made of the song starts with: the project's, or the
+//: file's it was imported from; empty for a song that has neither.
+std::string Studio::song_name() const {
+    if (!path_.empty()) return base_name(strip_extension(path_));
+    return import_name_;
+}
+
 void Studio::on_export(wxCommandEvent &) {
+    if (rendering_) {
+        say("already rendering");
+        return;
+    }
     bool any = false;
     for (const Track *t : audible(song_.tracks)) any = any || !t->notes.empty() || t->is_backing();
     if (!any) {
         say("nothing to export: no track that can be heard has any notes in it");
         return;
     }
-    wxFileDialog dlg(this, "Export audio", "", "", "WAV files (*.wav)|*.wav", wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+    std::string name = song_name();
+    wxFileDialog dlg(this, "Export audio", "", W(name.empty() ? name : name + ".wav"), "WAV files (*.wav)|*.wav",
+                     wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
     if (dlg.ShowModal() != wxID_OK) return;
     std::string path = U(dlg.GetPath());
     say(W("rendering to " + base_name(path)));
-    render(request(), path, [this, path](RenderResult res) {
-        say(W(printf_s("wrote %s, %.2f seconds", base_name(path).c_str(), res.ok ? res.seconds : 0.0)));
-    });
+    // A window that stays until the file is written, so the program is not
+    // closed under it, and that can give the export up.
+    rendering_ = true;
+    mi_play_->Enable(false);
+    auto cancel = std::make_shared<std::atomic<bool>>(false);
+    export_cancel_ = cancel;
+    export_shown_ = 0;
+    exporting_ = new wxProgressDialog("Export WAV", W("Exporting " + base_name(path)), 1000, this,
+                                      wxPD_APP_MODAL | wxPD_CAN_ABORT | wxPD_ELAPSED_TIME | wxPD_REMAINING_TIME);
+    export_timer_.Start(kExportPoll);
+    std::shared_ptr<Mixer> mixer = mixer_;
+    RenderRequest req = request();
+    worker_->ask<RenderResult>(
+        [this, mixer, req, path, cancel] {
+            return mixer->render(req, path, [this, cancel](double done) {
+                CallAfter([this, done] { export_progress(done); });
+                return !*cancel;
+            });
+        },
+        [this, path](RenderResult res) { exported(res, path); });
+}
+
+//: How far the export has got, 0 to 1, onto its window; below 0 only looks
+//: whether Cancel was pressed.
+void Studio::export_progress(double done) {
+    if (!exporting_) return;
+    if (done >= 0) export_shown_ = std::max(export_shown_, std::min(999, int(done * 1000)));
+    if (!exporting_->Update(export_shown_) && export_cancel_) *export_cancel_ = true;
+}
+
+//: The export is over, written or given up: its window goes, and what
+//: happened is said -- with the system's asterisk when it was written.
+void Studio::exported(const RenderResult &res, const std::string &path) {
+    export_timer_.Stop();
+    delete exporting_;
+    exporting_ = nullptr;
+    export_cancel_.reset();
+    rendering_ = false;
+    mi_play_->Enable(true);
+    if (!res.ok) {
+        say(res.cancelled ? W("export cancelled: " + base_name(path) + " was not written")
+                          : W("could not write " + base_name(path) + (res.error.empty() ? "" : ": " + res.error)));
+        return;
+    }
+#ifdef __WXMSW__
+    ::MessageBeep(MB_ICONASTERISK);
+#endif
+    say(W(printf_s("wrote %s, %.2f seconds", base_name(path).c_str(), res.seconds)));
 }
 
 //: Every track as a file of its own, at its own volume and pan: stems, so
@@ -2165,6 +2228,7 @@ void Studio::take(const Song &song, const std::string &path) {
     // file it came from, so only an edit makes it worth asking about
     reset_history(true);
     touch(false);
+    import_name_.clear();
 }
 
 void Studio::on_new(wxCommandEvent &) {
@@ -2175,6 +2239,7 @@ void Studio::on_new(wxCommandEvent &) {
     t.program = track().program;
     song_.tracks = {t};
     path_.clear();
+    import_name_.clear();
     sync_tracks(0);
     sync();
     reset_history(true);
@@ -2385,6 +2450,8 @@ void Studio::take_midi(const std::string &path, bool append) {
         song.tracks = tracks;
         take(song, "");
     }
+    // what a file made of the song is called, until it is saved as a project
+    if (path_.empty() && (!append || import_name_.empty())) import_name_ = base_name(strip_extension(path));
     size_t total = 0;
     for (const auto &p : got.parts)
         for (const Note &n : p.notes) total += !n.controller;
@@ -2455,6 +2522,7 @@ void Studio::import_vocalwriter(const std::string &path) {
     }
     Clock clock = got.song.clock();
     take(got.song, "");
+    import_name_ = base_name(strip_extension(path));
     int n = 0, parts = 0;
     for (const Track &t : song_.tracks) {
         parts += sings(t);
@@ -2505,6 +2573,7 @@ void Studio::on_close(wxCloseEvent &evt) {
     preview_timer_.Stop();
     recovery_timer_.Stop();
     follow_timer_.Stop();
+    export_timer_.Stop();
     worker_->close();
     // closing properly is what says the kept copy is not needed
     recovery_clear();

@@ -248,11 +248,20 @@ void control14(std::vector<vwseq_event> &ev, int32_t t, int status, int value) {
     ev.push_back({t, status, v & 127, v >> 7, 0});
 }
 
+//: Where the sequencer's samples go, and how many channels they are in.
+struct Collected {
+    std::vector<float> *samples;
+    int channels;
+};
+
 //: Over 32767, as the WAV writer multiplies back, so an export of a
-//: part holds the very samples VocalWriter wrote.
+//: part holds the very samples VocalWriter wrote. An export being followed
+//: hears how far it has got, and can stop it (sing_watch).
 int collect(void *user, const int16_t *samples, size_t count) {
-    auto *out = static_cast<std::vector<float> *>(user);
-    for (size_t i = 0; i < count; ++i) out->push_back(samples[i] / 32767.0f);
+    auto *to = static_cast<Collected *>(user);
+    for (size_t i = 0; i < count; ++i) to->samples->push_back(samples[i] / 32767.0f);
+    if (SingWatch *w = sing_watch())
+        return w->sung(double(to->samples->size()) / to->channels / kSampleRate) ? 0 : 1;
     return 0;
 }
 
@@ -699,7 +708,8 @@ public:
             return out;
         }
         out.channels = sp.p.kind == VWSEQ_VOCAL ? 1 : 2;
-        int rc = vwseq_sing(s.e, &sp.p, collect, &out.samples);
+        Collected to{&out.samples, out.channels};
+        int rc = vwseq_sing(s.e, &sp.p, collect, &to);
         if (rc != 0) {
             out.error = "VocalWriter's sequencer stopped (" + std::to_string(rc) + ")";
             out.samples.clear();
@@ -1031,7 +1041,8 @@ bool vocalwriter_song(const std::vector<std::pair<int, Part>> &parts, int room, 
     }
     vwseq_song song{sung.data(), int(sung.size()), room, wet};
     stereo->clear();
-    int rc = vwseq_sing_song(s.e, &song, collect, stereo);
+    Collected to{stereo, 2};
+    int rc = vwseq_sing_song(s.e, &song, collect, &to);
     if (rc != 0) {
         *error = "VocalWriter's sequencer stopped (" + std::to_string(rc) + ")";
         stereo->clear();
@@ -1042,7 +1053,7 @@ bool vocalwriter_song(const std::vector<std::pair<int, Part>> &parts, int room, 
 
 std::string vocalwriter_engine_name() { return VwAssets::get().ok() ? "C engine" : "not available"; }
 
-bool vocalwriter_reverb(std::vector<float> &mix, int room, int wet) {
+bool vocalwriter_reverb(std::vector<float> &mix, int room, int wet, const std::function<bool(double)> &going) {
     if (wet <= 0 || mix.empty()) return false;
     std::unique_ptr<vw_editor, void (*)(vw_editor *)> e(VwAssets::get().open_editor(), vw_ed_close);
     if (!e) return false;
@@ -1057,7 +1068,13 @@ bool vocalwriter_reverb(std::vector<float> &mix, int room, int wet) {
         float c = std::max(-1.0f, std::min(1.0f, mix[i]));
         pcm[i] = int16_t(c * 32767.0f);
     }
-    vw_ed_reverberate(e.get(), pcm.data(), int32_t(frames));
+    // in pieces, which the delay lines carry across, so a long song can say
+    // how far it has got
+    const size_t piece = 220 * 400;
+    for (size_t at = 0; at < frames; at += piece) {
+        vw_ed_reverberate(e.get(), pcm.data() + at * 2, int32_t(std::min(piece, frames - at)));
+        if (going && !going(double(std::min(frames, at + piece)) / double(frames))) return false;
+    }
     // keep whatever of the tail is not silence
     size_t last = 0;
     for (size_t f = 0; f < frames; ++f)

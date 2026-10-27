@@ -7,6 +7,7 @@
 // program.
 #pragma once
 
+#include <functional>
 #include <map>
 #include <mutex>
 #include <string>
@@ -78,7 +79,10 @@ std::string vocalwriter_engine_name();
 
 //: The application's reverb over interleaved stereo floats, through the
 //: engine's own 16-bit reverberator. Returns false (and leaves `mix` alone)
-//: if the reverb is off or the engine is not available.
-bool vocalwriter_reverb(std::vector<float> &mix, int room, int wet);
+//: if the reverb is off or the engine is not available. `going`, if given,
+//: hears how far it has got, 0 to 1, and returns false to stop it: then it
+//: returns false too, `mix` part done.
+bool vocalwriter_reverb(std::vector<float> &mix, int room, int wet,
+                        const std::function<bool(double)> &going = {});
 
 }  // namespace svs
