@@ -103,6 +103,35 @@ std::vector<BendEvent> bend_events(const std::vector<Pt> &points, double t0, dou
     return ev;
 }
 
+//: The bends as the notes are sung once their consonants are moved ahead of
+//: the beat (anticipate): from where a note now starts to where it is
+//: written, the bend it starts on rather than the one the note before ends
+//: on, which on the new note's pitch would be heard as a jump. `written`:
+//: each note's start in seconds before it was moved; the notes start at
+//: `from_s`.
+std::vector<Pt> bends_ahead(const std::vector<Pt> &bends, const std::vector<double> &written,
+                            const std::vector<SungNote> &notes, double from_s, double spb) {
+    std::vector<Pt> out = bends;
+    double at = from_s;
+    for (size_t k = 0; k < written.size() && k < notes.size(); ++k) {
+        double sung = at;
+        at += notes[k].beats * spb;
+        if (k == 0 || sung >= written[k] - 1e-9) continue;
+        double was = 0, starts = 0;
+        for (const Pt &p : out) {
+            if (p.t < sung - 1e-9) was = p.v;
+            if (p.t <= written[k] + 1e-9) starts = p.v;
+        }
+        if (std::fabs(starts - was) < 1e-9) continue;
+        out.erase(std::remove_if(out.begin(), out.end(),
+                                 [&](const Pt &p) { return p.t >= sung - 1e-9 && p.t < written[k] - 1e-9; }),
+                  out.end());
+        auto it = std::lower_bound(out.begin(), out.end(), sung, [](const Pt &p, double t) { return p.t < t; });
+        out.insert(it, {sung, starts, false});
+    }
+    return out;
+}
+
 std::pair<double, double> pan_gains(double pan) {
     double theta = (std::max(-1.0, std::min(1.0, pan)) + 1.0) * (kPi / 4.0);
     return {std::sqrt(2.0) * std::cos(theta), std::sqrt(2.0) * std::sin(theta)};
@@ -889,6 +918,12 @@ std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double
             phrase.held.clear();
             phrase.controls.clear();
         }
+        // each note's start as written, for its bend (bends_ahead)
+        std::vector<double> written;
+        for (double s = clock.seconds(run.at); written.size() < phrase.notes.size();) {
+            written.push_back(s);
+            s += phrase.notes[written.size() - 1].beats * spb;
+        }
         double lead = early && !own ? anticipate(phrase.notes, bpm, consonants, run.at - was_over) : 0.0;
         was_over = run.at + sum - lead;
         // a marked rest to scale the last syllable against, and to let it
@@ -913,7 +948,8 @@ std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double
         for (const SungNote &n : phrase.notes) sung_beats += n.beats;
         double end_s = own ? clock.seconds(run.at + sum + tail.beats) : from_s + sung_beats * spb;
         if (end_s <= start_s) continue;               // over before the cursor
-        phrase.bends = bend_events(bends, from_s, end_s);
+        phrase.bends = bend_events(early && !own ? bends_ahead(bends, written, phrase.notes, from_s, spb) : bends,
+                                   from_s, end_s);
         phrase.mods = bend_events(mods, from_s, end_s, wheel_step);
         std::string key = phrase_key(voice, phrase);
         std::shared_ptr<const std::vector<float>> sung;
