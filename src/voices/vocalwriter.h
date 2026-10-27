@@ -49,11 +49,14 @@ public:
     static Lexicon &get();
     bool ok() const { return ed_ != nullptr; }
     //: empty if there is no pronunciation; `marked` puts kSyllableBreak
-    //: between the dictionary's syllables
+    //: between the dictionary's syllables. A word the dictionary does not
+    //: know, written in pieces with hyphens, is the pieces' if it knows them.
     std::vector<std::string> phonemes(const std::string &word, bool marked = false);
 
 private:
     Lexicon();
+    //: one word, with the lock held; `known`: the dictionary knew it
+    std::vector<std::string> look_up(const std::string &clean, bool marked, bool *known);
     vw_editor *ed_ = nullptr;
     std::mutex mu_;
 };

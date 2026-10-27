@@ -143,7 +143,10 @@ in the middle of a note ("the sea" on one note) divides it there, and one
 in a rest ("to" before "see") has a note from there to the next, at that
 note's pitch. Where the note is bent from one pitch to the next as the
 syllable comes, it is divided where the bend arrives, so the syllable starts
-on its own pitch.
+on its own pitch. A word over several notes that VocalWriter's dictionary
+does not know is sung as its pieces, if it knows each of them and none is
+shorter than three letters: "jail-", "birds" as jail and birds, rather than
+the letter-to-sound rules' guess at jailbirds.
 
 **Append MIDI** (File > Append MIDI, Ctrl+Shift+M) puts the parts of a MIDI
 file under the song's own tracks, chosen as Import chooses them; its tempo

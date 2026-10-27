@@ -967,8 +967,10 @@ std::string repeated(const std::vector<std::string> &pieces) {
 
 //: Words still needing a pronunciation, lyrics broken across notes with
 //: hyphens ("count-", "ry") put back together, a held vowel left out, a
-//: repeated piece looked up once. A note with no lyric that holds on to the
-//: word before it (see hold_vowels) goes with that word.
+//: repeated piece looked up once. The pieces keep their hyphens, for a word
+//: the dictionary only knows in pieces (Lexicon::phonemes). A note with no
+//: lyric that holds on to the word before it (see hold_vowels) goes with
+//: that word.
 std::vector<std::pair<std::string, std::vector<int>>> pending_words(const std::vector<Note> &rows) {
     std::vector<std::pair<std::string, std::vector<int>>> pending;
     std::vector<int> run;
@@ -990,7 +992,10 @@ std::vector<std::pair<std::string, std::vector<int>>> pending_words(const std::v
         }
         if (r.word.back() == '-') continue;
         std::string once = repeated(pieces);
-        if (!letters.empty()) pending.push_back({once.empty() ? letters : once, run});
+        if (once.empty())
+            for (const std::string &p : pieces)
+                if (!p.empty()) once += (once.empty() ? "" : "-") + p;
+        if (!letters.empty()) pending.push_back({once, run});
         run.clear();
         letters.clear();
         pieces.clear();

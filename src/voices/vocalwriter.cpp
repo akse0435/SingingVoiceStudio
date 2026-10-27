@@ -127,13 +127,38 @@ Lexicon::Lexicon() {
 }
 
 std::vector<std::string> Lexicon::phonemes(const std::string &word, bool marked) {
-    std::string clean;
-    for (unsigned char c : word)
-        if (std::isalpha(c) || c == '\'') clean.push_back(char(c));
-    if (clean.empty() || !ed_) return {};
+    std::vector<std::string> pieces(1);
+    for (unsigned char c : word) {
+        if (c == '-' && !pieces.back().empty()) pieces.emplace_back();
+        else if (std::isalpha(c) || c == '\'') pieces.back().push_back(char(c));
+    }
+    if (pieces.back().empty()) pieces.pop_back();
+    std::string whole;
+    for (const std::string &p : pieces) whole += p;
+    if (whole.empty() || !ed_) return {};
     std::lock_guard<std::mutex> lock(mu_);
+    bool known = false;
+    std::vector<std::string> got = look_up(whole, marked, &known);
+    if (known || pieces.size() < 2) return got;
+    // a word the dictionary does not know is sung as its pieces, if it
+    // knows every one of them: "jail-birds" as "jail" and "birds". A piece
+    // of one or two letters is a syllable rather than a word ("A-la-ba-my").
+    std::vector<std::string> joined;
+    for (const std::string &p : pieces) {
+        if (std::count_if(p.begin(), p.end(), [](unsigned char c) { return std::isalpha(c); }) < 3) return got;
+        std::vector<std::string> one = look_up(p, marked, &known);
+        if (!known || one.empty()) return got;
+        if (marked && !joined.empty()) joined.push_back(kSyllableBreak);
+        joined.insert(joined.end(), one.begin(), one.end());
+    }
+    return joined;
+}
+
+std::vector<std::string> Lexicon::look_up(const std::string &clean, bool marked, bool *known) {
     unsigned char out[10 * 9] = {0};
-    int n = vw_ed_word(ed_, clean.c_str(), out);
+    int in_lexicon = 0;
+    int n = vw_ed_word(ed_, clean.c_str(), out, &in_lexicon);
+    *known = in_lexicon != 0;
     if (n <= 0) return {};
     const auto &table = svs::phonemes();
     std::vector<std::string> phones;
