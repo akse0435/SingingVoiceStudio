@@ -1,4 +1,4 @@
-# DECtalk's ten voices.
+# DECtalk's voices.
 #
 # DECtalk itself builds only with Microsoft's compiler, so it is not built
 # here: scripts/build_dectalk.ps1 makes DECtalk.dll and the dictionary

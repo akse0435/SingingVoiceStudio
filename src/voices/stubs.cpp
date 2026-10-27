@@ -34,9 +34,9 @@ private:
 #ifndef SVS_HAVE_DECTALK
 std::unique_ptr<Family> make_dectalk_family() {
     const char *names[] = {"Paul", "Betty", "Harry", "Frank", "Dennis",
-                           "Kit",  "Ursula", "Rita", "Wendy", "Val"};
+                           "Kit",  "Ursula", "Rita", "Wendy"};
     std::vector<VoiceEntry> v;
-    for (int i = 0; i < 10; ++i) v.push_back({kDectalkBase + i, std::string("DECtalk ") + names[i]});
+    for (int i = 0; i < 9; ++i) v.push_back({kDectalkBase + i, std::string("DECtalk ") + names[i]});
     return std::make_unique<Absent>("DECtalk", v);
 }
 #endif

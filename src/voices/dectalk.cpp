@@ -1,4 +1,4 @@
-// dectalk.cpp -- DECtalk's ten voices, singing.
+// dectalk.cpp -- DECtalk's voices, singing.
 //
 // The synthesiser is DECtalk 5 as published in third_party/dectalk, built
 // with Microsoft's compiler into DECtalk.dll (scripts/build_dectalk.ps1) on
@@ -587,22 +587,24 @@ struct Voice {
     double gain;          //: to bring full velocity to peaks of about one half
 };
 
-// Sung, every vowel is stressed and held, and five of the voices (Paul,
-// Harry, Dennis, Rita and Val) then go past full scale inside DECtalk, which
+// Sung, every vowel is stressed and held, and four of the voices (Paul,
+// Harry, Dennis and Rita) then go past full scale inside DECtalk, which
 // clips. Each voice's loudness (g5, the gain into its first formant, in dB)
 // is set so that the loudest vowels on the highest notes peak at about
 // -1.5 dB (0.74 to 0.86 of full scale, nothing clipped): 6 dB under
 // DECtalk's own for Paul, 9 for Harry, a few or none for the others. The
 // gains after it even the voices out: each was sung through ten vowels on
 // notes across its range at full velocity and scaled so that its median
-// peak is 0.5, as the SSI-263's are. Wendy whispers.
-const Voice kVoices[10] = {
+// peak is 0.5, as the SSI-263's are. Wendy whispers. Val is left out: it is
+// where DECtalk keeps a voice of the user's own, and here it is only Paul.
+const Voice kVoices[] = {
     {"Paul", "[:np][:dv g5 80]", 1.24},   {"Betty", "[:nb][:dv g5 78]", 1.21},
     {"Harry", "[:nh][:dv g5 72]", 1.56},  {"Frank", "[:nf][:dv g5 84]", 1.15},
     {"Dennis", "[:nd][:dv g5 80]", 0.92}, {"Kit", "[:nk][:dv g5 70]", 1.10},
     {"Ursula", "[:nu][:dv g5 79]", 1.19}, {"Rita", "[:nr][:dv g5 76]", 1.13},
-    {"Wendy", "[:nw][:dv g5 82]", 1.09},  {"Val", "[:nv][:dv g5 80]", 1.24},
+    {"Wendy", "[:nw][:dv g5 82]", 1.09},
 };
+constexpr int kVoiceCount = int(sizeof kVoices / sizeof kVoices[0]);
 
 // -- turning a phrase into what DECtalk is sent ------------------------------
 
@@ -1148,14 +1150,14 @@ public:
     std::string name() const override { return "DECtalk"; }
     std::vector<VoiceEntry> voices() override {
         std::vector<VoiceEntry> v;
-        for (int i = 0; i < 10; ++i)
+        for (int i = 0; i < kVoiceCount; ++i)
             v.push_back({kDectalkBase + i, std::string("DECtalk ") + kVoices[i].name});
         return v;
     }
     bool available(std::string *why) override { return Engine::get().ready(why); }
     std::unique_ptr<Singer> singer(int voice_id, std::string *err) override {
         int i = voice_id - kDectalkBase;
-        if (i < 0 || i >= 10) {
+        if (i < 0 || i >= kVoiceCount) {
             if (err) *err = "There is no DECtalk voice numbered " + std::to_string(voice_id) + ".";
             return nullptr;
         }

@@ -98,13 +98,26 @@ static bool by_name(std::optional<int> &id, const std::optional<std::string> &na
     return false;
 }
 
+//: A voice no longer offered, put on the one it sounded as: DECtalk's Val is
+//: where DECtalk keeps a voice of the user's own, and was only Paul.
+static bool retired(std::optional<int> &id, std::optional<std::string> &name) {
+    if (!(id && *id == kDectalkBase + 9) && !(name && *name == "DECtalk Val")) return false;
+    id = kDectalkBase;
+    name = "DECtalk Paul";
+    return true;
+}
+
 bool resolve_voice_names(Song &song, const std::vector<VoiceListing> &voices) {
     bool moved = false;
     for (Track &t : song.tracks) {
+        moved = retired(t.voice_id, t.voice_name) || moved;
         moved = by_name(t.voice_id, t.voice_name, voices) || moved;
         // and every voice a controller changes to
         for (Note &n : t.notes)
-            if (n.controller) moved = by_name(n.voice_id, n.voice_name, voices) || moved;
+            if (n.controller) {
+                moved = retired(n.voice_id, n.voice_name) || moved;
+                moved = by_name(n.voice_id, n.voice_name, voices) || moved;
+            }
     }
     return moved;
 }

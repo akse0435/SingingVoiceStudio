@@ -246,6 +246,9 @@ constexpr int kGenCount = int(sizeof kGens / sizeof kGens[0]);
 
 std::string group_name(int g) { return std::string("MacinTalk ") + kGens[g].title; }
 
+//: Whether generation `g` has voice `v`: Alex came with Leopard.
+bool in_generation(int g, int v) { return g > 0 || std::strcmp(kVoices[v].bundle, "Alex") != 0; }
+
 // -- tuning, measured ---------------------------------------------------------
 
 //: How far each voice sings from the pitch it is asked for, in cents, at
@@ -2218,6 +2221,7 @@ public:
         const Install &in = install();
         for (int g = 0; g < kGenCount; ++g)
             for (int v = 0; v < kVoiceCount; ++v) {
+                if (!in_generation(g, v)) continue;
                 VoiceEntry e;
                 e.id = kMacinTalkBase + kGenStride * g + v;
                 e.group = group_name(g);
@@ -2271,7 +2275,7 @@ public:
     std::unique_ptr<Singer> singer(int voice_id, std::string *err) override {
         int rel = voice_id - kMacinTalkBase;
         int g = rel / kGenStride, v = rel % kGenStride;
-        if (rel < 0 || g >= kGenCount || v >= kVoiceCount) {
+        if (rel < 0 || g >= kGenCount || v >= kVoiceCount || !in_generation(g, v)) {
             if (err) *err = "There is no MacinTalk voice numbered " + std::to_string(voice_id) + ".";
             return nullptr;
         }
