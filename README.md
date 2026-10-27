@@ -27,7 +27,7 @@ VocalWriter's voices get exactly the calls VocalWriter Studio made -- a song
 sung by them here is the same file, sample for sample, as the Python
 VocalWriter Studio renders -- and the song settings shape them as they shape
 the other engines. **Settings > Sing VocalWriter's voices through its own
-sequencer** (Ctrl+Shift+O, off until it is turned on) sings them through
+sequencer** (Ctrl+Shift+V, off until it is turned on) sings them through
 VocalWriter 2.0's own play path instead -- its parser places the consonants
 and its sequencer sings the track -- so a part exported to WAV is, sample for
 sample, what VocalWriter 2.0 sang, and a song VocalWriter's voices sing every
@@ -148,11 +148,11 @@ does not know is sung as its pieces, if it knows each of them and none is
 shorter than three letters: "jail-", "birds" as jail and birds, rather than
 the letter-to-sound rules' guess at jailbirds.
 
-**Append MIDI** (File > Append MIDI, Ctrl+Shift+M) puts the parts of a MIDI
+**Append MIDI** (File > Append MIDI, Ctrl+Shift+A) puts the parts of a MIDI
 file under the song's own tracks, chosen as Import chooses them; its tempo
 changes and time signature take the place of the song's.
 
-**Export MIDI** (File > Export MIDI, Ctrl+Shift+X) writes the song as a
+**Export MIDI** (File > Export MIDI, Ctrl+Shift+M) writes the song as a
 type 1 Standard MIDI File, as VocalWriter's own File > Export did: 240 ticks
 a beat, the time signature and the tempo and its changes on a first track,
 then a track for each part with something to sing or play, on the MIDI
@@ -402,13 +402,13 @@ Ctrl and Option for Alt, and Option+H to hear a note.
 | Ctrl+P / Ctrl+H / Ctrl+M / Ctrl+. | play from the start / hear one note / metronome / stop |
 | Ctrl+O / Ctrl+S | open and save a project |
 | Ctrl+I | import a MIDI file or a VocalWriter song |
-| Ctrl+Shift+M | append a MIDI file under the song's tracks |
+| Ctrl+Shift+A | append a MIDI file under the song's tracks |
 | Ctrl+Shift+I | whether importing MIDI closes the short rests between notes |
 | Ctrl+Shift+E | whether importing MIDI removes the note velocities from the sung tracks |
 | Ctrl+Shift+D | whether importing MIDI sings a vowel held over several notes on its first sound |
-| Ctrl+Shift+O | whether VocalWriter's voices are sung through its own sequencer |
+| Ctrl+Shift+V | whether VocalWriter's voices are sung through its own sequencer |
 | Ctrl+Shift+S / Ctrl+Shift+T | export one WAV / one WAV per track |
-| Ctrl+Shift+X | export a MIDI file |
+| Ctrl+Shift+M | export a MIDI file |
 
 ## From the command line
 

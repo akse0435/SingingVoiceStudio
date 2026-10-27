@@ -387,11 +387,11 @@ void Studio::build_menu() {
     f->AppendSeparator();
     f->Append(ID_IMPORT, K("&Import MIDI or VocalWriter song...\tCtrl+I"),
               "Take the notes from a MIDI file, or a whole song from VocalWriter");
-    f->Append(ID_APPEND, K("A&ppend MIDI...\tCtrl+Shift+M"),
+    f->Append(ID_APPEND, K("A&ppend MIDI...\tCtrl+Shift+A"),
               "Put a MIDI file's parts under the song's tracks, its tempo in place of the song's");
     f->Append(ID_EXPORT, K("&Export WAV...\tCtrl+Shift+S"), "Write the whole song to one file");
     f->Append(ID_EXPORT_TRACKS, K("Export &tracks...\tCtrl+Shift+T"), "Write every track to a file of its own");
-    f->Append(ID_EXPORT_MIDI, K("Export &MIDI...\tCtrl+Shift+X"),
+    f->Append(ID_EXPORT_MIDI, K("Export &MIDI...\tCtrl+Shift+M"),
               "Write the song as a Standard MIDI File, the words and phonemes on its notes, as VocalWriter did");
     f->AppendSeparator();
     f->Append(wxID_PREFERENCES, K("&Song settings...\tCtrl+,"),
@@ -435,7 +435,7 @@ void Studio::build_menu() {
                                         "While the song plays, every track's cursor moves to the note being sung, "
                                         "and stays there when it stops");
     mi_follow_->Check(settings_.follow_playback);
-    mi_own_path_ = prefs->AppendCheckItem(ID_OWN_PATH, K("Sing VocalWriter's voices through its own &sequencer\tCtrl+Shift+O"),
+    mi_own_path_ = prefs->AppendCheckItem(ID_OWN_PATH, K("Sing VocalWriter's voices through its own &sequencer\tCtrl+Shift+V"),
                                           "Sample for sample as VocalWriter 2.0 sang them; otherwise phrase by phrase, "
                                           "as the other engines sing");
     mi_own_path_->Check(settings_.vocalwriter_own_path);
@@ -767,7 +767,7 @@ void Studio::on_keys(wxCommandEvent &) {
         "Ctrl+O open a project, Ctrl+S save it",
         "Ctrl+I  import a MIDI file or a VocalWriter song. The parts without words are played by "
         "the GM Soundbank, VocalWriter's own instruments, as VocalWriter played them",
-        "Ctrl+Shift+M  append a MIDI file: its parts under the song's tracks, its tempo and time signature in "
+        "Ctrl+Shift+A  append a MIDI file: its parts under the song's tracks, its tempo and time signature in "
         "place of the song's",
         "Ctrl+Shift+I  whether importing MIDI closes the short rests between notes",
         "Ctrl+Shift+E  whether importing MIDI removes the note velocities from the sung tracks",
@@ -775,11 +775,11 @@ void Studio::on_keys(wxCommandEvent &) {
         "the last of them: day over three notes as d EH, EH, EY",
         "Ctrl+Shift+F  whether every track's cursor follows the note being sung while the song plays, staying "
         "where it got to when it stops",
-        "Ctrl+Shift+O  whether VocalWriter's voices are sung through its own sequencer, sample for sample as "
+        "Ctrl+Shift+V  whether VocalWriter's voices are sung through its own sequencer, sample for sample as "
         "VocalWriter 2.0 sang them, or phrase by phrase as the other engines sing",
         "Ctrl+Shift+S  export the whole song as one WAV",
         "Ctrl+Shift+T  export every track to its own WAV",
-        "Ctrl+Shift+X  export the song as a MIDI file, as VocalWriter did: the channels are asked first",
+        "Ctrl+Shift+M  export the song as a MIDI file, as VocalWriter did: the channels are asked first",
         "Enter on a note edits it",
     };
     // In a window of their own, where the focus goes, so they are read the
@@ -1294,17 +1294,16 @@ void Studio::on_key(wxKeyEvent &evt) {
         move_notes(code == WXK_UP ? -1 : 1);
     } else if (code == WXK_SPACE && !(evt.ControlDown() || evt.AltDown() || evt.ShiftDown())) {
         on_play_stop(e);
-    } else if (evt.ControlDown() && code == 'A') {
-        on_select_all(e);
     } else if (evt.ControlDown() && evt.ShiftDown() && code == 'C') {
         on_add_controller(e);
-    } else if (evt.ControlDown() && code == 'C') {
+    } else if (evt.ControlDown() && !evt.ShiftDown() && code == 'A') {
+        // with Shift these are the menu's, so they are skipped to it
+        on_select_all(e);
+    } else if (evt.ControlDown() && !evt.ShiftDown() && code == 'C') {
         on_copy(e);
-    } else if (evt.ControlDown() && evt.ShiftDown() && code == 'X') {
-        on_export_midi(e);
-    } else if (evt.ControlDown() && code == 'X') {
+    } else if (evt.ControlDown() && !evt.ShiftDown() && code == 'X') {
         on_cut(e);
-    } else if (evt.ControlDown() && code == 'V') {
+    } else if (evt.ControlDown() && !evt.ShiftDown() && code == 'V') {
         on_paste(e);
     } else if (code == WXK_DELETE || code == WXK_NUMPAD_DELETE) {
         on_remove(e);
