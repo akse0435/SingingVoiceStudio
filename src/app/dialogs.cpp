@@ -1092,6 +1092,46 @@ Note ControllerDialog::result() const {
     return n;
 }
 
+// -- MidiChannelsDialog -------------------------------------------------------------------
+
+MidiChannelsDialog::MidiChannelsDialog(wxWindow *parent, const std::vector<const Track *> &tracks,
+                                       const std::vector<int> &channels)
+    : wxDialog(parent, wxID_ANY, "Set MIDI channels") {
+    wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
+    wxStaticText *about = new wxStaticText(
+        this, wxID_ANY,
+        "The MIDI channel each track goes out on. MIDI has sixteen, so tracks may share one; in General MIDI "
+        "channel 10 is the drum kit's.");
+    about->Wrap(380);
+    outer->Add(about, 0, wxALL, 8);
+    // scrolled, for a song of many tracks
+    wxScrolledWindow *rows = new wxScrolledWindow(this, wxID_ANY);
+    wxBoxSizer *inner = new wxBoxSizer(wxVERTICAL);
+    wxArrayString numbers;
+    for (int c = 1; c <= 16; ++c) numbers.Add(wxString::Format("%d", c));
+    for (size_t k = 0; k < tracks.size(); ++k) {
+        wxChoice *choice = new wxChoice(rows, wxID_ANY, wxDefaultPosition, wxSize(80, -1), numbers);
+        choice->SetSelection(k < channels.size() ? std::max(0, std::min(15, channels[k])) : 0);
+        labelled(rows, inner, W(tracks[k]->name), choice, 0, "MIDI channel");
+        choices_.push_back(choice);
+    }
+    rows->SetSizer(inner);
+    rows->SetScrollRate(0, 10);
+    inner->Fit(rows);
+    wxSize all = inner->GetMinSize();
+    rows->SetMinSize(wxSize(all.x + 30, std::min(all.y, 420)));
+    outer->Add(rows, 1, wxEXPAND | wxALL, 4);
+    outer->Add(buttons(this), 0, wxEXPAND | wxALL, 8);
+    SetSizerAndFit(outer);
+    if (!choices_.empty()) choices_[0]->SetFocus();
+}
+
+std::vector<int> MidiChannelsDialog::channels() const {
+    std::vector<int> out;
+    for (wxChoice *c : choices_) out.push_back(std::max(0, c->GetSelection()));
+    return out;
+}
+
 // -- TrackDialog --------------------------------------------------------------------------
 
 TrackDialog::TrackDialog(wxWindow *parent, Studio *studio, const Track &track)

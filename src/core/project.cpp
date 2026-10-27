@@ -1098,6 +1098,18 @@ void place_controls(std::vector<Note> &rows, std::vector<PlayedChange> changes) 
     }
 }
 
+//: VocalWriter's controls, as Singing Voice Studio's MIDI export writes
+//: them, each kept to its range.
+template <class Beat>
+void vocalwriter_controls(const MidiTrack &track, Beat beat, std::vector<PlayedChange> &out) {
+    for (const auto &c : track.controls) {
+        const NoteControl *k = note_control(c.first);
+        if (!k) continue;
+        for (const auto &v : c.second)
+            out.push_back({beat(v.first), c.first, double(std::max(k->lo, std::min(k->hi, v.second)))});
+    }
+}
+
 ImportedPart from_midi(const MidiFile &midi, const MidiTrack &track, const std::string &name,
                        double grid, double close_rests, int *closed) {
     double div = midi.division ? midi.division : 480;
@@ -1153,6 +1165,7 @@ ImportedPart from_midi(const MidiFile &midi, const MidiTrack &track, const std::
     // the volume, as an instrument's
     std::vector<PlayedChange> volumes;
     part.volume = midi_volume(track, [&](long tick) { return double(tick) / div; }, volumes);
+    vocalwriter_controls(track, [&](long tick) { return double(tick) / div; }, volumes);
     place_controls(part.notes, volumes);
     part.pending = pending_words(part.notes);
     return part;
@@ -1207,6 +1220,7 @@ ImportedPart from_midi_played(const MidiFile &midi, const MidiTrack &track, cons
     for (const auto &v : track.sustains) changes.push_back({beat(v.first), "sustain", v.second <= 63 ? 0.0 : 127.0});
     for (const auto &r : track.bend_range) changes.push_back({beat(r.first), "bend_range", double(std::max(1, std::min(12, r.second)))});
     for (const auto &b : bend_curve(track)) changes.push_back({beat(b.first), "", round_to(b.second, 4)});
+    vocalwriter_controls(track, beat, changes);
     int program = std::max(0, program_at_start(track));
     if (!drums) {
         long first = track.notes.empty() ? 0 : track.notes.front().tick;

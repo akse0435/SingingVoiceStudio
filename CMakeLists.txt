@@ -159,6 +159,7 @@ set(CORE_SOURCES
   src/core/phonology.cpp
   src/core/project.cpp
   src/core/midifile.cpp
+  src/core/midiexport.cpp
   src/core/vwsong.cpp
   src/core/settings.cpp
   src/audio/wav.cpp

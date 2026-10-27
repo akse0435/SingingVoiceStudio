@@ -48,8 +48,11 @@ int phoneme_code(const std::string &symbol) {
 }
 
 std::string palette_alias(const std::string &symbol) {
+    // VocalWriter's g_Opcode_To_ASCII table spells phoneme 53, the tap,
+    // "DX", phoneme 23, the rest, "_", and phoneme 55 "DD" as the engine does
     if (symbol == "OH") return "O";
-    if (symbol == "DX") return "DD";
+    if (symbol == "DX") return "Q";
+    if (symbol == "_") return "%";
     return symbol;
 }
 

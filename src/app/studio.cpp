@@ -22,6 +22,7 @@
 #include "app/crash.h"
 #include "app/dialogs.h"
 #include "audio/decode.h"
+#include "core/midiexport.h"
 #include "core/paths.h"
 #include "core/vwsong.h"
 #include "voices/controls.h"
@@ -43,6 +44,7 @@ enum {
     ID_TRACK_NEW, ID_TRACK_BACKING, ID_TRACK_EDIT, ID_TRACK_REMOVE, ID_TRACK_MUTE, ID_TRACK_SOLO,
     ID_TRACK_UP, ID_TRACK_DOWN, ID_PREVIEW_TIMER, ID_RECOVERY_TIMER, ID_ADD_CONTROLLER, ID_CLOSE_RESTS,
     ID_REMOVE_VELOCITIES, ID_APPEND, ID_OWN_PATH, ID_PLAIN_HELD, ID_FOLLOW, ID_FOLLOW_TIMER, ID_EXPORT_TIMER,
+    ID_EXPORT_MIDI,
 };
 
 //: A beat is a quarter note, so a sixteenth is a quarter of a beat: the step
@@ -322,6 +324,8 @@ void Studio::build_menu() {
               "Put a MIDI file's parts under the song's tracks, its tempo in place of the song's");
     f->Append(ID_EXPORT, K("&Export WAV...\tCtrl+Shift+S"), "Write the whole song to one file");
     f->Append(ID_EXPORT_TRACKS, K("Export &tracks...\tCtrl+Shift+T"), "Write every track to a file of its own");
+    f->Append(ID_EXPORT_MIDI, K("Export &MIDI...\tCtrl+Shift+X"),
+              "Write the song as a Standard MIDI File, the words and phonemes on its notes, as VocalWriter did");
     f->AppendSeparator();
     f->Append(wxID_PREFERENCES, K("&Song settings...\tCtrl+,"),
               "Tempo, time signature, consonants, reverb, voice controls");
@@ -418,6 +422,7 @@ void Studio::build_menu() {
     on(ID_APPEND, &Studio::on_append);
     on(ID_EXPORT, &Studio::on_export);
     on(ID_EXPORT_TRACKS, &Studio::on_export_tracks);
+    on(ID_EXPORT_MIDI, &Studio::on_export_midi);
     on(wxID_PREFERENCES, &Studio::on_song_settings);
     on(ID_AUTO_PREVIEW, &Studio::on_auto_preview);
     on(ID_PANTHERA, &Studio::on_panthera);
@@ -705,6 +710,7 @@ void Studio::on_keys(wxCommandEvent &) {
         "VocalWriter 2.0 sang them, or phrase by phrase as the other engines sing",
         "Ctrl+Shift+S  export the whole song as one WAV",
         "Ctrl+Shift+T  export every track to its own WAV",
+        "Ctrl+Shift+X  export the song as a MIDI file, as VocalWriter did: the channels are asked first",
         "Enter on a note edits it",
     };
     // In a window of their own, where the focus goes, so they are read the
@@ -1219,6 +1225,8 @@ void Studio::on_key(wxKeyEvent &evt) {
         on_add_controller(e);
     } else if (evt.ControlDown() && code == 'C') {
         on_copy(e);
+    } else if (evt.ControlDown() && evt.ShiftDown() && code == 'X') {
+        on_export_midi(e);
     } else if (evt.ControlDown() && code == 'X') {
         on_cut(e);
     } else if (evt.ControlDown() && code == 'V') {
@@ -2009,6 +2017,34 @@ void Studio::exported(const RenderResult &res, const std::string &path) {
     ::MessageBeep(MB_ICONASTERISK);
 #endif
     say(W(printf_s("wrote %s, %.2f seconds", base_name(path).c_str(), res.seconds)));
+}
+
+//: File > Export MIDI: the song as a Standard MIDI File, as VocalWriter
+//: exported one, each track on the channel asked for.
+void Studio::on_export_midi(wxCommandEvent &) {
+    std::vector<const Track *> tracks = midi_export_tracks(song_);
+    if (tracks.empty()) {
+        say("nothing to export: no track has any notes in it");
+        return;
+    }
+    MidiChannelsDialog chans(this, tracks, default_midi_channels(tracks, program_map_));
+    if (chans.ShowModal() != wxID_OK) return;
+    std::string name = song_name();
+    wxFileDialog dlg(this, "Export MIDI", "", W(name.empty() ? name : name + ".mid"), kMidiWildcard,
+                     wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+    if (dlg.ShowModal() != wxID_OK) return;
+    std::string path = U(dlg.GetPath());
+    if (extension_lower(path).empty()) path += ".mid";
+    std::vector<int> channels = chans.channels();
+    std::vector<MidiOut> out;
+    for (size_t k = 0; k < tracks.size(); ++k) out.push_back({tracks[k], k < channels.size() ? channels[k] : 0});
+    try {
+        export_midi(path, song_, out, program_map_);
+    } catch (const std::exception &e) {
+        say(W(std::string("could not export: ") + e.what()));
+        return;
+    }
+    say(W("wrote " + base_name(path) + ": " + plural(tracks.size(), "track")));
 }
 
 //: Every track as a file of its own, at its own volume and pan: stems, so

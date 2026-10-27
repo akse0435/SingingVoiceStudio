@@ -48,6 +48,13 @@ uint32_t be32(const unsigned char *p) {
 
 const int kDrumChannel = 9;          // MIDI's channel 10
 
+//: One half of a 14-bit control about 8192: the MSB starts a value, and the
+//: LSB that follows it fills in its low bits.
+void fine(std::vector<std::pair<long, int>> &values, bool lsb, long tick, int v) {
+    if (!lsb) values.push_back({tick, (v << 7) - 8192});
+    else if (!values.empty()) values.back().second = (((values.back().second + 8192) & ~127) | v) - 8192;
+}
+
 //: One track as it is in the file, its channels still apart.
 struct RawTrack {
     std::string name;
@@ -162,6 +169,13 @@ RawTrack read_track(const unsigned char *b, size_t n) {
                     rpn_msb[ch] = v;
                 else if (a == 100)
                     rpn_lsb[ch] = v;
+                else if ((a == 6 || a == 38) && rpn_msb[ch] == 0 && rpn_lsb[ch] == 1)
+                    fine(c.controls["detune"], a == 38, tick, v);
+                else if (a == kChorusCC || a == kChorusCC + 32)
+                    fine(c.controls["chorus"], a != kChorusCC, tick, v);
+                else
+                    for (const MidiControl &m : kMidiControls)
+                        if (a == m.cc) c.controls[m.key].push_back({tick, v});
             }
             i += 2;
         }
@@ -455,6 +469,7 @@ MidiFile read_midi(const std::string &path, int lyrics_on) {
         if (t.volumes.empty()) t.volumes = from.volumes;
         if (t.expressions.empty()) t.expressions = from.expressions;
         if (t.pans.empty()) t.pans = from.pans;
+        if (t.controls.empty()) t.controls = from.controls;
     }
     return mf;
 }
@@ -467,7 +482,8 @@ std::vector<std::string> split_phonemes(const std::string &s) {
         if (std::isupper(c) && i + 1 < s.size() && std::isupper((unsigned char)s[i + 1])) {
             out.push_back(s.substr(i, 2));
             i += 2;
-        } else if (std::islower(c)) {
+        } else if (std::islower(c) || c == '_') {
+            // "_" is VocalWriter's spelling of a rest
             out.push_back(s.substr(i, 1));
             ++i;
         } else {

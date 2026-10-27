@@ -141,6 +141,25 @@ opened from the desktop or named on the command line comes in the same way.
 file under the song's own tracks, chosen as Import chooses them; its tempo
 changes and time signature take the place of the song's.
 
+**Export MIDI** (File > Export MIDI, Ctrl+Shift+X) writes the song as a
+type 1 Standard MIDI File, as VocalWriter's own File > Export did: 240 ticks
+a beat, the time signature and the tempo and its changes on a first track,
+then a track for each part with something to sing or play, on the MIDI
+channel asked for first -- VocalWriter's Set MIDI Channels: the drum kit on
+channel 10 and the others from 1 up to begin with. A sung note carries its
+word as a Text event and its phonemes, spelled VocalWriter's way, as a Lyric
+event, so Import brings it back as it was; a played note is a note. The
+voice goes out as a program change where one reaches it, the bends with the
+bend range they need, VocalWriter's volume and sustain pedal as CC 7 and CC
+64, the pan as CC 10 and the mod wheel as CC 1, and a track's volume scales
+its velocities, as VocalWriter's track level did. VocalWriter's export left
+its other controls out; here they go on controllers MIDI leaves undefined,
+which Import reads back: the colour, noise, breath, vibrato depth, vibrato
+rate, portamento and the rest's pitch on CC 102 to 108, the chorus as 14
+bits on CC 20 and 52, and the detune as RPN 1, the fine tuning. A song
+without them is the file VocalWriter wrote. A backing track is a file
+already, and is left out.
+
 **Short rests** between two notes can be closed as a MIDI file comes in
 (Settings > Close short rests when importing MIDI, Ctrl+Shift+I, off until it
 is turned on; `--close-rests BEATS` on the command line): a rest no longer
@@ -372,6 +391,7 @@ Ctrl and Option for Alt, and Option+H to hear a note.
 | Ctrl+Shift+D | whether importing MIDI sings a vowel held over several notes on its first sound |
 | Ctrl+Shift+O | whether VocalWriter's voices are sung through its own sequencer |
 | Ctrl+Shift+S / Ctrl+Shift+T | export one WAV / one WAV per track |
+| Ctrl+Shift+X | export a MIDI file |
 
 ## From the command line
 

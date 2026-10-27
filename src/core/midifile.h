@@ -11,11 +11,27 @@
 // are sung on.
 #pragma once
 
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace svs {
+
+//: The controllers that carry VocalWriter's own controls in a MIDI file, as
+//: Singing Voice Studio writes and reads them (VocalWriter's export left them
+//: out): numbers MIDI leaves undefined, so no other file sets them by chance.
+//: The chorus is 14 bits about 8192 on kChorusCC and its LSB, kChorusCC + 32;
+//: the detune, likewise 14 bits, is RPN 1, the fine tuning.
+struct MidiControl {
+    const char *key;
+    int cc;
+};
+const MidiControl kMidiControls[] = {
+    {"color", 102},     {"noise", 103},      {"breath", 104},     {"vibrato", 105},
+    {"vibrato_rate", 106}, {"portamento", 107}, {"lead_pitch", 108},
+};
+const int kChorusCC = 20;
 
 struct MidiNote {
     long tick = 0;
@@ -36,6 +52,9 @@ struct MidiTrack {
     std::vector<std::pair<long, int>> mods;           // (tick, CC 1, the mod wheel)
     //: CC 7, CC 11, CC 64 and CC 10
     std::vector<std::pair<long, int>> volumes, expressions, sustains, pans;
+    //: VocalWriter's controls (kMidiControls, the chorus and the detune), by
+    //: their keys in kNoteControls, each value as a note's control holds it
+    std::map<std::string, std::vector<std::pair<long, int>>> controls;
     //: the channel it plays on, 0-15 (9 is the drums), or -1
     int channel = -1;
     struct TimeSig {
@@ -62,7 +81,7 @@ struct MidiFile {
 MidiFile read_midi(const std::string &path, int lyrics_on = -1);
 
 //: Split VocalWriter's phoneme string: every uppercase symbol is two letters,
-//: every lowercase one is one, so "swIYt" is s w IY t.
+//: every lowercase one is one, so "swIYt" is s w IY t; "_" is a rest.
 std::vector<std::string> split_phonemes(const std::string &s);
 
 }  // namespace svs

@@ -174,6 +174,7 @@ private:
     void export_progress(double done);
     void exported(const RenderResult &res, const std::string &path);
     void on_export_tracks(wxCommandEvent &);
+    void on_export_midi(wxCommandEvent &);
     void export_track(std::shared_ptr<std::vector<std::pair<Track, std::string>>> jobs, size_t i,
                       int written);
     void mix(const RenderRequest &req, std::function<void(Mixed)> done);

@@ -262,6 +262,18 @@ private:
     wxTextCtrl *path_;
 };
 
+//: Which MIDI channel each track goes out on, asked before a MIDI export as
+//: VocalWriter's Set MIDI Channels asked: the drum kit on 10 to begin with.
+class MidiChannelsDialog : public wxDialog {
+public:
+    MidiChannelsDialog(wxWindow *parent, const std::vector<const Track *> &tracks, const std::vector<int> &channels);
+    //: one for each track, 0-15
+    std::vector<int> channels() const;
+
+private:
+    std::vector<wxChoice *> choices_;
+};
+
 //: A track's name, voice, volume and pan, and how that voice is set up.
 class TrackDialog : public wxDialog {
 public:
