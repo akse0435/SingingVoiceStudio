@@ -286,6 +286,10 @@ private:
     bool following_ = false;
     double play_from_ = 0;
     double play_lead_ = 0;      // seconds the sound began before play_from_
+    //: the song playing, without the metronome, which is put in or taken out
+    //: of it as Ctrl+M asks (ticked); empty when it is not the song
+    Mixed play_mix_;
+    std::shared_ptr<const std::vector<float>> ticked(const Mixed &res) const;
     Clock play_clock_;
     int preview_row_ = -1;
     std::unique_ptr<Worker> worker_;

@@ -22,6 +22,9 @@ public:
     //: is 2, 44.1 kHz. True if they are playing. The samples are shared, not
     //: copied, so starting a long song is instant.
     bool play(std::shared_ptr<const std::vector<float>> samples, int channels);
+    //: Go on with these samples from where the sound has got to, as when the
+    //: metronome is turned on while playing. False if nothing is playing.
+    bool swap(std::shared_ptr<const std::vector<float>> samples, int channels);
     void stop();
     //: Whether a sound is still playing.
     bool playing();

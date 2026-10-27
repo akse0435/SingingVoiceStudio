@@ -76,6 +76,15 @@ bool Player::play(std::shared_ptr<const std::vector<float>> samples, int channel
     return ma_device_start(&impl_->device) == MA_SUCCESS;
 }
 
+bool Player::swap(std::shared_ptr<const std::vector<float>> samples, int channels) {
+    if (!samples || samples->empty()) return false;
+    std::lock_guard<std::mutex> lock(impl_->mu);
+    if (impl_->done || !impl_->samples) return false;
+    impl_->samples = std::move(samples);
+    impl_->channels = channels == 2 ? 2 : 1;
+    return true;
+}
+
 void Player::stop() {
     {
         std::lock_guard<std::mutex> lock(impl_->mu);

@@ -809,7 +809,7 @@ void Studio::on_keys(wxCommandEvent &) {
         "Space  play from the note the cursor is on, or stop if it is playing",
         "Ctrl+P  play every track from the start",
         is_mac() ? "Option+H  hear the selected note" : "Ctrl+H  hear the selected note",
-        "Ctrl+M  metronome on or off, for playing only",
+        "Ctrl+M  metronome on or off, for playing only; while the song plays it comes in or goes at once",
         "Ctrl+. stop",
         "Ctrl+Shift+N  start an empty song",
         "Ctrl+O open a project, Ctrl+S save it",
@@ -1935,11 +1935,15 @@ RenderRequest Studio::request(const std::vector<Note> *only, double start,
     return make_request(song_, sing, start, program_map_);
 }
 
-//: The song as it is played: the metronome goes on here and nowhere else.
-RenderRequest Studio::playback(double start) {
-    RenderRequest r = request(nullptr, start);
-    if (mi_metronome_->IsChecked()) r.metronome_bar = bar_beats(signature());
-    return r;
+//: The song as it is played; the metronome goes on when it plays (ticked).
+RenderRequest Studio::playback(double start) { return request(nullptr, start); }
+
+//: The song as it plays from play_from_, with the metronome if it is on.
+std::shared_ptr<const std::vector<float>> Studio::ticked(const Mixed &res) const {
+    if (!mi_metronome_->IsChecked() || !res.samples) return res.samples;
+    auto y = std::make_shared<std::vector<float>>(*res.samples);
+    with_metronome(*y, res.channels, song_.clock(), bar_beats(signature()), play_from_, res.lead);
+    return y;
 }
 
 void Studio::render(const RenderRequest &req, const std::string &out, std::function<void(RenderResult)> done) {
@@ -1983,6 +1987,8 @@ void Studio::lookup(const std::vector<std::string> &words,
 }
 
 void Studio::on_metronome(wxCommandEvent &) {
+    // into the song playing, or out of it, from where it has got to
+    if (play_mix_.samples && player_.playing()) player_.swap(ticked(play_mix_), play_mix_.channels);
     if (!mi_metronome_->IsChecked()) {
         say("metronome off");
         return;
@@ -2114,7 +2120,10 @@ void Studio::played(const Mixed &res, bool quiet) {
         say(W(printf_s("playing %.2f seconds%s%s", res.seconds, res.cached ? " from cache" : "", loud.c_str())));
     else if (!loud.empty())
         say(W(loud.substr(2)));
-    play_audio(res, quiet);
+    Mixed shown = res;
+    shown.samples = ticked(res);
+    play_audio(shown, quiet);
+    play_mix_ = res;
     // the song, not a note heard on its own, is what the cursors follow
     play_clock_ = song_.clock();
     play_lead_ = res.lead;
@@ -2125,6 +2134,7 @@ void Studio::played(const Mixed &res, bool quiet) {
 //: Straight from memory to the sound card.
 void Studio::play_audio(const Mixed &res, bool quiet) {
     (void)quiet;
+    play_mix_ = Mixed();
     if (!res.samples || res.samples->empty()) {
         say("nothing to play");
         return;
@@ -2134,6 +2144,7 @@ void Studio::play_audio(const Mixed &res, bool quiet) {
 
 void Studio::stop_audio() {
     player_.stop();
+    play_mix_ = Mixed();
     following_ = false;
 }
 
