@@ -60,6 +60,13 @@ private:
 //: Which voice each old program number picks, for songs written down as
 //: program changes. -1 where there is none.
 std::vector<int> vocalwriter_program_voices();
+
+//: The parts of a song, as (voice, part) and each sung by VocalWriter, sung
+//: together as VocalWriter played a song: one mix through its reverb, into
+//: interleaved stereo. False, with `error` set if the engine failed, when
+//: it could not: then they are sung one by one.
+bool vocalwriter_song(const std::vector<std::pair<int, Part>> &parts, int room, int wet,
+                      std::vector<float> *stereo, std::string *error);
 std::string vocalwriter_engine_name();
 
 //: The application's reverb over interleaved stereo floats, through the

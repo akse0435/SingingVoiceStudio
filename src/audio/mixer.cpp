@@ -386,6 +386,38 @@ std::string part_key(int voice_id, const Part &p) {
     return "part:" + phrase_key(voice_id, as_phrase);
 }
 
+//: A part as a whole, rests and all, for an engine that sings it so.
+Part whole_part(const PartRequest &t, double bpm, double consonants) {
+    double spb = 60.0 / std::max(bpm, 1e-6);
+    Part part;
+    part.bpm = bpm;
+    part.style = t.voice;
+    part.level = t.volume * Registry::get().headroom(t.voice_id);
+    part.consonants = t.consonants ? *t.consonants : consonants;
+    part.channel = t.channel;
+    double total = 0;
+    for (const auto &e : t.notes) {
+        SungNote n;
+        n.midi = e.pitch;
+        n.beats = e.beats;
+        n.velocity = t.velocity;
+        n.phonemes = e.phonemes.empty() ? std::vector<std::string>{kRest} : e.phonemes;
+        n.word = e.word;
+        part.notes.push_back(n);
+        total += e.beats;
+    }
+    std::vector<Pt> bends, mods;
+    for (const BendPoint &b : t.bends) bends.push_back({b.beat * spb, b.semitones, b.slides});
+    for (const BendPoint &b : t.mods) mods.push_back({b.beat * spb, b.semitones, b.slides});
+    std::stable_sort(bends.begin(), bends.end(), [](const Pt &a, const Pt &b) { return a.t < b.t; });
+    std::stable_sort(mods.begin(), mods.end(), [](const Pt &a, const Pt &b) { return a.t < b.t; });
+    part.any_bends = !bends.empty();
+    double span = (total + 0.4) * spb;
+    part.bends = bend_events(bends, 0.0, span);
+    part.mods = bend_events(mods, 0.0, span, wheel_step);
+    return part;
+}
+
 //: The most backing tracks' files kept read at once. A file is stereo floats,
 //: 21 MB a minute, and a song seldom has more than one or two.
 const size_t kFilesKept = 4;
@@ -476,29 +508,7 @@ std::vector<float> Mixer::track(const PartRequest &t, double bpm, double consona
     Family *family = Registry::get().family_of(t.voice_id);
     bool own_time = family && family->sings_parts();
     if (own_time && whole) {
-        Part part;
-        part.bpm = bpm;
-        part.style = t.voice;
-        part.level = level;
-        part.any_bends = !bends.empty();
-        part.consonants = consonants;
-        part.channel = t.channel;
-        for (const auto &e : t.notes) {
-            SungNote n;
-            n.midi = e.pitch;
-            n.beats = e.beats;
-            n.velocity = t.velocity;
-            n.phonemes = e.phonemes.empty() ? std::vector<std::string>{kRest} : e.phonemes;
-            n.word = e.word;
-            part.notes.push_back(n);
-        }
-        double span = (total + 0.4) * spb;
-        std::vector<Pt> secs;
-        for (const Pt &p : bends) secs.push_back({p.t * spb, p.v, p.slides});
-        part.bends = bend_events(secs, 0.0, span);
-        std::vector<Pt> mod_secs;
-        for (const Pt &p : mods) mod_secs.push_back({p.t * spb, p.v, p.slides});
-        part.mods = bend_events(mod_secs, 0.0, span, wheel_step);
+        Part part = whole_part(t, bpm, consonants);
         std::string key = part_key(t.voice_id, part);
         std::shared_ptr<const std::vector<float>> sung;
         auto kept = phrases_.find(key);
@@ -694,6 +704,16 @@ Mixed Mixer::mix_locked(const RenderRequest &req, bool whole) {
         return res;
     }
     bool stopped = false;
+    if (whole) {
+        std::vector<float> out;
+        int channels = 1;
+        if (sung_together(req, &out, &channels)) {
+            double peak = 0;
+            for (float v : out) peak = std::max(peak, double(std::fabs(v)));
+            if (!add_backings(req, out, channels, peak, &res.error)) return res;
+            return finished(key, std::move(out), channels, peak, stopped);
+        }
+    }
     // grouped by the reverb each part ends up with, in the order first met
     std::vector<std::pair<Reverb, std::vector<size_t>>> groups;
     std::vector<std::vector<float>> ys(req.tracks.size());
@@ -785,46 +805,52 @@ Mixed Mixer::mix_locked(const RenderRequest &req, bool whole) {
             for (float &v : out) v = float(v / peak);
     }
 
-    // The backing tracks, under the voices and after their reverb. The file
-    // is placed by the clock, not the beat: it is the same recording at any
-    // tempo, and the cursor's beat is only where in it playing begins.
-    if (!req.backings.empty()) {
-        if (channels == 1) {
-            std::vector<float> two(out.size() * 2);
-            for (size_t i = 0; i < out.size(); ++i) two[2 * i] = two[2 * i + 1] = out[i];
-            out.swap(two);
-            channels = 2;
-        }
-        double from = req.start * 60.0 / std::max(req.bpm, 1e-6);
-        for (const BackingRequest &b : req.backings) {
-            std::string err;
-            std::shared_ptr<const std::vector<float>> file = backing(b.path, &err);
-            if (!file) {
-                res.error = "the backing track " + b.name + " cannot be played: " + err;
-                return res;
-            }
-            const std::vector<float> &x = *file;
-            size_t frames = x.size() / 2;
-            long at = round_half_even((b.start - from) * kSampleRate);
-            size_t skip = at < 0 ? size_t(-at) : 0, to = at < 0 ? 0 : size_t(at);
-            if (skip >= frames) continue;               // over before the cursor
-            size_t need = (to + frames - skip) * 2;
-            if (out.size() < need) out.resize(need, 0.0f);
-            // a balance rather than a pan: the file is stereo already, and
-            // turning it to one side turns the other side down
-            double gl = b.volume * std::min(1.0, 1.0 - b.pan), gr = b.volume * std::min(1.0, 1.0 + b.pan);
-            for (size_t k = skip; k < frames; ++k) {
-                out[2 * (to + k - skip)] += float(x[2 * k] * gl);
-                out[2 * (to + k - skip) + 1] += float(x[2 * k + 1] * gr);
-            }
-        }
-        double all = 0;
-        for (float v : out) all = std::max(all, double(std::fabs(v)));
-        if (all > 1.0)
-            for (float &v : out) v = float(v / all);
-        peak = std::max(peak, all);
-    }
+    if (!add_backings(req, out, channels, peak, &res.error)) return res;
+    return finished(key, std::move(out), channels, peak, stopped);
+}
 
+bool Mixer::sung_together(const RenderRequest &req, std::vector<float> *out, int *channels) {
+    if (req.tracks.empty()) return false;
+    Reverb rev = clean_reverb(req.reverb);
+    std::vector<std::pair<int, Part>> parts;
+    std::string key = "song:";
+    for (const PartRequest &t : req.tracks) {
+        Family *f = Registry::get().family_of(t.voice_id);
+        if (!f || !f->sings_parts() || std::fabs(t.pan) > 1e-6 || (t.reverb && clean_reverb(*t.reverb) != rev))
+            return false;
+        parts.push_back({t.voice_id, whole_part(t, req.bpm, req.consonants)});
+        key += part_key(t.voice_id, parts.back().second) + ";";
+    }
+    key += std::to_string(rev.first) + "," + std::to_string(rev.second);
+    std::shared_ptr<const std::vector<float>> sung;
+    auto kept = phrases_.find(key);
+    if (kept != phrases_.end()) {
+        kept->second.used = ++clock_;
+        sung = kept->second.samples;
+    } else {
+        std::vector<float> stereo;
+        std::string err;
+        if (!vocalwriter_song(parts, rev.first, rev.second, &stereo, &err)) return false;
+        sung = std::make_shared<const std::vector<float>>(std::move(stereo));
+        keep(key, sung, false, 0.0);
+    }
+    // with no reverb the two sides are the same
+    *channels = rev.second > 0 ? 2 : 1;
+    const std::vector<float> &y = *sung;
+    size_t frames = y.size() / 2;
+    size_t skip = std::min(frames, size_t(std::max(0L, round_half_even(req.start * 60.0 / std::max(req.bpm, 1e-6) *
+                                                                       kSampleRate))));
+    out->clear();
+    for (size_t i = skip; i < frames; ++i) {
+        out->push_back(y[2 * i]);
+        if (*channels == 2) out->push_back(y[2 * i + 1]);
+    }
+    return true;
+}
+
+Mixed Mixer::finished(const std::string &key, std::vector<float> out, int channels, double peak,
+                      bool stopped) {
+    Mixed res;
     res.ok = true;
     res.channels = channels;
     res.seconds = double(out.size() / size_t(channels)) / kSampleRate;
@@ -834,6 +860,49 @@ Mixed Mixer::mix_locked(const RenderRequest &req, bool whole) {
     last_key_ = key;
     last_ = res;
     return res;
+}
+
+// The backing tracks, under the voices and after their reverb. The file
+// is placed by the clock, not the beat: it is the same recording at any
+// tempo, and the cursor's beat is only where in it playing begins.
+bool Mixer::add_backings(const RenderRequest &req, std::vector<float> &out, int &channels, double &peak,
+                         std::string *error) {
+    if (req.backings.empty()) return true;
+    if (channels == 1) {
+        std::vector<float> two(out.size() * 2);
+        for (size_t i = 0; i < out.size(); ++i) two[2 * i] = two[2 * i + 1] = out[i];
+        out.swap(two);
+        channels = 2;
+    }
+    double from = req.start * 60.0 / std::max(req.bpm, 1e-6);
+    for (const BackingRequest &b : req.backings) {
+        std::string err;
+        std::shared_ptr<const std::vector<float>> file = backing(b.path, &err);
+        if (!file) {
+            *error = "the backing track " + b.name + " cannot be played: " + err;
+            return false;
+        }
+        const std::vector<float> &x = *file;
+        size_t frames = x.size() / 2;
+        long at = round_half_even((b.start - from) * kSampleRate);
+        size_t skip = at < 0 ? size_t(-at) : 0, to = at < 0 ? 0 : size_t(at);
+        if (skip >= frames) continue;               // over before the cursor
+        size_t need = (to + frames - skip) * 2;
+        if (out.size() < need) out.resize(need, 0.0f);
+        // a balance rather than a pan: the file is stereo already, and
+        // turning it to one side turns the other side down
+        double gl = b.volume * std::min(1.0, 1.0 - b.pan), gr = b.volume * std::min(1.0, 1.0 + b.pan);
+        for (size_t k = skip; k < frames; ++k) {
+            out[2 * (to + k - skip)] += float(x[2 * k] * gl);
+            out[2 * (to + k - skip) + 1] += float(x[2 * k + 1] * gr);
+        }
+    }
+    double all = 0;
+    for (float v : out) all = std::max(all, double(std::fabs(v)));
+    if (all > 1.0)
+        for (float &v : out) v = float(v / all);
+    peak = std::max(peak, all);
+    return true;
 }
 
 }  // namespace svs

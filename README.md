@@ -24,8 +24,10 @@ phrase is sung by the part's voice and placed where the score puts it, and the
 parts are panned and mixed, the ones sharing a reverb setting through one room.
 VocalWriter's voices are sung through VocalWriter 2.0's own play path -- its
 parser places the consonants and its sequencer sings the track -- so a part
-exported to WAV is, sample for sample, what VocalWriter 2.0 sang; playing, a
-phrase is sung on its own, which comes very near. A project saved here is the
+exported to WAV is, sample for sample, what VocalWriter 2.0 sang, and a song
+VocalWriter's voices sing every part of is exported as VocalWriter played
+it: all the parts at once, through its reverb. Playing, a phrase is sung on
+its own, which comes very near. A project saved here is the
 same file byte for byte as VocalWriter Studio's. The other engines are handed the same notes, the same phoneme timings
 and one shared pitch curve (written note, bend, detune, portamento, vibrato),
 each in its own terms: DECtalk a pitch per phoneme in Hz, the SSI-263 its

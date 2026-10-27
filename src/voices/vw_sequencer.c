@@ -1,6 +1,6 @@
-/* vw_sequencer.c -- one part as a VocalWriter song (see vw_sequencer.h):
+/* vw_sequencer.c -- parts as a VocalWriter song (see vw_sequencer.h):
  * written as a .trk, read back with the engine's loader and played as
- * engine/src/song.c's vw_render does, the reverb left to the mixer.
+ * engine/src/song.c's vw_render does.
  */
 #include "voices/vw_sequencer.h"
 
@@ -18,7 +18,7 @@
 #define TICKS_PER_BEAT 240
 #define SPEECH_RATE 140            /* what StartCurSeq passes MakeSpeechData */
 #define POLYPHONY 48
-#define VOCAL_TRACK 1
+#define MAX_PARTS 31                /* the tracks after the tempo track */
 #define REST_PHONEME 23
 #define SPARE_PROGRAM 127
 
@@ -91,25 +91,23 @@ static void event(buf *b, int channel, int32_t time, int status, int key, int vo
 
 static const unsigned char kEnd[4] = {0xff, 0xff, 0xff, 0xff};
 
-/* The part as a .trk file: the header, the 32 track records, the tempo
-   track, the vocal track, its lyrics and the empty tracks. */
-static unsigned char *write_song(const vwseq_part *part, int program, size_t *out_len)
+/* One part as a vocal track: its events, the controls at and before a note
+   in front of it, and its lyrics. Returns the last tick it sings. */
+static int32_t write_part(const vwseq_part *part, int track, int program, buf *vocal, buf *lyrics,
+                          int *lyric_count)
 {
-    buf tempo = {0}, vocal = {0}, lyrics = {0}, file = {0};
-    unsigned char header[SEQHEADER_SIZE], info[SEQINFO_SIZE];
-    int32_t last_sung = 0, offset;
-    int i, ei = 0, lyric = 0, bpm = clamp(part->bpm, 10, 250);
+    int32_t last_sung = 0;
+    int i, ei = 0, lyric = 0;
 
-    event(&vocal, 1, 0, 3, 0, program, 0, 0);
+    event(vocal, track, 0, 3, 0, program, 0, 0);
     for (i = 0; i < part->note_count; i++) {
         const vwseq_note *n = &part->notes[i];
-        /* the controls at and before a note go in front of it */
         while (ei < part->event_count && part->events[ei].time <= n->start) {
             const vwseq_event *e = &part->events[ei++];
-            event(&vocal, 1, e->time, e->status, e->key, e->vol, 0, 0);
+            event(vocal, track, e->time, e->status, e->key, e->vol, 0, 0);
         }
         if (n->rest) {
-            event(&vocal, 1, n->start, 8, n->key, 0, n->duration, 0);
+            event(vocal, track, n->start, 8, n->key, 0, n->duration, 0);
             continue;
         }
         {
@@ -123,17 +121,39 @@ static unsigned char *write_song(const vwseq_part *part, int program, size_t *ou
             memcpy(rec + 1, n->text, tl);
             rec[13] = (unsigned char)pl;
             memcpy(rec + 14, n->phonemes + 1, (size_t)pl);
-            put(&lyrics, rec, 26);
+            put(lyrics, rec, 26);
         }
-        event(&vocal, 1, n->start, 6, n->key, clamp(n->velocity, 1, 127), n->duration, lyric++);
+        event(vocal, track, n->start, 6, n->key, clamp(n->velocity, 1, 127), n->duration, lyric++);
         if (n->start + n->duration > last_sung)
             last_sung = n->start + n->duration;
     }
     while (ei < part->event_count) {
         const vwseq_event *e = &part->events[ei++];
-        event(&vocal, 1, e->time, e->status, e->key, e->vol, 0, 0);
+        event(vocal, track, e->time, e->status, e->key, e->vol, 0, 0);
     }
-    put(&vocal, kEnd, 4);
+    put(vocal, kEnd, 4);
+    *lyric_count = lyric;
+    return last_sung;
+}
+
+/* The parts as a .trk file: the header, the 32 track records, the tempo
+   track, a vocal track and its lyrics for each part, from track 1, and the
+   empty tracks. */
+static unsigned char *write_song(const vwseq_part *parts, int count, const int *programs,
+                                 size_t *out_len)
+{
+    buf tempo = {0}, file = {0}, vocal[MAX_PARTS], lyrics[MAX_PARTS];
+    unsigned char header[SEQHEADER_SIZE], info[SEQINFO_SIZE];
+    int32_t last_sung = 0, offset;
+    int i, lyric_count[MAX_PARTS], bpm = clamp(parts[0].bpm, 10, 250), failed = 0;
+
+    memset(vocal, 0, sizeof vocal);
+    memset(lyrics, 0, sizeof lyrics);
+    for (i = 0; i < count; i++) {
+        int32_t last = write_part(&parts[i], 1 + i, programs[i], &vocal[i], &lyrics[i], &lyric_count[i]);
+        if (last > last_sung)
+            last_sung = last;
+    }
     /* the tempo, and the end mark a beat after the last sung note */
     event(&tempo, 0, 0, 4, bpm >> 8, bpm & 0xff, 0, 0);
     event(&tempo, 0, last_sung + TICKS_PER_BEAT, 9, 0, 0, 0, 0);
@@ -149,7 +169,7 @@ static unsigned char *write_song(const vwseq_part *part, int program, size_t *ou
     be16(header + 0x12, TICKS_PER_BEAT);
     be16(header + 0x14, 32);
     for (i = 0; i < 32; i++) {
-        be16(header + 0x16 + 2 * i, i == VOCAL_TRACK ? clamp(part->track_level, 0, 100) : 100);
+        be16(header + 0x16 + 2 * i, i >= 1 && i <= count ? clamp(parts[i - 1].track_level, 0, 100) : 100);
         be16(header + 0x56 + 2 * i, 1);
     }
     memset(info, 0, sizeof info);
@@ -162,15 +182,15 @@ static unsigned char *write_song(const vwseq_part *part, int program, size_t *ou
             be32(t + 0x8, offset);
             be32(t + 0xc, (int32_t)tempo.len);
             offset += (int32_t)tempo.len;
-        } else if (i == VOCAL_TRACK) {
+        } else if (i <= count) {
             be32(t + 0x4, 1);                    /* a vocal track */
             be32(t + 0x8, offset);
-            be32(t + 0xc, (int32_t)vocal.len);
-            offset += (int32_t)vocal.len;
+            be32(t + 0xc, (int32_t)vocal[i - 1].len);
+            offset += (int32_t)vocal[i - 1].len;
             be32(t + 0x18, offset);
-            be32(t + 0x1c, lyric);
+            be32(t + 0x1c, lyric_count[i - 1]);
             be32(t + 0x20, 13);
-            offset += (int32_t)lyrics.len;
+            offset += (int32_t)lyrics[i - 1].len;
         } else {
             be32(t + 0x8, offset);
             be32(t + 0xc, 4);
@@ -180,15 +200,18 @@ static unsigned char *write_song(const vwseq_part *part, int program, size_t *ou
     put(&file, header, sizeof header);
     put(&file, info, sizeof info);
     put(&file, tempo.p, tempo.len);
-    put(&file, vocal.p, vocal.len);
-    if (lyrics.len)
-        put(&file, lyrics.p, lyrics.len);
-    for (i = 2; i < 32; i++)
+    for (i = 0; i < count; i++) {
+        put(&file, vocal[i].p, vocal[i].len);
+        if (lyrics[i].len)
+            put(&file, lyrics[i].p, lyrics[i].len);
+        failed |= vocal[i].failed | lyrics[i].failed;
+        free(vocal[i].p);
+        free(lyrics[i].p);
+    }
+    for (i = count + 1; i < 32; i++)
         put(&file, kEnd, 4);
     free(tempo.p);
-    free(vocal.p);
-    free(lyrics.p);
-    if (file.failed || tempo.failed || vocal.failed || lyrics.failed) {
+    if (file.failed || tempo.failed || failed) {
         free(file.p);
         return NULL;
     }
@@ -285,91 +308,128 @@ static void on_done(int32_t refCon)
     g_done = 1;
 }
 
-int vwseq_sing(vwseq_engine *engine, const vwseq_part *part, vwseq_sink sink, void *user)
+/* MakeSpeechData for a vocal track, as StartCurSeq calls it, hung off the
+   song, its consonants shortened if asked. */
+static int make_speech(vw_engine *e, vw_song *s, int track, double consonants)
+{
+    TrackInfoPtr t = (TrackInfoPtr)(s->image + track * TRACKINFO_SIZE);
+    Handle h = NewHandle(0);
+    int32_t len = 0, off;
+    int16_t serr;
+    if (h == NULL)
+        return -2;
+    serr = Synth_MakeSpeechData(e->svv, s->image + t->lyricData, s->image + t->trackData, h, &len,
+                                SPEECH_RATE);
+    if (serr != 0 || len < 4) {
+        DisposeHandle(h);
+        return serr ? serr : -1;
+    }
+    nucleus_every_note((int16_t *)*h);
+    if (consonants > 0 && consonants < 1.0)
+        scale_consonants((int16_t *)*h, consonants);
+    if (s->image_len + (size_t)len > s->image_cap) {
+        unsigned char *p = (unsigned char *)realloc(s->image, s->image_len + (size_t)len);
+        if (p == NULL) {
+            DisposeHandle(h);
+            return -2;
+        }
+        s->image = p;
+        s->image_cap = s->image_len + (size_t)len;
+    }
+    off = (int32_t)s->image_len;
+    memcpy(s->image + off, *h, (size_t)len);
+    s->image_len += (size_t)len;
+    DisposeHandle(h);
+    t = (TrackInfoPtr)(s->image + track * TRACKINFO_SIZE);
+    t->speechData = off;
+    t->speechDataLen = len;
+    return 0;
+}
+
+/* The parts as one song, played as the application plays it: `channels` 1
+   gives the left channel (a voice is in the middle), 2 both. */
+static int sing(vwseq_engine *engine, const vwseq_part *parts, int count, int room, int wet,
+                int channels, vwseq_sink sink, void *user)
 {
     vw_engine *e = &engine->e;
     shellVarPtr svv = e->svv;
     synthVarsPtr xx = svv->ChannelGlobals;
-    int16_t *map = (int16_t *)e->voices, saved = 0, serr;
+    int16_t *map = (int16_t *)e->voices, saved[MAX_PARTS], serr;
     vw_song s;
-    TrackInfoPtr t;
-    Handle h;
     PlayRec pr;
     unsigned char *trk;
     size_t trk_len = 0;
-    int32_t len = 0, off;
-    int i, rc, program = -1, patched = 0;
-    double seconds = 0.0;
+    int i, k, rc = 0, programs[MAX_PARTS], patched[MAX_PARTS];
+    double seconds = 0.0, max_seconds = 0.0;
 
-    if (part->voice < 0 || part->voice >= e->voiceCount)
-        return -3;
-    /* The voice is chosen as a song chooses it, by a program change at the
-       first tick; one no program reaches borrows the last for the song. */
-    for (i = 0; i < 128 && program < 0; i++)
-        if (map[i] == part->voice)
-            program = i;
-    if (program < 0) {
-        program = SPARE_PROGRAM;
-        patched = 1;
-        saved = map[program];
-        map[program] = (int16_t)part->voice;
+    if (count < 1 || count > MAX_PARTS)
+        return -1;
+    /* A voice is chosen as a song chooses it, by a program change at the
+       first tick; one no program reaches borrows one from the top. */
+    for (i = 0; i < count; i++) {
+        if (parts[i].voice < 0 || parts[i].voice >= e->voiceCount)
+            return -3;
+        if (parts[i].max_seconds > max_seconds)
+            max_seconds = parts[i].max_seconds;
     }
-    trk = write_song(part, program, &trk_len);
+    for (i = 0; i < count; i++) {
+        programs[i] = -1;
+        patched[i] = 0;
+        for (k = 0; k < 128 && programs[i] < 0; k++)
+            if (map[k] == parts[i].voice)
+                programs[i] = k;
+    }
+    for (i = 0; i < count; i++) {
+        int p = SPARE_PROGRAM, taken = 1;
+        if (programs[i] >= 0)
+            continue;
+        while (taken && p >= 0) {
+            taken = 0;
+            for (k = 0; k < count; k++)
+                if (programs[k] == p)
+                    taken = 1;
+            if (taken)
+                --p;
+        }
+        if (p < 0) {
+            rc = -1;
+            goto restore;
+        }
+        programs[i] = p;
+        patched[i] = 1;
+        saved[i] = map[p];
+        map[p] = (int16_t)parts[i].voice;
+    }
+    trk = write_song(parts, count, programs, &trk_len);
     rc = trk == NULL ? -2 : vw_song_load(&s, trk, trk_len, NULL, 0) != VW_OK ? -1 : 0;
     free(trk);
     if (rc != 0)
         goto restore;
 
-    /* the speech channel before the levels: a level reaches only a voice */
+    /* the speech channels before the levels: a level reaches only a voice */
     Synth_MakeAllTrackskNotSpeech(svv);
-    serr = Synth_MakeTrackSpeech(svv, VOCAL_TRACK);
-    if (serr != 0) {
-        rc = serr;
-        goto done;
+    for (i = 0; i < count; i++) {
+        serr = Synth_MakeTrackSpeech(svv, (int16_t)(1 + i));
+        if (serr != 0) {
+            rc = serr;
+            goto done;
+        }
     }
     Synth_SetKaraokeTrack(svv, -1);
     for (i = 0; i < 32; i++) {
-        Synth_SetPlayTrack(svv, (int16_t)i, (int16_t)(i == VOCAL_TRACK));
+        Synth_SetPlayTrack(svv, (int16_t)i, (int16_t)(i >= 1 && i <= count));
         Synth_TrackToChan(svv, (int16_t)i, -1);
         Synth_SetTrackLevel(svv, (int16_t)i, s.trackLevels[i]);
     }
-
-    /* MakeSpeechData, as StartCurSeq calls it, hung off the song */
-    t = (TrackInfoPtr)(s.image + VOCAL_TRACK * TRACKINFO_SIZE);
-    h = NewHandle(0);
-    if (h == NULL) {
-        rc = -2;
-        goto done;
-    }
-    serr = Synth_MakeSpeechData(svv, s.image + t->lyricData, s.image + t->trackData, h, &len,
-                                SPEECH_RATE);
-    if (serr != 0 || len < 4) {
-        DisposeHandle(h);
-        rc = serr ? serr : -1;
-        goto done;
-    }
-    nucleus_every_note((int16_t *)*h);
-    if (part->consonants > 0 && part->consonants < 1.0)
-        scale_consonants((int16_t *)*h, part->consonants);
-    if (s.image_len + (size_t)len > s.image_cap) {
-        unsigned char *p = (unsigned char *)realloc(s.image, s.image_len + (size_t)len);
-        if (p == NULL) {
-            DisposeHandle(h);
-            rc = -2;
+    for (i = 0; i < count; i++)
+        if ((rc = make_speech(e, &s, 1 + i, parts[i].consonants)) != 0)
             goto done;
-        }
-        s.image = p;
-        s.image_cap = s.image_len + (size_t)len;
-    }
-    off = (int32_t)s.image_len;
-    memcpy(s.image + off, *h, (size_t)len);
-    s.image_len += (size_t)len;
-    DisposeHandle(h);
-    t = (TrackInfoPtr)(s.image + VOCAL_TRACK * TRACKINFO_SIZE);
-    t->speechData = off;
-    t->speechDataLen = len;
     Synth_SetKbdFlags(svv, 0);
-    Synth_SetReverb(svv, 0.0f, 0.0f, 0.0f);      /* the mixer's, over all the parts */
+    /* the reverb, as SendReverbParams sends it */
+    if (wet > 0)
+        Synth_SetReverb(svv, (float)room / 100.0f, (float)wet / 100.0f, 1.0f - (float)wet / 100.0f);
+    else
+        Synth_SetReverb(svv, 0.0f, 0.0f, 0.0f);
     Synth_StartMusic(svv);
 
     memset(&pr, 0, sizeof pr);
@@ -381,33 +441,36 @@ int vwseq_sing(vwseq_engine *engine, const vwseq_part *part, vwseq_sink sink, vo
     Synth_SetSeqDoneCB(svv, on_done, 0);
     rc = Synth_SeqPlayer(svv, &pr);
     if (rc == 0) {
-        int16_t mono[4096];
-        /* Start_Speech gives channel 0 its vibrato from the top of the cycle
-           and every other channel from half way; this part sings alone, on
-           channel 0, so a later track's is set as its own channel would. */
-        if (part->channel > 0) {
-            formantVarPtr zz = (formantVarPtr)xx->speechVars[xx->SpeechMap[VOCAL_TRACK]];
-            zz->vibrato_Phase1 = 128 << 16;
-            zz->vibrato_Phase2 = 128 << 16;
-        }
-        while (!g_done) {
-            Ptr out;
-            int32_t blen, frames, k, n = 0;
+        int16_t out[4096];
+        /* Start_Speech gives the first speech channel its vibrato from the
+           top of the cycle and every other one from half way. A part sung
+           here without the parts before it in its song is set as its own
+           channel would be. */
+        for (i = 0; i < count; i++)
+            if ((parts[i].channel > 0) != (i > 0)) {
+                formantVarPtr zz = (formantVarPtr)xx->speechVars[xx->SpeechMap[1 + i]];
+                zz->vibrato_Phase1 = parts[i].channel > 0 ? 128 << 16 : 0;
+                zz->vibrato_Phase2 = zz->vibrato_Phase1;
+            }
+        int stop = 0;
+        while (!g_done && !stop) {
+            Ptr buf;
+            int32_t blen, frames, n = 0;
             const int16_t *stereo;
-            Synth_GetNextBuffer(svv, &out, &blen);
-            stereo = (const int16_t *)out;
+            Synth_GetNextBuffer(svv, &buf, &blen);
+            stereo = (const int16_t *)buf;
             frames = blen / 4;
-            /* the voice is in the middle: both channels are the same */
-            while (n < frames && !g_done) {
-                int32_t m = frames - n > 4096 ? 4096 : frames - n;
-                for (k = 0; k < m; k++)
-                    mono[k] = stereo[2 * (n + k)];
-                if (sink(user, mono, (size_t)m))
-                    g_done = 1;
+            /* the whole buffer, the one the song ends in too, as Play to
+               Disk writes it */
+            while (n < frames && !stop) {
+                int32_t m = frames - n > 2048 ? 2048 : frames - n, j;
+                for (j = 0; j < m * channels; j++)
+                    out[j] = channels == 2 ? stereo[2 * n + j] : stereo[2 * (n + j)];
+                stop = sink(user, out, (size_t)(m * channels));
                 n += m;
             }
             seconds += (double)frames / 44100.0;
-            if (part->max_seconds > 0 && seconds >= part->max_seconds)
+            if (max_seconds > 0 && seconds >= max_seconds)
                 break;
         }
         pr.theFlags = 0;
@@ -419,7 +482,18 @@ done:
     Synth_MakeAllTrackskNotSpeech(svv);
     vw_song_free(&s);
 restore:
-    if (patched)
-        map[program] = saved;
+    for (i = count - 1; i >= 0; i--)
+        if (patched[i])
+            map[programs[i]] = saved[i];
     return rc;
+}
+
+int vwseq_sing(vwseq_engine *engine, const vwseq_part *part, vwseq_sink sink, void *user)
+{
+    return sing(engine, part, 1, 0, 0, 1, sink, user);
+}
+
+int vwseq_sing_song(vwseq_engine *engine, const vwseq_song *song, vwseq_sink sink, void *user)
+{
+    return sing(engine, song->parts, song->part_count, song->reverb_room, song->reverb_wet, 2, sink, user);
 }

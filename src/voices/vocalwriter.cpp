@@ -207,6 +207,144 @@ int collect(void *user, const int16_t *samples, size_t count) {
     return 0;
 }
 
+//: A part as the sequencer takes it, with the notes and events it points at.
+struct SeqPart {
+    std::vector<vwseq_note> notes;
+    std::vector<vwseq_event> events;
+    vwseq_part p{};
+    //: what of the level is finer than the track level's whole percent
+    double residual = 1.0;
+};
+
+//: False if the part sings nothing.
+bool to_seq(const Part &part, int voice, SeqPart *sp) {
+    if (part.notes.empty()) return false;
+    // The sequencer's tempo is a whole number; a tempo between two is
+    // kept by counting ticks at the whole one.
+    int tempo = int(std::max(10L, std::min(250L, std::lround(part.bpm))));
+    double tick_scale = kTicksPerBeat * tempo / std::max(part.bpm, 1e-6);
+    auto ticks = [&](double beats) { return int32_t(std::llround(beats * tick_scale)); };
+    double tick_per_second = kTicksPerBeat * tempo / 60.0;
+    auto at_second = [&](double s) { return int32_t(std::llround(std::max(0.0, s) * tick_per_second)); };
+
+    // placed by where each note begins, so that nothing drifts
+    std::vector<vwseq_note> &notes = sp->notes;
+    double beat = 0.0;
+    int32_t end = 0;
+    for (size_t i = 0; i < part.notes.size(); ++i) {
+        const SungNote &n = part.notes[i];
+        int32_t a = ticks(beat), b = ticks(beat + n.beats);
+        beat += n.beats;
+        if (b <= a) continue;
+        vwseq_note v{};
+        v.start = a;
+        v.duration = b - a;
+        v.key = n.midi;
+        v.velocity = n.velocity;
+        if (is_rest_note(n)) {
+            // a rest carries the coming note's key, as VocalWriter
+            // writes it: that note's first consonants are sung in it
+            v.rest = 1;
+            for (size_t k = i + 1; k < part.notes.size(); ++k)
+                if (!is_rest_note(part.notes[k])) {
+                    v.key = part.notes[k].midi;
+                    break;
+                }
+            if (!notes.empty() && notes.back().rest && notes.back().start + notes.back().duration == a) {
+                notes.back().duration += v.duration;
+                end = b;
+                continue;
+            }
+        } else {
+            std::string text = lyric_text(n.word);
+            std::memcpy(v.text, text.c_str(), text.size() + 1);
+            int count = 0;
+            for (const std::string &p : n.phonemes) {
+                int code = phoneme_code(p);
+                if (code < 0 || p == kRest || count == 12) continue;
+                v.phonemes[1 + count++] = (unsigned char)code;
+            }
+            v.phonemes[0] = (unsigned char)count;
+        }
+        notes.push_back(v);
+        end = b;
+    }
+    if (notes.empty()) return false;
+    // the sequencer finishes a track once its voice has sung a rest
+    if (!notes.back().rest) {
+        vwseq_note r{};
+        r.start = end;
+        r.duration = kTicksPerBeat;
+        r.key = notes.back().key;
+        r.velocity = notes.back().velocity;
+        r.rest = 1;
+        notes.push_back(r);
+    }
+
+    // The part's settings at the start, only those off their defaults,
+    // so the voice starts as a VocalWriter song starts it; then the
+    // bends and the wheel as they move.
+    std::vector<vwseq_event> &ev = sp->events;
+    size_t count;
+    const VoiceControl *c = svs::voice_controls(&count);
+    VoiceStyle style = clean_voice(part.style);
+    for (size_t i = 0; i < count; ++i) {
+        int value = style.*(c[i].field);
+        std::string call = c[i].call;
+        if (value == (call == "Speech_Portamento" ? kEnginePortamento : c[i].def)) continue;
+        if (call == "Speech_Color") control(ev, 0, VWSEQ_COLOR, value);
+        else if (call == "Speech_VibDepth") control(ev, 0, VWSEQ_VIB_DEPTH, value);
+        else if (call == "Speech_VibFreq") control(ev, 0, VWSEQ_VIB_FREQ, value);
+        else if (call == "Speech_Chorus") control14(ev, 0, VWSEQ_CHORUS, value);
+        else if (call == "Speech_Breath") control(ev, 0, VWSEQ_BREATH, value);
+        else if (call == "Speech_Detune") control14(ev, 0, VWSEQ_DETUNE, value);
+        else if (call == "Speech_Portamento") control(ev, 0, VWSEQ_PORTAMENTO, value);
+    }
+    if (part.any_bends) {
+        // VocalWriter's own range of two semitones if the bends fit it,
+        // else the narrowest that holds them
+        double widest = 0;
+        for (const BendEvent &b : part.bends) widest = std::max(widest, std::fabs(b.semitones));
+        int range = widest <= 2.0 + 1e-9 ? 2 : int(std::min(12.0, std::ceil(widest - 1e-9)));
+        if (range != 2) control(ev, 0, VWSEQ_PB_RANGE, range);
+        for (const BendEvent &b : part.bends)
+            control14(ev, at_second(b.seconds), VWSEQ_PITCH_BEND, bend_raw(b.semitones, range));
+    }
+    if (!part.mods.empty()) {
+        int last = -1;
+        for (const BendEvent &m : part.mods) {
+            int v = int(std::lrint(effective_vibrato(style.vibrato, m.semitones)));
+            if (v != last) control(ev, at_second(m.seconds), VWSEQ_VIB_DEPTH, v);
+            last = v;
+        }
+    }
+    std::stable_sort(ev.begin(), ev.end(),
+                     [](const vwseq_event &a, const vwseq_event &b) { return a.time < b.time; });
+
+    vwseq_part &p = sp->p;
+    p = vwseq_part{};
+    p.bpm = tempo;
+    p.voice = voice;
+    p.notes = notes.data();
+    p.note_count = int(notes.size());
+    p.events = ev.data();
+    p.event_count = int(ev.size());
+    p.channel = part.channel;
+    p.consonants = part.consonants;
+    p.max_seconds = end / tick_per_second + 10.0;
+
+    // the level as VocalWriter's track level, in whole percent, and what is
+    // finer than that on the samples; a voice VocalWriter sang past full
+    // scale is left as it sang it
+    p.track_level = 100;
+    sp->residual = part.level;
+    if (part.level > 0 && part.level <= 1.0) {
+        p.track_level = std::max(1, int(std::lround(part.level * 100)));
+        sp->residual = part.level / (p.track_level / 100.0);
+    }
+    return true;
+}
+
 class VwSinger : public Singer {
 public:
     VwSinger(int voice_id) : voice_id_(voice_id) {}
@@ -238,144 +376,22 @@ public:
 
     Sung sing_part(const Part &part) override {
         Sung out;
-        if (part.notes.empty()) return out;
-        // The sequencer's tempo is a whole number; a tempo between two is
-        // kept by counting ticks at the whole one.
-        int tempo = int(std::max(10L, std::min(250L, std::lround(part.bpm))));
-        double tick_scale = kTicksPerBeat * tempo / std::max(part.bpm, 1e-6);
-        auto ticks = [&](double beats) { return int32_t(std::llround(beats * tick_scale)); };
-        double tick_per_second = kTicksPerBeat * tempo / 60.0;
-        auto at_second = [&](double s) { return int32_t(std::llround(std::max(0.0, s) * tick_per_second)); };
-
-        // placed by where each note begins, so that nothing drifts
-        std::vector<vwseq_note> notes;
-        double beat = 0.0;
-        int32_t end = 0;
-        for (size_t i = 0; i < part.notes.size(); ++i) {
-            const SungNote &n = part.notes[i];
-            int32_t a = ticks(beat), b = ticks(beat + n.beats);
-            beat += n.beats;
-            if (b <= a) continue;
-            vwseq_note v{};
-            v.start = a;
-            v.duration = b - a;
-            v.key = n.midi;
-            v.velocity = n.velocity;
-            if (is_rest_note(n)) {
-                // a rest carries the coming note's key, as VocalWriter
-                // writes it: that note's first consonants are sung in it
-                v.rest = 1;
-                for (size_t k = i + 1; k < part.notes.size(); ++k)
-                    if (!is_rest_note(part.notes[k])) {
-                        v.key = part.notes[k].midi;
-                        break;
-                    }
-                if (!notes.empty() && notes.back().rest && notes.back().start + notes.back().duration == a) {
-                    notes.back().duration += v.duration;
-                    end = b;
-                    continue;
-                }
-            } else {
-                std::string text = lyric_text(n.word);
-                std::memcpy(v.text, text.c_str(), text.size() + 1);
-                int count = 0;
-                for (const std::string &p : n.phonemes) {
-                    int code = phoneme_code(p);
-                    if (code < 0 || p == kRest || count == 12) continue;
-                    v.phonemes[1 + count++] = (unsigned char)code;
-                }
-                v.phonemes[0] = (unsigned char)count;
-            }
-            notes.push_back(v);
-            end = b;
-        }
-        if (notes.empty()) return out;
-        // the sequencer finishes a track once its voice has sung a rest
-        if (!notes.back().rest) {
-            vwseq_note r{};
-            r.start = end;
-            r.duration = kTicksPerBeat;
-            r.key = notes.back().key;
-            r.velocity = notes.back().velocity;
-            r.rest = 1;
-            notes.push_back(r);
-        }
-
-        // The part's settings at the start, only those off their defaults,
-        // so the voice starts as a VocalWriter song starts it; then the
-        // bends and the wheel as they move.
-        std::vector<vwseq_event> ev;
-        size_t count;
-        const VoiceControl *c = svs::voice_controls(&count);
-        VoiceStyle style = clean_voice(part.style);
-        for (size_t i = 0; i < count; ++i) {
-            int value = style.*(c[i].field);
-            std::string call = c[i].call;
-            if (value == (call == "Speech_Portamento" ? kEnginePortamento : c[i].def)) continue;
-            if (call == "Speech_Color") control(ev, 0, VWSEQ_COLOR, value);
-            else if (call == "Speech_VibDepth") control(ev, 0, VWSEQ_VIB_DEPTH, value);
-            else if (call == "Speech_VibFreq") control(ev, 0, VWSEQ_VIB_FREQ, value);
-            else if (call == "Speech_Chorus") control14(ev, 0, VWSEQ_CHORUS, value);
-            else if (call == "Speech_Breath") control(ev, 0, VWSEQ_BREATH, value);
-            else if (call == "Speech_Detune") control14(ev, 0, VWSEQ_DETUNE, value);
-            else if (call == "Speech_Portamento") control(ev, 0, VWSEQ_PORTAMENTO, value);
-        }
-        if (part.any_bends) {
-            // VocalWriter's own range of two semitones if the bends fit it,
-            // else the narrowest that holds them
-            double widest = 0;
-            for (const BendEvent &b : part.bends) widest = std::max(widest, std::fabs(b.semitones));
-            int range = widest <= 2.0 + 1e-9 ? 2 : int(std::min(12.0, std::ceil(widest - 1e-9)));
-            if (range != 2) control(ev, 0, VWSEQ_PB_RANGE, range);
-            for (const BendEvent &b : part.bends)
-                control14(ev, at_second(b.seconds), VWSEQ_PITCH_BEND, bend_raw(b.semitones, range));
-        }
-        if (!part.mods.empty()) {
-            int last = -1;
-            for (const BendEvent &m : part.mods) {
-                int v = int(std::lrint(effective_vibrato(style.vibrato, m.semitones)));
-                if (v != last) control(ev, at_second(m.seconds), VWSEQ_VIB_DEPTH, v);
-                last = v;
-            }
-        }
-        std::stable_sort(ev.begin(), ev.end(),
-                         [](const vwseq_event &a, const vwseq_event &b) { return a.time < b.time; });
-
-        vwseq_part p{};
-        p.bpm = tempo;
-        p.voice = voice_id_;
-        p.notes = notes.data();
-        p.note_count = int(notes.size());
-        p.events = ev.data();
-        p.event_count = int(ev.size());
-        p.channel = part.channel;
-        p.consonants = part.consonants;
-        p.max_seconds = end / tick_per_second + 10.0;
-
+        SeqPart sp;
+        if (!to_seq(part, voice_id_, &sp)) return out;
         SeqEngine &s = seq_engine();
         std::lock_guard<std::mutex> lock(s.mu);
         if (!open_seq_engine(s)) {
             out.error = s.error;
             return out;
         }
-        // the level as VocalWriter's track level, in whole percent, and
-        // what is finer than that on the samples; a voice VocalWriter sang
-        // past full scale is left as it sang it
-        int track_level = 100;
-        double residual = part.level;
-        if (part.level > 0 && part.level <= 1.0) {
-            track_level = std::max(1, int(std::lround(part.level * 100)));
-            residual = part.level / (track_level / 100.0);
-        }
-        p.track_level = track_level;
-        int rc = vwseq_sing(s.e, &p, collect, &out.samples);
+        int rc = vwseq_sing(s.e, &sp.p, collect, &out.samples);
         if (rc != 0) {
             out.error = "VocalWriter's sequencer stopped (" + std::to_string(rc) + ")";
             out.samples.clear();
             return out;
         }
-        if (residual != 1.0)
-            for (float &v : out.samples) v = float(v * residual);
+        if (sp.residual != 1.0)
+            for (float &v : out.samples) v = float(v * sp.residual);
         return out;
     }
 
@@ -467,6 +483,35 @@ std::vector<int> vocalwriter_program_voices() {
     if (!e) return out;
     for (int p = 0; p < 128; ++p) out[size_t(p)] = vw_ed_program_voice(e.get(), p);
     return out;
+}
+
+bool vocalwriter_song(const std::vector<std::pair<int, Part>> &parts, int room, int wet,
+                      std::vector<float> *stereo, std::string *error) {
+    std::vector<SeqPart> seq(parts.size());
+    std::vector<vwseq_part> sung;
+    for (size_t i = 0; i < parts.size(); ++i) {
+        if (!to_seq(parts[i].second, parts[i].first - kVocalWriterBase, &seq[i])) continue;
+        // a level between VocalWriter's whole percents is put on the samples,
+        // which one mix cannot do part by part
+        if (seq[i].residual != 1.0) return false;
+        sung.push_back(seq[i].p);
+    }
+    if (sung.empty() || sung.size() > 31) return false;
+    SeqEngine &s = seq_engine();
+    std::lock_guard<std::mutex> lock(s.mu);
+    if (!open_seq_engine(s)) {
+        *error = s.error;
+        return false;
+    }
+    vwseq_song song{sung.data(), int(sung.size()), room, wet};
+    stereo->clear();
+    int rc = vwseq_sing_song(s.e, &song, collect, stereo);
+    if (rc != 0) {
+        *error = "VocalWriter's sequencer stopped (" + std::to_string(rc) + ")";
+        stereo->clear();
+        return false;
+    }
+    return true;
 }
 
 std::string vocalwriter_engine_name() { return VwAssets::get().ok() ? "C engine" : "not available"; }

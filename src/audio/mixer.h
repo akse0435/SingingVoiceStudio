@@ -109,6 +109,15 @@ private:
                              bool early, bool whole, bool *stopped_short, std::string *error);
     void keep(const std::string &key, std::shared_ptr<const std::vector<float>> sung,
               bool stopped_short, double starts_before);
+    //: An export of a song VocalWriter sings every part of, with no part
+    //: panned or in a room of its own, sung as VocalWriter played a song:
+    //: all the parts at once, through its reverb. False if it is not such a
+    //: song, or VocalWriter could not; it is then sung part by part.
+    bool sung_together(const RenderRequest &req, std::vector<float> *out, int *channels);
+    bool add_backings(const RenderRequest &req, std::vector<float> &out, int &channels, double &peak,
+                      std::string *error);
+    //: the mix made, kept as the last one
+    Mixed finished(const std::string &key, std::vector<float> out, int channels, double peak, bool stopped);
     //: a backing track's file, read the first time it is played and kept
     //: until it changes on disk
     std::shared_ptr<const std::vector<float>> backing(const std::string &path, std::string *error);
