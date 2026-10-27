@@ -386,12 +386,15 @@ void put_words(std::vector<MidiNote> &notes, const std::vector<std::pair<long, i
     // made, and the syllable is left to the merging below. A note bent from
     // one pitch to the next as the syllable comes is divided where the bend
     // arrives, so the syllable starts on its own pitch ("the" on C#4 gliding
-    // down, "sea" on B3).
+    // down, "sea" on B3). One before the part's first note is none of the
+    // song: the title and the singer, as karaoke files show them first.
     const long shortest = std::lround(div / 16);
+    long first = notes.empty() ? 0 : notes.front().tick;
+    for (const MidiNote &n : notes) first = std::min(first, n.tick);
     std::vector<MidiNote> made;
     for (size_t s = 0; s < syls.size(); ++s) {
         bool continues = s > 0 && syls[s - 1].second.back() == '-';
-        if (at[s] >= 0 || !own_syllable(syls[s].second, continues)) continue;
+        if (at[s] >= 0 || !own_syllable(syls[s].second, continues) || syls[s].first < first) continue;
         long t = syls[s].first;
         MidiNote *on = nullptr, *next = nullptr;
         auto look = [&](MidiNote &n) {
