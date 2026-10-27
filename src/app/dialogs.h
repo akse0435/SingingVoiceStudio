@@ -247,6 +247,23 @@ private:
     double was_;
 };
 
+//: Which of a MIDI file's parts are imported, each ticked or unticked with
+//: Space. The first row, every part, is ticked to begin with and ticks or
+//: unticks all the others with it.
+class ImportPartsDialog : public wxDialog {
+public:
+    ImportPartsDialog(wxWindow *parent, const wxArrayString &parts);
+    //: the parts ticked, as indices into `parts`
+    std::vector<int> chosen() const;
+
+private:
+    void on_checked(int row);
+    void on_ok(wxCommandEvent &evt);
+    //: whether a part is ticked; if not, says so
+    bool ready();
+    ReportList *list_;
+};
+
 //: Which track a type 0 MIDI file's lyrics are sung on: one of `parts`,
 //: chosen in a box that starts on the first.
 class LyricTrackDialog : public wxDialog {

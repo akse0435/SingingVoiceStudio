@@ -2496,51 +2496,62 @@ void Studio::take_midi(const std::string &path, bool append) {
         say(W(base_name(path) + " has no notes in it"));
         return;
     }
-    // A type 0 file's lyrics could be sung on any of its channels, so which
-    // one sings them is asked, the first chosen to begin with.
-    int lyrics_on = -1;
+    // A type 0 file's lyrics could be sung on any of several channels
     LyricChoice choice;
     try {
         choice = lyric_choice(path);
     } catch (const std::exception &) {
     }
-    if (choice.channels.size() > 1) {
-        wxArrayString labels;
-        std::vector<int> channels;
-        for (const MidiPart &p : parts) {
-            if (std::find(choice.channels.begin(), choice.channels.end(), p.channel) == choice.channels.end()) continue;
-            channels.push_back(p.channel);
-            labels.Add(W(p.name + ", " + std::to_string(p.notes) + " notes"));
-        }
-        LyricTrackDialog ask(this, labels);
-        if (ask.ShowModal() != wxID_OK || ask.chosen() < 0) return;
-        lyrics_on = channels[size_t(ask.chosen())];
-        try {
-            parts = midi_parts(path, lyrics_on);
-        } catch (const std::exception &e) {
-            say(W("cannot read " + base_name(path) + ": " + e.what()));
-            return;
-        }
-    }
-    // what a part is, as the list below says it: its instrument too, unless
-    // it is named after it
-    auto described = [](const MidiPart &p) {
-        std::string what = p.words ? "with words" : p.drums ? "drums" : gm_program_name(p.program);
+    bool ask_lyrics = choice.channels.size() > 1;
+    // what a part is, as the boxes below say it: its instrument too, unless
+    // named after it; not "with words" while which part sings is to be asked
+    auto described = [ask_lyrics](const MidiPart &p) {
+        std::string what = p.words && !ask_lyrics ? "with words" : p.drums ? "drums" : gm_program_name(p.program);
         bool said = p.name.size() >= what.size() &&
                     std::equal(what.begin(), what.end(), p.name.begin(),
                                [](char a, char b) { return std::tolower((unsigned char)a) == std::tolower((unsigned char)b); });
         return p.name + ", " + std::to_string(p.notes) + " notes" + (said ? "" : ", " + what);
     };
     if (parts.size() > 1) {
-        // Every part at once is the first choice, and the default: a file
-        // with several parts in it is usually several parts of one song.
+        // Every part at once is the default: a file with several parts in it
+        // is usually several parts of one song.
         wxArrayString labels;
-        labels.Add("Every part, one track each");
         for (const auto &p : parts) labels.Add(W(described(p)));
-        wxSingleChoiceDialog pick(this, "What should be imported?", "Import MIDI", labels);
+        ImportPartsDialog pick(this, labels);
         if (pick.ShowModal() != wxID_OK) return;
-        int i = pick.GetSelection();
-        if (i > 0) parts = {parts[size_t(i - 1)]};
+        std::vector<MidiPart> kept;
+        for (int i : pick.chosen()) kept.push_back(parts[size_t(i)]);
+        parts = kept;
+    }
+    // Then which of the parts chosen sings the lyrics, the first to begin
+    // with; one sings them unasked, and with none every part is played.
+    int lyrics_on = -1;
+    if (ask_lyrics) {
+        wxArrayString labels;
+        std::vector<int> channels;
+        for (const MidiPart &p : parts) {
+            if (std::find(choice.channels.begin(), choice.channels.end(), p.channel) == choice.channels.end()) continue;
+            channels.push_back(p.channel);
+            labels.Add(W(described(p)));
+        }
+        if (channels.size() > 1) {
+            LyricTrackDialog ask(this, labels);
+            if (ask.ShowModal() != wxID_OK || ask.chosen() < 0) return;
+            lyrics_on = channels[size_t(ask.chosen())];
+        } else if (channels.size() == 1) {
+            lyrics_on = channels[0];
+        }
+        // the same parts, the words now on the one that sings them
+        std::vector<std::string> wanted;
+        for (const MidiPart &p : parts) wanted.push_back(p.name);
+        try {
+            parts.clear();
+            for (const MidiPart &p : midi_parts(path, lyrics_on))
+                if (std::find(wanted.begin(), wanted.end(), p.name) != wanted.end()) parts.push_back(p);
+        } catch (const std::exception &e) {
+            say(W("cannot read " + base_name(path) + ": " + e.what()));
+            return;
+        }
     }
     std::vector<std::string> names, played;
     for (const auto &p : parts) names.push_back(p.name);

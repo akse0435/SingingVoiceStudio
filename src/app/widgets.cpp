@@ -87,6 +87,31 @@ void ReportList::OnKey(std::function<void(wxKeyEvent &)> fn) {
     Bind(wxEVT_KEY_DOWN, [fn](wxKeyEvent &evt) { fn(evt); });
 }
 
+// The list view's own check boxes: Space ticks them, and a screen reader
+// says "checked" and "not checked".
+void ReportList::EnableChecks() {
+    EnableCheckBoxes(true);
+    auto changed = [this](wxListEvent &evt) {
+        evt.Skip();
+        if (!setting_ && checked_) checked_(int(evt.GetIndex()));
+    };
+    Bind(wxEVT_LIST_ITEM_CHECKED, changed);
+    Bind(wxEVT_LIST_ITEM_UNCHECKED, changed);
+}
+
+bool ReportList::IsChecked(int index) const {
+    return index >= 0 && index < GetItemCount() && IsItemChecked(index);
+}
+
+void ReportList::SetChecked(int index, bool on) {
+    if (index < 0 || index >= GetItemCount()) return;
+    setting_ = true;
+    CheckItem(index, on);
+    setting_ = false;
+}
+
+void ReportList::OnChecked(std::function<void(int)> fn) { checked_ = std::move(fn); }
+
 #else
 
 ReportList::ReportList(wxWindow *parent, long style, const wxSize &size)
@@ -101,6 +126,7 @@ long ReportList::InsertColumn(long col, const wxString &heading, int, int width)
 
 long ReportList::InsertItem(long index, const wxString &label) {
     wxVector<wxVariant> row;
+    if (checks_) row.push_back(wxVariant(false));
     row.push_back(wxVariant(label));
     for (int c = 1; c < cols_; ++c) row.push_back(wxVariant(wxString()));
     if (index >= long(GetItemCount()))
@@ -112,8 +138,45 @@ long ReportList::InsertItem(long index, const wxString &label) {
 
 bool ReportList::SetItem(long index, int column, const wxString &label) {
     if (index < 0 || index >= long(GetItemCount()) || column < 0 || column >= cols_) return false;
-    SetTextValue(label, unsigned(index), unsigned(column));
+    SetTextValue(label, unsigned(index), unsigned(column + (checks_ ? 1 : 0)));
     return true;
+}
+
+// The check boxes are a column of their own, ahead of the others.
+void ReportList::EnableChecks() {
+    if (checks_) return;
+    checks_ = true;
+    AppendToggleColumn("", wxDATAVIEW_CELL_ACTIVATABLE);
+    Bind(wxEVT_DATAVIEW_ITEM_VALUE_CHANGED, [this](wxDataViewEvent &evt) {
+        evt.Skip();
+        int row = ItemToRow(evt.GetItem());
+        if (!setting_ && checked_ && evt.GetColumn() == 0 && row != wxNOT_FOUND) checked_(row);
+    });
+    Bind(wxEVT_CHAR_HOOK, &ReportList::on_space, this);
+}
+
+bool ReportList::IsChecked(int index) const {
+    return checks_ && index >= 0 && index < GetItemCount() && GetToggleValue(unsigned(index), 0);
+}
+
+void ReportList::SetChecked(int index, bool on) {
+    if (!checks_ || index < 0 || index >= GetItemCount()) return;
+    setting_ = true;
+    SetToggleValue(on, unsigned(index), 0);
+    setting_ = false;
+}
+
+void ReportList::OnChecked(std::function<void(int)> fn) { checked_ = std::move(fn); }
+
+// The table does not tick a box from the keyboard, so Space does it here.
+void ReportList::on_space(wxKeyEvent &evt) {
+    int row = FocusedRow();
+    if (evt.GetKeyCode() != WXK_SPACE || evt.HasAnyModifiers() || !owns_focus() || row < 0) {
+        evt.Skip();
+        return;
+    }
+    SetChecked(row, !IsChecked(row));
+    if (checked_) checked_(row);
 }
 
 std::vector<int> ReportList::SelectedRows() const {

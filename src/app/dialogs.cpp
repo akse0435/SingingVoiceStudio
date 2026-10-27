@@ -924,6 +924,75 @@ std::string PantheraDialog::folder() const {
     return U(t);
 }
 
+ImportPartsDialog::ImportPartsDialog(wxWindow *parent, const wxArrayString &parts)
+    : wxDialog(parent, wxID_ANY, "Import MIDI") {
+    wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
+    wxStaticText *about = new wxStaticText(
+        this, wxID_ANY,
+        "What should be imported? Space ticks or unticks a part. Every part, the first, ticks or unticks them "
+        "all, so untick it to choose a few.");
+    about->Wrap(380);
+    outer->Add(about, 0, wxALL, 8);
+    list_ = new ReportList(this, wxLC_REPORT | wxLC_SINGLE_SEL, wxSize(380, 220));
+    list_->EnableChecks();
+    list_->InsertColumn(0, "Part", wxLIST_FORMAT_LEFT, 350);
+    list_->InsertItem(0, "Every part, one track each");
+    for (size_t i = 0; i < parts.size(); ++i) list_->InsertItem(long(i + 1), parts[i]);
+    for (int i = 0; i < list_->GetItemCount(); ++i) list_->SetChecked(i, true);
+    list_->OnChecked([this](int row) { on_checked(row); });
+    // Enter is OK, caught before the list takes it; not the list's
+    // activation, which Windows also gives Space, the tick
+    Bind(wxEVT_CHAR_HOOK, [this](wxKeyEvent &evt) {
+        int code = evt.GetKeyCode();
+        wxWindow *focus = wxWindow::FindFocus();
+        bool in_list = focus && (focus == list_ || list_->IsDescendant(focus));
+        if (!in_list || evt.HasAnyModifiers() || (code != WXK_RETURN && code != WXK_NUMPAD_ENTER)) {
+            evt.Skip();
+            return;
+        }
+        if (ready()) EndModal(wxID_OK);
+    });
+    caption(this, outer, "Parts", list_, 1);
+    outer->Add(buttons(this), 0, wxEXPAND | wxALL, 8);
+    Bind(wxEVT_BUTTON, &ImportPartsDialog::on_ok, this, wxID_OK);
+    SetSizerAndFit(outer);
+    list_->SelectRow(0);
+    list_->FocusRow(0);
+    list_->SetFocus();
+}
+
+void ImportPartsDialog::on_checked(int row) {
+    int n = list_->GetItemCount();
+    if (row == 0) {
+        bool on = list_->IsChecked(0);
+        for (int i = 1; i < n; ++i) list_->SetChecked(i, on);
+        return;
+    }
+    // every part is ticked exactly when all the others are
+    bool all = true;
+    for (int i = 1; i < n; ++i) all = all && list_->IsChecked(i);
+    list_->SetChecked(0, all);
+}
+
+void ImportPartsDialog::on_ok(wxCommandEvent &evt) {
+    if (ready()) evt.Skip();
+}
+
+bool ImportPartsDialog::ready() {
+    if (!chosen().empty()) return true;
+    wxMessageBox("No part is ticked. Tick one with Space, or Every part for them all.", GetTitle(),
+                 wxOK | wxICON_ERROR, this);
+    list_->SetFocus();
+    return false;
+}
+
+std::vector<int> ImportPartsDialog::chosen() const {
+    std::vector<int> out;
+    for (int i = 1; i < list_->GetItemCount(); ++i)
+        if (list_->IsChecked(i)) out.push_back(i - 1);
+    return out;
+}
+
 LyricTrackDialog::LyricTrackDialog(wxWindow *parent, const wxArrayString &parts)
     : wxDialog(parent, wxID_ANY, "Import MIDI") {
     wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);

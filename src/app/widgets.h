@@ -79,12 +79,26 @@ public:
     void OnSelected(std::function<void()> fn);
     void OnKey(std::function<void(wxKeyEvent &)> fn);
 
+    //: A box to tick on every row, ticked and unticked with Space. Called
+    //: before the columns are added.
+    void EnableChecks();
+    bool IsChecked(int index) const;
+    //: ticks a row without OnChecked hearing of it
+    void SetChecked(int index, bool on);
+    //: what the window does when a row is ticked or unticked from the keyboard
+    //: or the mouse
+    void OnChecked(std::function<void(int)> fn);
+
     //: the caption above it, and the name a screen reader reads, together
     wxStaticText *caption_text = nullptr;
     class Named *caption_named = nullptr;
 
-#if !SVS_NATIVE_LISTCTRL
 private:
+    std::function<void(int)> checked_;
+    bool setting_ = false;
+#if !SVS_NATIVE_LISTCTRL
+    void on_space(wxKeyEvent &evt);
+    bool checks_ = false;
     //: Keys the native table claims for itself as well: Option and Command
     //: with the arrows mean "go to the end of the list" to an NSTableView,
     //: and the editor uses those same combinations to transpose a note and
