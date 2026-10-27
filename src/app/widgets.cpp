@@ -261,6 +261,11 @@ wxWindow *labelled(wxWindow *parent, wxSizer *sizer, const wxString &label, wxWi
     return ctrl;
 }
 
+void enable_labelled(wxWindow *ctrl, bool on) {
+    ctrl->Enable(on);
+    if (wxStaticText *text = wxDynamicCast(ctrl->GetPrevSibling(), wxStaticText)) text->Enable(on);
+}
+
 ReportList *caption(wxWindow *parent, wxSizer *sizer, const wxString &label, ReportList *ctrl,
                     int proportion) {
     wxStaticText *text = new wxStaticText(parent, wxID_ANY, label);

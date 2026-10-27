@@ -687,7 +687,10 @@ TrackDialog::TrackDialog(wxWindow *parent, Studio *studio, const Track &track)
     labelled(this, row, "Voice", voice_);
     outer->Add(row, 0, wxEXPAND);
     fill_voices(current);
-    engine_->Bind(wxEVT_CHOICE, [this](wxCommandEvent &) { fill_voices(-1); });
+    engine_->Bind(wxEVT_CHOICE, [this](wxCommandEvent &) {
+        fill_voices(-1);
+        sync_velocity();
+    });
     voice_->Bind(wxEVT_CHOICE, [this](wxCommandEvent &) {
         int i = voice_->GetSelection();
         if (i >= 0 && i < int(ids_.size())) engines_[size_t(std::max(0, engine_->GetSelection()))].last = ids_[size_t(i)];
@@ -697,6 +700,10 @@ TrackDialog::TrackDialog(wxWindow *parent, Studio *studio, const Track &track)
     labelled(this, outer, "Volume", volume_, 0, "per cent");
     pan_ = spin(this, -100, 100, track.pan, 80);
     labelled(this, outer, "Pan", pan_, 0, "-100 far left to 100 far right");
+    velocity_ = spin(this, 1, 127, track.velocity, 80);
+    labelled(this, outer, "Velocity", velocity_, 0,
+             "how hard the notes are sung, by VocalWriter's voices only; its songs used about 114");
+    sync_velocity();
 
     own_consonants_ = new wxCheckBox(this, wxID_ANY, "&Consonant length just for this track");
     own_consonants_->SetValue(bool(track.consonants));
@@ -772,6 +779,12 @@ void TrackDialog::fill_voices(int select) {
     voice_->SetSelection(at);
 }
 
+//: The velocity is VocalWriter's alone, so it is greyed for another engine.
+void TrackDialog::sync_velocity() {
+    const Engine &e = engines_[size_t(std::max(0, engine_->GetSelection()))];
+    enable_labelled(velocity_, !e.voices.empty() && is_vocalwriter_voice(e.voices.front().id));
+}
+
 void TrackDialog::on_own_voice(wxCommandEvent &) {
     for (auto &vc : voice_ctrls_) vc.second->Enable(own_voice_->GetValue());
 }
@@ -790,6 +803,7 @@ void TrackDialog::apply(Track &track) const {
     track.voice_name = saved_voice_name(*track.voice_id, studio_->voice_list());
     track.volume = volume_->GetValue();
     track.pan = pan_->GetValue();
+    track.velocity = velocity_->GetValue();
     // None when the part is following the song, which is not the same as
     // holding a copy of what the song says now: a part that follows keeps
     // following when the song settings change.

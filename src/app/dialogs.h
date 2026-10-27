@@ -176,6 +176,7 @@ private:
 
     Studio *studio_;
     void fill_voices(int select);
+    void sync_velocity();
     struct Engine {
         std::string name;
         bool available;
@@ -187,7 +188,7 @@ private:
     std::vector<int> ids_;      // the voices in the voice box, in order
     wxTextCtrl *name_;
     wxChoice *voice_;
-    wxSpinCtrl *volume_, *pan_, *consonants_, *room_, *wet_;
+    wxSpinCtrl *volume_, *pan_, *velocity_, *consonants_, *room_, *wet_;
     wxCheckBox *own_consonants_, *own_reverb_, *own_voice_;
     std::vector<std::pair<const VoiceControl *, wxSpinCtrl *>> voice_ctrls_;
 };

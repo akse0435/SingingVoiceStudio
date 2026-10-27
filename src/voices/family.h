@@ -34,6 +34,10 @@ enum : int {
     kFamilySpan = 1000,
 };
 
+//: Whether a voice is one of VocalWriter's: the only engine a velocity means
+//: more than loudness to, which every engine has as the part's volume.
+inline bool is_vocalwriter_voice(int id) { return id >= kVocalWriterBase && id < kVocalWriterBase + kFamilySpan; }
+
 struct VoiceEntry {
     int id = 0;
     std::string name;    //: as the voice list shows it, e.g. "DECtalk Betty"

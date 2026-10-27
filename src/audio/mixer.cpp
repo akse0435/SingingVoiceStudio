@@ -276,6 +276,7 @@ RenderRequest make_request(const Song &song, const std::vector<const Track *> &p
         p.voice_id = track_voice(*t, program_map);
         p.volume = t->volume / 100.0;
         p.pan = t->pan / 100.0;
+        p.velocity = t->velocity;
         // a part with no voice controls of its own is sung with the song's
         p.voice = t->voice ? *t->voice : song.voice;
         p.reverb = t->reverb;
@@ -428,7 +429,9 @@ std::vector<float> Mixer::track(const PartRequest &t, double bpm, double consona
             SungNote n;
             n.midi = e->pitch;
             n.beats = e->beats;
-            n.velocity = t.velocity;
+            // only VocalWriter's voices are sung harder or softer; to the
+            // others it would be loudness, which the part's volume is
+            n.velocity = is_vocalwriter_voice(t.voice_id) ? t.velocity : kDefaultVelocity;
             n.phonemes = e->phonemes.empty() ? std::vector<std::string>{kRest} : e->phonemes;
             n.durations_ms = syllable_lengths(n.phonemes, n.beats * 60000.0 / bpm, consonants);
             phrase.notes.push_back(n);

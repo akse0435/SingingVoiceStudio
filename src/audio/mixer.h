@@ -28,7 +28,7 @@ struct PartRequest {
     VoiceStyle voice;
     std::optional<Reverb> reverb;
     std::optional<double> consonants;
-    int velocity = 64;
+    int velocity = kDefaultVelocity;
     struct N {
         int pitch;
         double beats;

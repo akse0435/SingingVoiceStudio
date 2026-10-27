@@ -25,6 +25,8 @@ extern const char *const kMidiWildcard;
 extern const char *const kDefaultPhoneme;
 
 constexpr int kDefaultPitch = 60;
+//: how hard a part's notes are sung when it says nothing, 1-127
+constexpr int kDefaultVelocity = 64;
 constexpr double kDefaultBeats = 0.5;
 //: semitones below which a bend point is not worth keeping
 constexpr double kBendEpsilon = 0.01;
@@ -82,6 +84,9 @@ struct Track {
     std::optional<std::string> voice_name;
     int volume = 100;   // per cent
     int pan = 0;        // -100 .. 100
+    //: how hard the notes are sung: louder for most engines, and for
+    //: VocalWriter's the vowels against the consonants
+    int velocity = kDefaultVelocity;
     bool mute = false;
     bool solo = false;
     std::vector<Note> notes;
@@ -102,7 +107,8 @@ struct Track {
     bool operator==(const Track &o) const {
         return name == o.name && program == o.program && voice_id == o.voice_id &&
                voice_name == o.voice_name &&
-               volume == o.volume && pan == o.pan && mute == o.mute && solo == o.solo &&
+               volume == o.volume && pan == o.pan && velocity == o.velocity &&
+               mute == o.mute && solo == o.solo &&
                notes == o.notes && voice == o.voice && reverb == o.reverb &&
                consonants == o.consonants && audio == o.audio && audio_start == o.audio_start;
     }

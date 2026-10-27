@@ -117,6 +117,9 @@ public:
 //: A caption beside a control, and the same words to a screen reader.
 wxWindow *labelled(wxWindow *parent, wxSizer *sizer, const wxString &label, wxWindow *ctrl,
                    int proportion = 0, const wxString &hint = "");
+//: Grey a captioned control and its caption together: a screen reader reads
+//: the caption of a greyed control as text of the window's own.
+void enable_labelled(wxWindow *ctrl, bool on);
 //: A caption above a control that fills the window, such as a list.
 ReportList *caption(wxWindow *parent, wxSizer *sizer, const wxString &label, ReportList *ctrl,
                     int proportion = 1);

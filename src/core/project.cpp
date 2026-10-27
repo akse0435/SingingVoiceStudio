@@ -367,6 +367,8 @@ json track_doc(const Track &t) {
     if (t.voice_name) d["voice_name"] = *t.voice_name;
     d["volume"] = t.volume;
     d["pan"] = t.pan;
+    // only when moved, so an older song is the same file
+    if (t.velocity != kDefaultVelocity) d["velocity"] = t.velocity;
     d["mute"] = t.mute;
     d["solo"] = t.solo;
     json notes = json::array();
@@ -468,6 +470,8 @@ Track read_track(const json &doc, size_t index) {
     t.program = get("program") ? as_int(*get("program"), 0) : 0;
     t.volume = std::max(0, std::min(100, get("volume") ? as_int(*get("volume"), 100) : 100));
     t.pan = std::max(-100, std::min(100, get("pan") ? as_int(*get("pan"), 0) : 0));
+    int velocity = get("velocity") ? as_int(*get("velocity"), kDefaultVelocity) : kDefaultVelocity;
+    t.velocity = std::max(1, std::min(127, velocity));
     t.mute = get("mute") && truthy(*get("mute"));
     t.solo = get("solo") && truthy(*get("solo"));
     if (const json *n = get("notes")) t.notes = read_notes(*n);
