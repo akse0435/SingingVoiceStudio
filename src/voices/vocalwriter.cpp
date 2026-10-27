@@ -271,6 +271,9 @@ private:
     //: then only the controls moved off their defaults.
     void voice_controls(vw_editor *e, const Phrase &phrase) {
         vw_ed_defaults(e, 1);
+        // The defaults clear the voice's own chorus (Webster's, the only one
+        // in the bank), so the voice is chosen again, as VocalWriter does.
+        vw_ed_voice(e, voice_id_);
         vw_ed_volume(e, 127);
         if (phrase.level != 1.0) vw_ed_level(e, float(phrase.level));
         size_t count;
