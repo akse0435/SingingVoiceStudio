@@ -50,7 +50,7 @@ private:
 class AddWordDialog : public wxDialog, Alive {
 public:
     AddWordDialog(wxWindow *parent, Studio *studio, int pitch, double beats);
-    //: Add word to existing notes: the word goes on `existing`, the notes
+    //: Add word to existing note(s): the word goes on `existing`, the notes
     //: that sound from the cursor on, each keeping all but what it sings.
     //: `text`: Add text, words divided by spaces put on them one after another.
     AddWordDialog(wxWindow *parent, Studio *studio, std::vector<Note> existing, bool text = false);

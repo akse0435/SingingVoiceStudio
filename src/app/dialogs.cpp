@@ -149,7 +149,7 @@ AddWordDialog::AddWordDialog(wxWindow *parent, Studio *studio, int pitch, double
 }
 
 AddWordDialog::AddWordDialog(wxWindow *parent, Studio *studio, std::vector<Note> existing, bool text)
-    : wxDialog(parent, wxID_ANY, text ? "Add text" : "Add word to existing notes"), studio_(studio),
+    : wxDialog(parent, wxID_ANY, text ? "Add text" : "Add word to existing note(s)"), studio_(studio),
       pitch_(kDefaultPitch), existing_(std::move(existing)), text_(text) {
     build(kDefaultBeats);
 }

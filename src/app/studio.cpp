@@ -317,7 +317,7 @@ void Studio::build_menu() {
 
     wxMenu *note = new wxMenu();
     note->Append(ID_ADD_WORD, K("Add &word...\tCtrl+W"), "Look a word up and spread it over one note or several");
-    note->Append(ID_ADD_WORD_EXISTING, K("Add word to ex&isting notes...\tCtrl+Shift+W"),
+    note->Append(ID_ADD_WORD_EXISTING, K("Add word to ex&isting note(s)...\tCtrl+Shift+W"),
                  "Look a word up and put it on the notes already there, from the selected one on");
     note->Append(ID_ADD_TEXT, K("Add te&xt...\tCtrl+Shift+X"),
                  "Look a text up word by word and put it on the notes already there, from the selected one on");
@@ -1693,7 +1693,7 @@ void Studio::on_add_word_existing(wxCommandEvent &) {
         say("there is no note from the cursor on to put a word on");
         return;
     }
-    undoable("add word to existing notes", [&] {
+    undoable("add word to existing note(s)", [&] {
         AddWordDialog dlg(this, this, existing);
         if (dlg.ShowModal() != wxID_OK) return;
         std::vector<Note> put = dlg.result();
