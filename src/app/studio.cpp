@@ -1378,11 +1378,12 @@ void Studio::preview(const std::vector<Note> &rows, std::function<void()> done) 
 }
 
 void Studio::lookup(const std::vector<std::string> &words,
-                    std::function<void(std::map<std::string, std::vector<std::string>>)> done) {
+                    std::function<void(std::map<std::string, std::vector<std::string>>)> done,
+                    bool marked) {
     worker_->ask<std::map<std::string, std::vector<std::string>>>(
-        [words] {
+        [words, marked] {
             std::map<std::string, std::vector<std::string>> out;
-            for (const std::string &w : words) out[w] = Lexicon::get().phonemes(w);
+            for (const std::string &w : words) out[w] = Lexicon::get().phonemes(w, marked);
             return out;
         },
         done);
@@ -1905,9 +1906,12 @@ void Studio::on_import(wxCommandEvent &) {
         std::sort(words.begin(), words.end());
         say(W("looking up " + plural(words.size(), "word")));
         std::vector<ImportedPart> parts_copy = got.parts;
-        lookup(words, [this, parts_copy, pending](std::map<std::string, std::vector<std::string>> found) {
-            imported_words(parts_copy, found, pending);
-        });
+        lookup(
+            words,
+            [this, parts_copy, pending](std::map<std::string, std::vector<std::string>> found) {
+                imported_words(parts_copy, found, pending);
+            },
+            true);
     }
 }
 

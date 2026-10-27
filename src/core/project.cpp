@@ -707,26 +707,95 @@ Bend curve_over(const std::vector<std::pair<long, double>> &curve, long start, l
     return steps;
 }
 
+std::string letters_of(const std::string &text) {
+    std::string out;
+    for (char c : text)
+        if (std::isalpha((unsigned char)c) || c == '\'') out.push_back(c);
+    return out;
+}
+
+//: Whether a syllable only holds on to the vowel sung before it, as karaoke
+//: files write a melisma ("Go-", "o-", "o"): no letters, or the last vowel
+//: letter again.
+bool holds_vowel(const std::string &before, const std::string &text) {
+    if (before.empty()) return false;
+    std::string t = letters_of(text);
+    if (t.empty()) return true;
+    char last = char(std::tolower((unsigned char)before.back()));
+    if (!std::strchr("aeiouy", last)) return false;
+    for (char c : t)
+        if (std::tolower((unsigned char)c) != last) return false;
+    return true;
+}
+
+//: The piece a word only repeats ("yo-", "yo"), or nothing. The dictionary
+//: guesses at such a word ("yoyo" as "y OY . OW") and knows the piece.
+std::string repeated(const std::vector<std::string> &pieces) {
+    if (pieces.size() < 2 || pieces[0].empty()) return "";
+    for (const std::string &p : pieces)
+        if (p.size() != pieces[0].size() ||
+            !std::equal(p.begin(), p.end(), pieces[0].begin(), [](char a, char b) {
+                return std::tolower((unsigned char)a) == std::tolower((unsigned char)b);
+            }))
+            return "";
+    return pieces[0];
+}
+
 //: Words still needing a pronunciation, lyrics broken across notes with
-//: hyphens ("count-", "ry") put back together.
+//: hyphens ("count-", "ry") put back together, a held vowel left out, a
+//: repeated piece looked up once. A note with no lyric that holds on to the
+//: word before it (see hold_vowels) goes with that word.
 std::vector<std::pair<std::string, std::vector<int>>> pending_words(const std::vector<Note> &rows) {
     std::vector<std::pair<std::string, std::vector<int>>> pending;
     std::vector<int> run;
     std::string letters;
+    std::vector<std::string> pieces;
     for (size_t i = 0; i < rows.size(); ++i) {
         const Note &r = rows[i];
-        if (!r.phonemes.empty() || r.word.empty()) continue;
+        if (!r.phonemes.empty()) continue;
+        if (r.word.empty()) {
+            if (!run.empty()) run.push_back(int(i));
+            else if (!pending.empty() && pending.back().second.back() + 1 == int(i))
+                pending.back().second.push_back(int(i));
+            continue;
+        }
         run.push_back(int(i));
-        letters += r.word;
+        if (!holds_vowel(letters, r.word)) {
+            letters += letters_of(r.word);
+            pieces.push_back(letters_of(r.word));
+        }
         if (r.word.back() == '-') continue;
-        std::string clean;
-        for (char c : letters)
-            if (std::isalpha((unsigned char)c) || c == '\'') clean.push_back(c);
-        if (!clean.empty()) pending.push_back({clean, run});
+        std::string once = repeated(pieces);
+        if (!letters.empty()) pending.push_back({once.empty() ? letters : once, run});
         run.clear();
         letters.clear();
+        pieces.clear();
     }
     return pending;
+}
+
+//: A note with no lyric right after a sung one holds on to its vowel, as a
+//: karaoke file leaves the rest of a melisma ("name" on three notes sings
+//: "n EY", "EY", "EY m"), and so does one after a rest inside a word that
+//: goes on ("g-", rest, two notes, "o."); any other, or one after nothing
+//: to look up, sings kDefaultPhoneme.
+void hold_vowels(std::vector<Note> &notes) {
+    bool open = false;
+    for (size_t i = 0; i < notes.size(); ++i) {
+        Note &n = notes[i];
+        if (!n.word.empty()) {
+            open = n.phonemes.empty() && n.word.back() == '-';
+        } else if (!n.phonemes.empty()) {
+            open = open && n.is_rest();
+        } else if (!open && (i == 0 || !notes[i - 1].phonemes.empty())) {
+            n.phonemes = {kDefaultPhoneme};
+        }
+    }
+    std::vector<bool> held(notes.size());
+    for (const auto &pw : pending_words(notes))
+        for (int i : pw.second) held[size_t(i)] = true;
+    for (size_t i = 0; i < notes.size(); ++i)
+        if (notes[i].phonemes.empty() && notes[i].word.empty() && !held[i]) notes[i].phonemes = {kDefaultPhoneme};
 }
 
 ImportedPart from_midi(const MidiFile &midi, const MidiTrack &track, const std::string &name,
@@ -768,8 +837,6 @@ ImportedPart from_midi(const MidiFile &midi, const MidiTrack &track, const std::
         std::vector<std::string> ph;
         if (!n.phonemes.empty()) {
             for (const std::string &x : split_phonemes(n.phonemes)) ph.push_back(palette_alias(x));
-        } else if (word.empty()) {
-            ph = {kDefaultPhoneme};
         }
         long length = std::max(1L, end - at);
         part.notes.push_back(Note(ph, n.pitch, length * step, word,
@@ -777,6 +844,7 @@ ImportedPart from_midi(const MidiFile &midi, const MidiTrack &track, const std::
                                   curve_over(wheel, n.tick, n.tick + span, kModEpsilon)));
         at += length;
     }
+    hold_vowels(part.notes);
     part.pending = pending_words(part.notes);
     return part;
 }
@@ -808,6 +876,159 @@ Imported import_midi(const std::string &path, const std::vector<std::string> &na
     return out;
 }
 
+namespace {
+
+//: One syllable sung over `share` notes, split at its vowel: each note after
+//: the first starts on it, as "s t AR", "AR t". With no vowel the notes after
+//: the first rest.
+std::vector<std::vector<std::string>> split_held(const std::vector<std::string> &syl, int share) {
+    auto vowel = std::find_if(syl.begin(), syl.end(), [](const std::string &x) { return is_nucleus(x); });
+    std::vector<std::vector<std::string>> out;
+    if (share <= 1 || vowel == syl.end()) {
+        out.push_back(syl);
+        out.resize(size_t(std::max(share, 1)));
+        return out;
+    }
+    out.emplace_back(syl.begin(), vowel + 1);
+    for (int j = 2; j < share; ++j) out.push_back({*vowel});
+    out.emplace_back(vowel, syl.end());
+    return out;
+}
+
+//: How many syllables a piece of lyric looks to hold: its runs of vowel
+//: letters, a silent e at the end of a word not counted.
+int vowel_groups(const std::string &text, bool word_end) {
+    std::string t = letters_of(text);
+    int n = 0;
+    bool in = false;
+    for (char c : t) {
+        bool v = std::strchr("aeiouyAEIOUY", c) != nullptr;
+        if (v && !in) ++n;
+        in = v;
+    }
+    size_t z = t.size();
+    if (word_end && n > 1 && z >= 2 && std::tolower((unsigned char)t[z - 1]) == 'e' &&
+        !std::strchr("aeiouyAEIOUY", t[z - 2]))
+        --n;
+    return std::max(n, 1);
+}
+
+//: Whether a piece of lyric goes on with the syllable before it rather than
+//: starting one: it opens on a vowel letter, or has none ("in-", "ste-", "ad").
+bool goes_on(const std::string &text) {
+    std::string t = letters_of(text);
+    if (t.empty() || std::strchr("aeiouAEIOU", t[0])) return true;
+    for (char c : t)
+        if (std::strchr("aeiouyAEIOUY", c)) return false;
+    return true;
+}
+
+//: The phonemes of one word on its notes, from the lyric each note carries.
+//: A note that holds the vowel before it sings on that syllable; the others
+//: share the syllables out as their lyrics read ("Jitter-", "bug" is two and
+//: one; "in-", "ste-", "ad" is one and two) where that adds up, and evenly
+//: where it does not, a syllable sung on more of them than one split at its
+//: vowel.
+std::vector<std::vector<std::string>> on_notes(std::vector<std::string> phonemes,
+                                               const std::vector<std::string> &texts) {
+    std::vector<size_t> sung;              // the notes that start a syllable
+    std::vector<int> held;                 // how many notes hold each one's vowel
+    std::string letters;
+    std::vector<std::string> pieces;
+    for (size_t k = 0; k < texts.size(); ++k) {
+        if (!sung.empty() && holds_vowel(letters, texts[k])) {
+            ++held.back();
+            continue;
+        }
+        letters += letters_of(texts[k]);
+        pieces.push_back(letters_of(texts[k]));
+        sung.push_back(k);
+        held.push_back(0);
+    }
+    // a word that only repeats a piece was looked up as the piece
+    if (!repeated(pieces).empty()) {
+        std::vector<std::string> once = phonemes;
+        for (size_t k = 1; k < pieces.size(); ++k) {
+            phonemes.push_back(kSyllableBreak);
+            phonemes.insert(phonemes.end(), once.begin(), once.end());
+        }
+    }
+    // the dictionary's syllables where it marks them, else as they divide
+    std::vector<std::vector<std::string>> syls(1);
+    for (const std::string &p : phonemes) {
+        if (p != kSyllableBreak) syls.back().push_back(p);
+        else if (!syls.back().empty()) syls.emplace_back();
+    }
+    if (syls.back().empty()) syls.pop_back();
+    // The dictionary keeps a consonant between vowels with the syllable
+    // before it ("b EY b", "IY"); it is sung opening the next one instead.
+    for (size_t k = 0; k + 1 < syls.size(); ++k) {
+        auto &a = syls[k], &b = syls[k + 1];
+        auto nucleus = [](const std::string &x) { return is_nucleus(x); };
+        auto last = std::find_if(a.rbegin(), a.rend(), nucleus);
+        auto first = std::find_if(b.begin(), b.end(), nucleus);
+        if (last == a.rend() || first == b.end()) continue;
+        if (b.front() == "NG") {        // no syllable opens on it ("h AE NG", "IH NG")
+            a.push_back("NG");
+            b.erase(b.begin());
+            continue;
+        }
+        size_t from = a.size(), stop = size_t(a.rend() - last);
+        while (from > stop) {
+            std::vector<std::string> onset(a.begin() + long(from - 1), a.end());
+            onset.insert(onset.end(), b.begin(), first);
+            if (onset.front() == "NG" || !legal_onset(onset)) break;
+            --from;
+        }
+        b.insert(b.begin(), a.begin() + long(from), a.end());
+        a.resize(from);
+    }
+    if (syls.size() < 2) syls = syllabify(syls.empty() ? std::vector<std::string>{} : syls[0]);
+    if (syls.empty()) return std::vector<std::vector<std::string>>(texts.size());
+    int n = int(syls.size()), m = int(sung.size());
+    std::vector<std::vector<std::string>> groups;
+    if (m > n) {
+        std::vector<int> starts;
+        for (int k = 0; k < m; ++k)
+            if (k == 0 || !goes_on(texts[sung[size_t(k)]])) starts.push_back(k);
+        for (int k = 0; k < n; ++k) {
+            int share = int(starts.size()) == n ? (k + 1 < n ? starts[size_t(k + 1)] : m) - starts[size_t(k)]
+                                                : m / n + (k < m % n ? 1 : 0);
+            auto part = split_held(syls[size_t(k)], share);
+            groups.insert(groups.end(), part.begin(), part.end());
+        }
+    } else {
+        std::vector<int> want;
+        int sum = 0;
+        for (size_t k = 0; k < sung.size(); ++k) {
+            want.push_back(vowel_groups(texts[sung[k]], k + 1 == sung.size()));
+            sum += want.back();
+        }
+        // otherwise evenly, as regroup does
+        if (sum != n)
+            for (int k = 0, at = 0; k < m; ++k) {
+                want[size_t(k)] = (n - at) / (m - k);
+                at += want[size_t(k)];
+            }
+        int at = 0;
+        for (int w : want) {
+            std::vector<std::string> g;
+            for (int j = at; j < at + w; ++j) g.insert(g.end(), syls[size_t(j)].begin(), syls[size_t(j)].end());
+            groups.push_back(g);
+            at += w;
+        }
+    }
+    groups.resize(size_t(m));
+    std::vector<std::vector<std::string>> out;
+    for (int k = 0; k < m; ++k) {
+        auto part = split_held(groups[size_t(k)], 1 + held[size_t(k)]);
+        out.insert(out.end(), part.begin(), part.end());
+    }
+    return out;
+}
+
+}  // namespace
+
 int pronounce(std::vector<ImportedPart> &parts,
               const std::map<std::string, std::vector<std::string>> &found) {
     int got = 0;
@@ -821,7 +1042,9 @@ int pronounce(std::vector<ImportedPart> &parts,
                         part.notes[i].phonemes = {kDefaultPhoneme};
                 continue;
             }
-            auto groups = regroup(it->second, int(indices.size()));
+            std::vector<std::string> texts;
+            for (int i : indices) texts.push_back(i >= 0 && i < int(part.notes.size()) ? part.notes[i].word : "");
+            auto groups = on_notes(it->second, texts);
             while (groups.size() < indices.size()) groups.push_back({});
             for (size_t k = 0; k < indices.size(); ++k) {
                 int i = indices[k];

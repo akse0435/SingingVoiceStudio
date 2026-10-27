@@ -3,9 +3,12 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>
 #include <deque>
 #include <map>
+#include <set>
 #include <stdexcept>
+#include <tuple>
 
 #include "core/paths.h"
 
@@ -18,12 +21,18 @@ const int kMetaText = 0x01, kMetaTrackName = 0x03, kMetaLyric = 0x05, kMetaTempo
 
 // MIDI text is bytes in whatever the writer liked; VocalWriter wrote Mac
 // Roman. Plain ASCII is what matters for words, so anything above 127 is
-// read as Latin-1, which keeps it one character to a byte.
+// read as Latin-1, which keeps it one character to a byte. Control bytes
+// are dropped but for the line breaks: Yamaha's files end every syllable
+// with a zero ("And \0"), which would hide the space that ends the word.
 std::string text_of(const unsigned char *p, size_t n) {
     std::string out;
     for (size_t i = 0; i < n; ++i) {
         unsigned char c = p[i];
-        if (c < 0x80) {
+        if (c == '\t') {
+            out.push_back(' ');
+        } else if (c < 0x20 && c != '\r' && c != '\n') {
+            continue;
+        } else if (c < 0x80) {
             out.push_back(char(c));
         } else {
             out.push_back(char(0xC0 | (c >> 6)));
@@ -37,14 +46,27 @@ uint32_t be32(const unsigned char *p) {
     return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3];
 }
 
-MidiTrack read_track(const unsigned char *b, size_t n) {
-    MidiTrack trk;
+const int kDrumChannel = 9;          // MIDI's channel 10
+
+//: One track as it is in the file, its channels still apart.
+struct RawTrack {
+    std::string name;
+    MidiTrack channel[16];              // each channel's notes and controls
+    std::vector<std::pair<long, std::string>> texts, lyrics;
+    std::vector<std::pair<long, long>> tempos;
+    std::vector<MidiTrack::TimeSig> time_sigs;
+};
+
+RawTrack read_track(const unsigned char *b, size_t n) {
+    RawTrack trk;
     size_t i = 0;
     long tick = 0;
     int running = -1;
-    int rpn_msb = 127, rpn_lsb = 127;
-    std::map<int, std::deque<std::pair<long, int>>> sounding;
-    std::map<long, std::string> text_at, lyric_at;
+    int rpn_msb[16], rpn_lsb[16];
+    std::fill(rpn_msb, rpn_msb + 16, 127);
+    std::fill(rpn_lsb, rpn_lsb + 16, 127);
+    // notes sounding, by channel and pitch
+    std::map<std::pair<int, int>, std::deque<std::pair<long, int>>> sounding;
     auto need = [&](size_t k) {
         if (i + k > n) throw std::runtime_error("the track ends in the middle of an event");
     };
@@ -78,9 +100,9 @@ MidiTrack read_track(const unsigned char *b, size_t n) {
             if (type == kMetaTrackName) {
                 trk.name = text_of(d, size_t(len));
             } else if (type == kMetaText) {
-                text_at[tick] = text_of(d, size_t(len));
+                trk.texts.push_back({tick, text_of(d, size_t(len))});
             } else if (type == kMetaLyric) {
-                lyric_at[tick] = text_of(d, size_t(len));
+                trk.lyrics.push_back({tick, text_of(d, size_t(len))});
             } else if (type == kMetaTempo && len == 3) {
                 trk.tempos.push_back({tick, long(d[0]) << 16 | long(d[1]) << 8 | d[2]});
             } else if (type == kMetaTimeSig && len >= 2) {
@@ -91,19 +113,23 @@ MidiTrack read_track(const unsigned char *b, size_t n) {
             need(size_t(len));
             i += size_t(len);
         } else {
-            int high = status & 0xF0;
+            int high = status & 0xF0, ch = status & 0x0F;
+            MidiTrack &c = trk.channel[ch];
             if (high == 0xC0 || high == 0xD0) {
                 need(1);
-                if (high == 0xC0) trk.programs.push_back({tick, b[i]});
+                if (high == 0xC0) c.programs.push_back({tick, b[i]});
                 i += 1;
                 continue;
             }
             need(2);
             int a = b[i], v = b[i + 1];
             if (high == 0x90 && v > 0) {
-                sounding[a].push_back({tick, v});
+                // the same key struck twice at once is one note
+                auto &q = sounding[{ch, a}];
+                if (!q.empty() && q.back().first == tick) q.back().second = std::max(q.back().second, v);
+                else q.push_back({tick, v});
             } else if (high == 0x80 || (high == 0x90 && v == 0)) {
-                auto &q = sounding[a];
+                auto &q = sounding[{ch, a}];
                 if (!q.empty()) {
                     auto [start, vel] = q.front();
                     q.pop_front();
@@ -112,41 +138,228 @@ MidiTrack read_track(const unsigned char *b, size_t n) {
                     note.pitch = a;
                     note.velocity = vel;
                     note.duration = tick - start;
-                    trk.notes.push_back(note);
+                    c.notes.push_back(note);
                 }
             } else if (high == 0xE0) {
-                trk.bends.push_back({tick, ((v << 7) | a) - 8192});
+                c.bends.push_back({tick, ((v << 7) | a) - 8192});
             } else if (high == 0xB0) {
                 // RPN 0 is the pitch-bend sensitivity, which VocalWriter's own
                 // exports change mid-song
                 if (a == 1)
-                    trk.mods.push_back({tick, v});
-                else if (a == 6 && rpn_msb == 0 && rpn_lsb == 0)
-                    trk.bend_range.push_back({tick, v});
+                    c.mods.push_back({tick, v});
+                else if (a == 6 && rpn_msb[ch] == 0 && rpn_lsb[ch] == 0)
+                    c.bend_range.push_back({tick, v});
                 else if (a == 101)
-                    rpn_msb = v;
+                    rpn_msb[ch] = v;
                 else if (a == 100)
-                    rpn_lsb = v;
+                    rpn_lsb[ch] = v;
             }
             i += 2;
         }
     }
-    std::stable_sort(trk.notes.begin(), trk.notes.end(), [](const MidiNote &x, const MidiNote &y) {
-        return x.tick != y.tick ? x.tick < y.tick : x.pitch < y.pitch;
-    });
-    for (MidiNote &note : trk.notes) {
-        auto t = text_at.find(note.tick);
-        auto l = lyric_at.find(note.tick);
-        std::string text = t != text_at.end() ? t->second : "";
-        std::string lyric = l != lyric_at.end() ? l->second : "";
-        if (!text.empty()) {
-            note.text = text;          // VocalWriter: the word, and its phonemes
-            note.phonemes = lyric;
-        } else {
-            note.text = lyric;         // everyone else: the word as the lyric
+    for (MidiTrack &c : trk.channel)
+        std::stable_sort(c.notes.begin(), c.notes.end(), [](const MidiNote &x, const MidiNote &y) {
+            return x.tick != y.tick ? x.tick < y.tick : x.pitch < y.pitch;
+        });
+    return trk;
+}
+
+bool has_letters(const std::string &s) {
+    for (unsigned char c : s)
+        if (std::isalnum(c) || c >= 0x80) return true;
+    return false;
+}
+
+//: The sung syllables of a track's lyrics, cleaned of a karaoke file's line
+//: and page marks and its "----" placeholders. Where the lyrics mark words by
+//: spaces, as karaoke files do, a syllable that runs on into the next one
+//: without a space is joined to it with "-", VocalWriter's way, so that the
+//: dictionary is asked for "into" rather than for "in" and "to".
+std::vector<std::pair<long, std::string>> syllables(std::vector<std::pair<long, std::string>> raw) {
+    // two events at one moment are one syllable
+    std::vector<std::pair<long, std::string>> merged;
+    for (auto &e : raw) {
+        if (!merged.empty() && merged.back().first == e.first) merged.back().second += e.second;
+        else merged.push_back(e);
+    }
+    struct Syl {
+        long tick;
+        std::string text;
+        bool lead, trail, brk_before;
+    };
+    std::vector<Syl> out;
+    bool pending = false;               // a line break or a gap since the last syllable
+    int spaced = 0;
+    for (auto &e : merged) {
+        std::string t = e.second;
+        std::vector<size_t> marks;
+        for (size_t k = 0; k < t.size(); ++k)
+            if (t[k] == '\r' || t[k] == '\n') marks.push_back(k);
+        size_t first = t.find_first_not_of(' ');
+        if (first != std::string::npos && (t[first] == '/' || t[first] == '\\'))
+            marks.push_back(first);     // a karaoke line or page break
+        for (size_t k : marks) t[k] = ' ';
+        // a placeholder at the same moment as a syllable ("I " and "- ") is
+        // no part of it, though the space before it still ends the word
+        for (size_t p = 0; p < t.size();) {
+            size_t q = std::min(t.find(' ', p), t.size());
+            if (!has_letters(t.substr(p, q - p))) std::fill(t.begin() + long(p), t.begin() + long(q), ' ');
+            p = q + 1;
+        }
+        if (!has_letters(t)) {          // a mark, or a placeholder for no words
+            pending = true;
+            continue;
+        }
+        size_t a = t.find_first_not_of(' '), z = t.find_last_not_of(' ');
+        bool before = false, after = false;
+        for (size_t k : marks) (k < a ? before : after) = true;
+        bool lead = a > 0, trail = z + 1 < t.size();
+        if (lead || trail) ++spaced;
+        out.push_back({e.first, t.substr(a, z - a + 1), lead, trail, pending || before});
+        pending = after;
+    }
+    // spaces mark the words only where the lyrics use them at all
+    bool by_spaces = !out.empty() && spaced * 10 >= int(out.size());
+    std::vector<std::pair<long, std::string>> words;
+    for (size_t k = 0; k < out.size(); ++k) {
+        std::string w = out[k].text;
+        bool runs_on = k + 1 < out.size() && !out[k].trail && !out[k + 1].lead && !out[k + 1].brk_before;
+        if (by_spaces && runs_on && w.back() != '-') w += "-";
+        words.push_back({out[k].tick, w});
+    }
+    return words;
+}
+
+//: Each syllable's note, as an index into `notes` (sorted by time), or -1.
+//: A syllable takes the nearest note not yet taken, keeping their order: one
+//: up to a 32nd note before it (never as much as half way to the next note),
+//: or one up to an 8th note after it: a pick-up's lyric sits ahead of its
+//: note, and a karaoke file's lyrics run ahead of a sung line by as much as a
+//: 16th. `exact` counts those that sit right on their note.
+std::vector<int> pair_up(const std::vector<MidiNote> &notes,
+                         const std::vector<std::pair<long, std::string>> &syls, double div, int *exact) {
+    // a chord sings on its top note, the last one at its moment
+    std::vector<long> ticks;
+    std::vector<int> index;
+    for (size_t k = 0; k < notes.size(); ++k) {
+        if (!ticks.empty() && ticks.back() == notes[k].tick) index.back() = int(k);
+        else {
+            ticks.push_back(notes[k].tick);
+            index.push_back(int(k));
         }
     }
-    return trk;
+    const double before = div / 8, after = div / 2;
+    std::vector<int> out(syls.size(), -1);
+    *exact = 0;
+    size_t from = 0;
+    for (size_t s = 0; s < syls.size(); ++s) {
+        long t = syls[s].first;
+        size_t nx = size_t(std::upper_bound(ticks.begin() + long(from), ticks.end(), t) - ticks.begin());
+        long best = -1;
+        double dist = 0;
+        if (nx > from) {
+            size_t pv = nx - 1;
+            double gap = pv + 1 < ticks.size() ? double(ticks[pv + 1] - ticks[pv]) / 2 : before;
+            if (t - ticks[pv] <= std::min(before, gap)) {
+                best = long(pv);
+                dist = double(t - ticks[pv]);
+            }
+        }
+        if (nx < ticks.size() && ticks[nx] - t <= after && (best < 0 || ticks[nx] - t < dist))
+            best = long(nx);
+        if (best < 0) continue;
+        // a word with no note of its own ("A" before "jit-ter-bug") leaves
+        // the note to the syllable that sits closer to it, if that one could
+        // take it; one sung late takes the note it came after, up to an 8th
+        if (s + 1 < syls.size()) {
+            long d = ticks[size_t(best)] - syls[s + 1].first;
+            if (std::labs(d) < std::labs(t - ticks[size_t(best)]) && (d >= 0 ? d <= after : -d <= before)) {
+                if (nx == 0 || nx - 1 < from || size_t(best) == nx - 1 || t - ticks[nx - 1] > after) continue;
+                best = long(nx - 1);
+            }
+        }
+        out[s] = index[size_t(best)];
+        if (ticks[size_t(best)] == t) ++*exact;
+        from = size_t(best) + 1;
+    }
+    return out;
+}
+
+//: The words onto the notes. VocalWriter's own exports write a note's word
+//: as a Text event and its phonemes as a Lyric event, both on the note;
+//: everyone else writes the sung syllable as a Lyric event, near enough.
+void put_words(std::vector<MidiNote> &notes, const RawTrack &trk, double div) {
+    std::map<long, std::string> text_at, lyric_at;
+    for (const auto &e : trk.texts) text_at[e.first] = e.second;
+    for (const auto &e : trk.lyrics) lyric_at[e.first] += e.second;
+    std::set<long> spoken;
+    for (MidiNote &note : notes) {
+        auto t = text_at.find(note.tick);
+        if (t == text_at.end() || t->second.empty()) continue;
+        auto l = lyric_at.find(note.tick);
+        note.text = t->second;
+        note.phonemes = l != lyric_at.end() ? l->second : "";
+        spoken.insert(note.tick);
+    }
+    std::vector<std::pair<long, std::string>> rest;
+    for (const auto &e : trk.lyrics)
+        if (!spoken.count(e.first)) rest.push_back(e);
+    auto syls = syllables(rest);
+    int exact;
+    std::vector<int> at = pair_up(notes, syls, div, &exact);
+    // A piece left without a note is part of the syllable it runs on into,
+    // or of the one that runs on into it: a karaoke file lights up "ne" and
+    // then "xt " on one note, or "ha" on its note and "nd " a little later.
+    for (size_t s = 0; s < syls.size(); ++s) {
+        if (at[s] >= 0) continue;
+        std::string &w = syls[s].second;
+        if (s + 1 < syls.size() && w.back() == '-') {
+            syls[s + 1].second = w.substr(0, w.size() - 1) + syls[s + 1].second;
+        } else if (s > 0 && at[s - 1] >= 0 && syls[s - 1].second.back() == '-') {
+            std::string &before = syls[s - 1].second;
+            before = before.substr(0, before.size() - 1) + w;
+        }
+    }
+    for (size_t s = 0; s < syls.size(); ++s)
+        if (at[s] >= 0 && notes[size_t(at[s])].text.empty()) notes[size_t(at[s])].text = syls[s].second;
+}
+
+//: Which channel a track's lyrics are sung on: the one most syllables fall
+//: on, never the drums; within a tenth of that, the one with most of its
+//: notes sung, then channel 1 or 4, then most syllables right on their
+//: notes, then the lowest.
+int lyric_channel(const RawTrack &trk, const std::vector<int> &used, double div) {
+    auto syls = syllables(trk.lyrics);
+    struct Score {
+        int ch, hits, exact;
+        double share;
+    };
+    std::vector<Score> scores;
+    for (int ch : used) {
+        if (ch == kDrumChannel && used.size() > 1) continue;
+        int exact;
+        const std::vector<MidiNote> &notes = trk.channel[ch].notes;
+        std::vector<int> at = pair_up(notes, syls, div, &exact);
+        int hits = int(std::count_if(at.begin(), at.end(), [](int k) { return k >= 0; }));
+        std::set<long> onsets;
+        for (const MidiNote &n : notes) onsets.insert(n.tick);
+        scores.push_back({ch, hits, exact, onsets.empty() ? 0.0 : double(hits) / onsets.size()});
+    }
+    if (scores.empty()) return used.front();
+    int best = 0;
+    for (const Score &s : scores) best = std::max(best, s.hits);
+    auto near = [&](const Score &s) { return s.hits * 10 >= best * 9; };
+    double share = 0;
+    for (const Score &s : scores)
+        if (near(s)) share = std::max(share, s.share);
+    auto rank = [&](const Score &s) {
+        bool in = near(s) && s.share * 10 >= share * 9;
+        return std::make_tuple(near(s), in, in && (s.ch == 0 || s.ch == 3), in ? s.exact : 0, s.hits, -s.ch);
+    };
+    const Score *pick = &scores[0];
+    for (const Score &s : scores)
+        if (rank(s) > rank(*pick)) pick = &s;
+    return pick->ch;
 }
 
 }  // namespace
@@ -161,14 +374,43 @@ MidiFile read_midi(const std::string &path) {
     mf.format = b[8] << 8 | b[9];
     int ntracks = b[10] << 8 | b[11];
     mf.division = b[12] << 8 | b[13];
+    double div = mf.division ? mf.division : 480;
     size_t pos = 8 + hlen;
     for (int k = 0; k < ntracks; ++k) {
         if (pos + 8 > b.size() || std::string(b.begin() + pos, b.begin() + pos + 4) != "MTrk")
             throw std::runtime_error("a track is missing or damaged");
         uint32_t len = be32(&b[pos + 4]);
         if (pos + 8 + len > b.size()) throw std::runtime_error("a track runs past the end of the file");
-        mf.tracks.push_back(read_track(&b[pos + 8], len));
+        RawTrack trk = read_track(&b[pos + 8], len);
         pos += 8 + len;
+        std::vector<int> used;
+        for (int ch = 0; ch < 16; ++ch)
+            if (!trk.channel[ch].notes.empty()) used.push_back(ch);
+        // A track playing on several channels -- a type 0 file's only track
+        // -- is a part for each, as a type 1 file has them; the tempo and
+        // time signature stay on a track of their own. Unnamed in a type 0
+        // file, where the one name is the song's.
+        MidiTrack meta;
+        meta.name = trk.name;
+        meta.tempos = trk.tempos;
+        meta.time_sigs = trk.time_sigs;
+        if (used.size() <= 1) {
+            MidiTrack t = used.empty() ? MidiTrack() : trk.channel[used[0]];
+            t.name = trk.name;
+            t.tempos = trk.tempos;
+            t.time_sigs = trk.time_sigs;
+            put_words(t.notes, trk, div);
+            mf.tracks.push_back(t);
+            continue;
+        }
+        mf.tracks.push_back(meta);
+        int sung = trk.lyrics.empty() && trk.texts.empty() ? -1 : lyric_channel(trk, used, div);
+        for (int ch : used) {
+            MidiTrack t = trk.channel[ch];
+            t.name = mf.format == 0 ? "" : trk.name;
+            if (ch == sung) put_words(t.notes, trk, div);
+            mf.tracks.push_back(t);
+        }
     }
     return mf;
 }

@@ -109,7 +109,7 @@ Lexicon::Lexicon() {
     }
 }
 
-std::vector<std::string> Lexicon::phonemes(const std::string &word) {
+std::vector<std::string> Lexicon::phonemes(const std::string &word, bool marked) {
     std::string clean;
     for (unsigned char c : word)
         if (std::isalpha(c) || c == '\'') clean.push_back(char(c));
@@ -120,15 +120,37 @@ std::vector<std::string> Lexicon::phonemes(const std::string &word) {
     if (n <= 0) return {};
     const auto &table = svs::phonemes();
     std::vector<std::string> phones;
+    std::vector<int> syllable;
     for (int i = 0; i < n && i < 10; ++i) {
         int count = out[i * 9];
         for (int k = 0; k < count && k < 8; ++k) {
             int code = out[i * 9 + 1 + k];
-            if (code < int(table.size())) phones.push_back(table[size_t(code)].symbol);
+            if (code < int(table.size())) {
+                phones.push_back(table[size_t(code)].symbol);
+                syllable.push_back(i);
+            }
         }
     }
     if (phones.empty()) return {};
-    return allophones(phones);
+    std::vector<std::string> sounds = allophones(phones);
+    if (!marked) return sounds;
+    // An allophone stands for one phoneme or for two run together ("AX r"
+    // is ER); it goes in the syllable of the first.
+    std::vector<std::string> out_marked;
+    size_t i = 0;
+    for (const std::string &s : sounds) {
+        if (i >= phones.size()) break;
+        if (!out_marked.empty() && syllable[i] != syllable[i - 1] && out_marked.back() != kSyllableBreak)
+            out_marked.push_back(kSyllableBreak);
+        out_marked.push_back(s);
+        size_t took = s != phones[i] && s != "LX" ? 2 : 1;
+        // a pair run over a break leaves the break after it
+        if (took == 2 && i + 1 < phones.size() && syllable[i + 1] != syllable[i] &&
+            i + 2 < phones.size())
+            out_marked.push_back(kSyllableBreak);
+        i += took;
+    }
+    return out_marked;
 }
 
 // -- singing -------------------------------------------------------------------

@@ -47,8 +47,9 @@ class Lexicon {
 public:
     static Lexicon &get();
     bool ok() const { return ed_ != nullptr; }
-    //: empty if there is no pronunciation
-    std::vector<std::string> phonemes(const std::string &word);
+    //: empty if there is no pronunciation; `marked` puts kSyllableBreak
+    //: between the dictionary's syllables
+    std::vector<std::string> phonemes(const std::string &word, bool marked = false);
 
 private:
     Lexicon();

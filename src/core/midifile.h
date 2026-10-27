@@ -5,6 +5,10 @@
 // each note's word as a Text event and the phonemes it derived as a Lyric
 // event beside it; everyone else writes the sung word in the Lyric event,
 // which is what that event is for. Both are read.
+//
+// A track that plays on several channels, as a type 0 file's one track does,
+// is read as a track for each channel, and its lyrics go to the channel they
+// are sung on.
 #pragma once
 
 #include <string>

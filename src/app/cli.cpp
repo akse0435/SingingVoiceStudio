@@ -136,7 +136,7 @@ Song open_song(const std::string &path) {
     if (pending) {
         say("looking up " + std::to_string(words.size()) + " word" + s_if(words.size()));
         std::map<std::string, std::vector<std::string>> found;
-        for (const auto &w : words) found[w] = Lexicon::get().phonemes(w);
+        for (const auto &w : words) found[w] = Lexicon::get().phonemes(w, true);
         int done = pronounce(got.parts, found);
         size_t shortfall = pending - size_t(done);
         if (shortfall)

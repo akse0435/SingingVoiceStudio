@@ -62,8 +62,10 @@ public:
     int current_voice() const { return track_voice_of(track()); }
     //: render notes on the current track's voice and play them
     void preview(const std::vector<Note> &notes, std::function<void()> done);
+    //: `marked`: with the dictionary's syllables marked (Lexicon::phonemes)
     void lookup(const std::vector<std::string> &words,
-                std::function<void(std::map<std::string, std::vector<std::string>>)> done);
+                std::function<void(std::map<std::string, std::vector<std::string>>)> done,
+                bool marked = false);
     void play_audio(const Mixed &res, bool quiet = false);
 
 private:

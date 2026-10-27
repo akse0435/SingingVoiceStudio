@@ -21,6 +21,10 @@ struct PhonemeInfo {
     int min_ms;
 };
 
+//: Put between syllables in a looked-up pronunciation, where the dictionary
+//: divides the word (Lexicon::phonemes); never sung.
+inline const char *const kSyllableBreak = ".";
+
 //: Every phoneme, in VocalWriter's internal order (its phoneme codes).
 const std::vector<PhonemeInfo> &phonemes();
 const PhonemeInfo *phoneme(const std::string &symbol);
