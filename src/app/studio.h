@@ -197,6 +197,7 @@ private:
     void on_remove_velocities(wxCommandEvent &);
     void on_own_path(wxCommandEvent &);
     void on_plain_held(wxCommandEvent &);
+    void on_octave_instruments(wxCommandEvent &);
     void on_follow(wxCommandEvent &);
     void follow();
     void preview_note(int i);
@@ -306,6 +307,7 @@ private:
     wxMenuItem *mi_remove_velocities_ = nullptr;
     wxMenuItem *mi_own_path_ = nullptr;
     wxMenuItem *mi_plain_held_ = nullptr;
+    wxMenuItem *mi_octave_instruments_ = nullptr;
     wxMenuItem *mi_follow_ = nullptr;
     wxMenuItem *mi_undo_ = nullptr;
     wxMenuItem *mi_redo_ = nullptr;

@@ -35,6 +35,9 @@ struct Settings {
     //: a vowel an imported MIDI file holds over several notes sings its
     //: first sound until the last of them (pronounce, `plain_held`)
     bool plain_held_vowels = false;
+    //: an imported MIDI file's played parts on the instruments the soundbank
+    //: has an octave off are transposed an octave (import_midi, `octaves`)
+    bool octave_instruments = false;
     //: while the song plays, every track's cursor moves to the note sung
     bool follow_playback = false;
 };

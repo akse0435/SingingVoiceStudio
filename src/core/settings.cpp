@@ -63,6 +63,8 @@ Settings load_settings() {
         s.close_word_rests = doc["close_word_rests"].get<bool>();
     if (doc.contains("plain_held_vowels") && doc["plain_held_vowels"].is_boolean())
         s.plain_held_vowels = doc["plain_held_vowels"].get<bool>();
+    if (doc.contains("octave_instruments") && doc["octave_instruments"].is_boolean())
+        s.octave_instruments = doc["octave_instruments"].get<bool>();
     if (doc.contains("follow_playback") && doc["follow_playback"].is_boolean())
         s.follow_playback = doc["follow_playback"].get<bool>();
     return s;
@@ -79,6 +81,7 @@ bool save_settings(const Settings &s) {
     doc["vocalwriter_own_path"] = s.vocalwriter_own_path;
     doc["close_word_rests"] = s.close_word_rests;
     doc["plain_held_vowels"] = s.plain_held_vowels;
+    doc["octave_instruments"] = s.octave_instruments;
     doc["follow_playback"] = s.follow_playback;
     return write_text(in_folder("settings.json"), doc.dump(1) + "\n");
 }

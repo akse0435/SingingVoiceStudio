@@ -208,6 +208,16 @@ goes the other way, its y sung once: "few" over three notes is f YU, UW, UW
 rather than f YU, YU, YU. The command line does as the window was last set
 to.
 
+**Instruments an octave off**: a few of the GM Soundbank's instruments sound
+an octave away from where a MIDI file means them to. Settings > Transpose
+certain instruments by an octave when importing MIDI to compensate for their
+different pitch in the soundbank (Ctrl+Shift+O, off until it is turned on)
+moves the played parts of programs 29 - 32, 34, 36, 37, 53, 80, 86, 96, 100
+and 101 an octave up, and of 98 and 102 an octave down, counting from 0,
+note by note by the program each is played with. A sung part, the drum kit
+and a VocalWriter song are left as they are. The command line does as the
+window was last set to.
+
 **Velocities** come in on every note of a MIDI file, sung or played, as
 VocalWriter took them in: the one most of a track's notes have is the
 track's, and a note keeps its own where it differs. Settings > Remove note
@@ -428,6 +438,7 @@ Ctrl and Option for Alt, and Option+H to hear a note.
 | Ctrl+Shift+I | whether importing MIDI closes the short rests between notes |
 | Ctrl+Shift+E | whether importing MIDI removes the note velocities from the sung tracks |
 | Ctrl+Shift+D | whether importing MIDI and adding a word sing a vowel held over several notes on its first sound |
+| Ctrl+Shift+O | whether importing MIDI transposes the instruments the soundbank has an octave off by an octave |
 | Ctrl+Shift+V | whether VocalWriter's voices are sung through its own sequencer |
 | Ctrl+Shift+S / Ctrl+Shift+T | export one WAV / one WAV per track |
 | Ctrl+Shift+M | export a MIDI file |

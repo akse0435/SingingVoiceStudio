@@ -346,10 +346,14 @@ struct Imported {
 //: part's program changes are changes of voice, to the one `programs` gives
 //: each number, as vocalwriter_program_voices does (-1 for none).
 //: `close_word_rests`: a sung part's rests in the middle of a word are
-//: closed whatever `close_rests` is (close_short_rests).
+//: closed whatever `close_rests` is (close_short_rests). `octaves`: the
+//: played parts of programs 29 - 32, 34, 36, 37, 53, 80, 86, 96, 100 and 101
+//: are moved an octave up, and of 98 and 102 an octave down, as the
+//: soundbank's instruments for them sound an octave off.
 Imported import_midi(const std::string &path, const std::vector<std::string> &names, double close_rests = 0,
                      const std::vector<std::string> &played = {}, bool remove_velocities = false,
-                     int lyrics_on = -1, const std::vector<int> &programs = {}, bool close_word_rests = false);
+                     int lyrics_on = -1, const std::vector<int> &programs = {}, bool close_word_rests = false,
+                     bool octaves = false);
 
 // -- tracks an instrument plays ---------------------------------------------
 

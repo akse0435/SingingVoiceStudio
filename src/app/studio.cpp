@@ -44,7 +44,7 @@ enum {
     ID_TRACK_NEW, ID_TRACK_BACKING, ID_TRACK_EDIT, ID_TRACK_REMOVE, ID_TRACK_MUTE, ID_TRACK_SOLO,
     ID_TRACK_UP, ID_TRACK_DOWN, ID_PREVIEW_TIMER, ID_RECOVERY_TIMER, ID_ADD_CONTROLLER, ID_CLOSE_RESTS,
     ID_REMOVE_VELOCITIES, ID_APPEND, ID_OWN_PATH, ID_PLAIN_HELD, ID_FOLLOW, ID_FOLLOW_TIMER, ID_EXPORT_TIMER,
-    ID_EXPORT_MIDI, ID_ADD_WORD_EXISTING,
+    ID_EXPORT_MIDI, ID_ADD_WORD_EXISTING, ID_OCTAVE_INSTRUMENTS,
 };
 
 //: A beat is a quarter note, so a sixteenth is a quarter of a beat: the step
@@ -432,6 +432,13 @@ void Studio::build_menu() {
         "The vowel's whole sound on the last note alone: \"day\" over three notes is d EH, EH, EY rather than d EY, EY, "
         "EY; YU on the first alone, \"few\" as f YU, UW, UW");
     mi_plain_held_->Check(settings_.plain_held_vowels);
+    mi_octave_instruments_ = prefs->AppendCheckItem(
+        ID_OCTAVE_INSTRUMENTS,
+        K("Transpose certain instruments by an &octave when importing MIDI to compensate for their different pitch "
+          "in the soundbank\tCtrl+Shift+O"),
+        "The played parts of programs 29 - 32, 34, 36, 37, 53, 80, 86, 96, 100 and 101 an octave up, of 98 and 102 "
+        "an octave down; the sung parts and VocalWriter songs as they are");
+    mi_octave_instruments_->Check(settings_.octave_instruments);
     mi_follow_ = prefs->AppendCheckItem(ID_FOLLOW, K("&Notes follow playback\tCtrl+Shift+F"),
                                         "While the song plays, every track's cursor moves to the note being sung, "
                                         "and stays there when it stops");
@@ -499,6 +506,7 @@ void Studio::build_menu() {
     on(ID_REMOVE_VELOCITIES, &Studio::on_remove_velocities);
     on(ID_OWN_PATH, &Studio::on_own_path);
     on(ID_PLAIN_HELD, &Studio::on_plain_held);
+    on(ID_OCTAVE_INSTRUMENTS, &Studio::on_octave_instruments);
     on(ID_FOLLOW, &Studio::on_follow);
     Bind(wxEVT_MENU, [this](wxCommandEvent &) { Close(); }, wxID_EXIT);
 }
@@ -661,6 +669,17 @@ void Studio::on_plain_held(wxCommandEvent &) {
         (kept ? "" : ", for this sitting only: the settings file could not be written"));
 }
 
+//: A setting of the program too: whether a MIDI import transposes the
+//: instruments the soundbank has an octave off by an octave.
+void Studio::on_octave_instruments(wxCommandEvent &) {
+    bool on = mi_octave_instruments_->IsChecked();
+    settings_.octave_instruments = on;
+    bool kept = save_settings(settings_);
+    say(wxString(on ? "importing MIDI transposes the instruments the soundbank has an octave off by an octave"
+                    : "importing MIDI leaves every played part at the pitch the file gives it") +
+        (kept ? "" : ", for this sitting only: the settings file could not be written"));
+}
+
 //: A setting of the program too: whether VocalWriter's voices are sung
 //: through its own sequencer. Changed on the engines' thread, between two
 //: renders, so no song is sung half one way and half the other.
@@ -781,6 +800,8 @@ void Studio::on_keys(wxCommandEvent &) {
         "Ctrl+Shift+E  whether importing MIDI removes the note velocities from the sung tracks",
         "Ctrl+Shift+D  whether importing MIDI and adding a word sing a vowel held over several notes on its "
         "first sound until the last of them: day over three notes as d EH, EH, EY",
+        "Ctrl+Shift+O  whether importing MIDI transposes the instruments the soundbank has an octave off by an "
+        "octave",
         "Ctrl+Shift+F  whether every track's cursor follows the note being sung while the song plays, staying "
         "where it got to when it stops",
         "Ctrl+Shift+V  whether VocalWriter's voices are sung through its own sequencer, sample for sample as "
@@ -2626,7 +2647,7 @@ void Studio::take_midi(const std::string &path, bool append) {
         for (const auto &pv : program_map_)
             if (pv.first >= 0 && pv.first < 128) programs[size_t(pv.first)] = pv.second;
         got = import_midi(path, names, rests_to_close(), played, settings_.remove_note_velocities, lyrics_on,
-                          programs, settings_.close_word_rests);
+                          programs, settings_.close_word_rests, settings_.octave_instruments);
     } catch (const std::exception &e) {
         say(W(std::string("cannot import: ") + e.what()));
         return;
