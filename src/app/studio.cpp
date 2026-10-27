@@ -2194,6 +2194,32 @@ void Studio::take_midi(const std::string &path, bool append) {
         say(W(base_name(path) + " has no notes in it"));
         return;
     }
+    // A type 0 file's lyrics could be sung on any of its channels, so which
+    // one sings them is asked, the first chosen to begin with.
+    int lyrics_on = -1;
+    LyricChoice choice;
+    try {
+        choice = lyric_choice(path);
+    } catch (const std::exception &) {
+    }
+    if (choice.channels.size() > 1) {
+        wxArrayString labels;
+        std::vector<int> channels;
+        for (const MidiPart &p : parts) {
+            if (std::find(choice.channels.begin(), choice.channels.end(), p.channel) == choice.channels.end()) continue;
+            channels.push_back(p.channel);
+            labels.Add(W(p.name + ", " + std::to_string(p.notes) + " notes"));
+        }
+        LyricTrackDialog ask(this, labels);
+        if (ask.ShowModal() != wxID_OK || ask.chosen() < 0) return;
+        lyrics_on = channels[size_t(ask.chosen())];
+        try {
+            parts = midi_parts(path, lyrics_on);
+        } catch (const std::exception &e) {
+            say(W("cannot read " + base_name(path) + ": " + e.what()));
+            return;
+        }
+    }
     // what a part is, as the list below says it: its instrument too, unless
     // it is named after it
     auto described = [](const MidiPart &p) {
@@ -2227,7 +2253,7 @@ void Studio::take_midi(const std::string &path, bool append) {
     }
     Imported got;
     try {
-        got = import_midi(path, names, rests_to_close(), played, settings_.remove_note_velocities);
+        got = import_midi(path, names, rests_to_close(), played, settings_.remove_note_velocities, lyrics_on);
     } catch (const std::exception &e) {
         say(W(std::string("cannot import: ") + e.what()));
         return;

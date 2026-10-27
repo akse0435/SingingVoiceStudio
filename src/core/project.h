@@ -290,10 +290,21 @@ struct MidiPart {
     bool words = false;
     bool drums = false;
     int program = 0;
+    //: the channel it plays on, 0-15
+    int channel = -1;
     //: the GM Soundbank voice it would be played with
     int voice() const;
 };
-std::vector<MidiPart> midi_parts(const std::string &path);
+//: `lyrics_on`: the channel a type 0 file's lyrics go to (lyric_choice);
+//: -1 for the one most of them fall on.
+std::vector<MidiPart> midi_parts(const std::string &path, int lyrics_on = -1);
+//: The channels a type 0 file's lyrics could be sung on, and the likeliest;
+//: none when there is nothing to choose (one channel, or no lyrics).
+struct LyricChoice {
+    std::vector<int> channels;
+    int likely = -1;
+};
+LyricChoice lyric_choice(const std::string &path);
 //: The parts an import plays on the GM Soundbank: every one without words,
 //: so only a part with words is sung, and none in a file without them.
 std::vector<std::string> parts_to_play(const std::vector<MidiPart> &parts);
@@ -328,7 +339,8 @@ struct Imported {
 //: Soundbank, chords and all; the rest are sung, and `remove_velocities`
 //: leaves their notes the track's velocity, none of their own.
 Imported import_midi(const std::string &path, const std::vector<std::string> &names, double close_rests = 0,
-                     const std::vector<std::string> &played = {}, bool remove_velocities = false);
+                     const std::vector<std::string> &played = {}, bool remove_velocities = false,
+                     int lyrics_on = -1);
 
 // -- tracks an instrument plays ---------------------------------------------
 

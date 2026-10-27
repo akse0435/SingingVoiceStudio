@@ -50,10 +50,16 @@ struct MidiFile {
     int format = 0;
     int division = 480;
     std::vector<MidiTrack> tracks;
+    //: In a type 0 file whose lyrics could be sung on more than one channel,
+    //: those channels (the drums left out) and the one most syllables fall
+    //: on; empty when there is nothing to choose.
+    std::vector<int> lyric_channels;
+    int likely_lyric_channel = -1;
 };
 
-//: Throws std::runtime_error.
-MidiFile read_midi(const std::string &path);
+//: Throws std::runtime_error. `lyrics_on`: the channel a type 0 file's
+//: lyrics go to, one of its lyric_channels; -1 for the likely one.
+MidiFile read_midi(const std::string &path, int lyrics_on = -1);
 
 //: Split VocalWriter's phoneme string: every uppercase symbol is two letters,
 //: every lowercase one is one, so "swIYt" is s w IY t.

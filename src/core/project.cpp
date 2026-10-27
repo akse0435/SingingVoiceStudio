@@ -1242,8 +1242,8 @@ ImportedPart from_midi_played(const MidiFile &midi, const MidiTrack &track, cons
 
 int MidiPart::voice() const { return drums ? kGmDrums : kGmBase + std::max(0, program); }
 
-std::vector<MidiPart> midi_parts(const std::string &path) {
-    MidiFile midi = read_midi(path);
+std::vector<MidiPart> midi_parts(const std::string &path, int lyrics_on) {
+    MidiFile midi = read_midi(path, lyrics_on);
     std::vector<MidiPart> out;
     for (const auto &nt : named_tracks(midi)) {
         MidiPart p;
@@ -1252,9 +1252,15 @@ std::vector<MidiPart> midi_parts(const std::string &path) {
         for (const MidiNote &n : nt.second->notes) p.words = p.words || !n.text.empty() || !n.phonemes.empty();
         p.drums = drum_track(*nt.second);
         p.program = std::max(0, program_at_start(*nt.second));
+        p.channel = nt.second->channel;
         out.push_back(p);
     }
     return out;
+}
+
+LyricChoice lyric_choice(const std::string &path) {
+    MidiFile midi = read_midi(path);
+    return {midi.lyric_channels, midi.likely_lyric_channel};
 }
 
 std::vector<std::string> parts_to_play(const std::vector<MidiPart> &parts) {
@@ -1411,8 +1417,8 @@ std::vector<std::pair<std::string, int>> midi_tracks(const std::string &path) {
 }
 
 Imported import_midi(const std::string &path, const std::vector<std::string> &names, double close_rests,
-                     const std::vector<std::string> &played, bool remove_velocities) {
-    MidiFile midi = read_midi(path);
+                     const std::vector<std::string> &played, bool remove_velocities, int lyrics_on) {
+    MidiFile midi = read_midi(path, lyrics_on);
     auto named = named_tracks(midi);
     if (named.empty()) throw std::runtime_error("this file has no notes in it");
     double grid = midi_grid(midi);

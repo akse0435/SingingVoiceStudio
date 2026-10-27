@@ -373,7 +373,7 @@ int lyric_channel(const RawTrack &trk, const std::vector<int> &used, double div)
 
 }  // namespace
 
-MidiFile read_midi(const std::string &path) {
+MidiFile read_midi(const std::string &path, int lyrics_on) {
     std::vector<unsigned char> b;
     if (!read_file(path, &b)) throw std::runtime_error("cannot read the file");
     if (b.size() < 14 || std::string(b.begin(), b.begin() + 4) != "MThd")
@@ -426,6 +426,21 @@ MidiFile read_midi(const std::string &path) {
         }
         mf.tracks.push_back(meta);
         int sung = trk.lyrics.empty() && trk.texts.empty() ? -1 : lyric_channel(trk, used, div);
+        // A type 0 file's lyrics go where the caller says, once it has been
+        // asked which of the channels sings them.
+        bool words = std::any_of(trk.lyrics.begin(), trk.lyrics.end(),
+                                 [](const std::pair<long, std::string> &l) { return has_letters(l.second); });
+        if (mf.format == 0 && words && mf.lyric_channels.empty()) {
+            for (int ch : used)
+                if (ch != kDrumChannel) mf.lyric_channels.push_back(ch);
+            if (mf.lyric_channels.size() < 2) {
+                mf.lyric_channels.clear();
+            } else {
+                mf.likely_lyric_channel = sung;
+                if (std::find(mf.lyric_channels.begin(), mf.lyric_channels.end(), lyrics_on) != mf.lyric_channels.end())
+                    sung = lyrics_on;
+            }
+        }
         for (int ch : used) {
             MidiTrack t = trk.channel[ch];
             t.name = mf.format == 0 ? "" : trk.name;

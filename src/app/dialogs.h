@@ -239,6 +239,17 @@ private:
     double was_;
 };
 
+//: Which track a type 0 MIDI file's lyrics are sung on: one of `parts`,
+//: chosen in a box that starts on the first.
+class LyricTrackDialog : public wxDialog {
+public:
+    LyricTrackDialog(wxWindow *parent, const wxArrayString &parts);
+    int chosen() const { return choice_->GetSelection(); }
+
+private:
+    wxChoice *choice_;
+};
+
 //: Where Panthera is, for the MacinTalk voices: a folder typed in or browsed
 //: to, or nothing, to look where Panthera's NVDA add-on puts it.
 class PantheraDialog : public wxDialog {

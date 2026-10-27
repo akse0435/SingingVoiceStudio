@@ -128,8 +128,11 @@ goes to 200%.
 took them in: the parts with words are sung, and the others are played with
 the programs the file gives them, channel 10 on the drum kit; a file without
 words is played throughout. A part the file leaves unnamed is named after its
-instrument, the drum kit's "Drums". On the command line the same;
-`--sing-all` sings every part. Each track takes its volume from the
+instrument, the drum kit's "Drums". A type 0 file, every part on one track
+of the file, has its lyrics on that track rather than on a part, so when it
+plays on more than one channel Import asks which part the lyrics are sung
+on, in a box that starts on the first. On the command line the same,
+the likeliest taken; `--sing-all` sings every part. Each track takes its volume from the
 file, CC 7 by CC 11 with both at 127 being 100%, at its loudest, with
 VocalWriter's volume control against that where it changes. A MIDI file
 opened from the desktop or named on the command line comes in the same way.

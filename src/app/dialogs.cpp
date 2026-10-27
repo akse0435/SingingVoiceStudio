@@ -864,6 +864,24 @@ std::string PantheraDialog::folder() const {
     return U(t);
 }
 
+LyricTrackDialog::LyricTrackDialog(wxWindow *parent, const wxArrayString &parts)
+    : wxDialog(parent, wxID_ANY, "Import MIDI") {
+    wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
+    wxStaticText *about = new wxStaticText(
+        this, wxID_ANY,
+        "The lyrics in this file could belong to any of these tracks. Which track are they sung on? That track "
+        "is the one that sings.");
+    about->Wrap(380);
+    outer->Add(about, 0, wxALL, 8);
+    choice_ = new wxChoice(this, wxID_ANY, wxDefaultPosition, wxSize(300, -1), parts);
+    labelled(this, outer, "Sung track", choice_, 1);
+    outer->Add(buttons(this), 0, wxEXPAND | wxALL, 8);
+    SetSizerAndFit(outer);
+    // the first chosen, so a screen reader has a track to read, not a blank
+    if (!parts.empty()) choice_->SetSelection(0);
+    choice_->SetFocus();
+}
+
 SongSettingsDialog::SongSettingsDialog(wxWindow *parent, const Song &song, bool own_time)
     : wxDialog(parent, wxID_ANY, "Song settings"), was_sig_(song.sig), was_end_(song.end),
       end_shown_(W(end_text(song.end, song.sig))) {
