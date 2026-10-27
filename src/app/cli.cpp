@@ -380,9 +380,17 @@ int run_cli(const CliArgs &args) {
         } catch (const std::exception &e) {
             return fail(e.what());
         }
+        // the whole song: the changes of voice go too
         for (Track &t : song.tracks) {
             t.voice_id = pick;
             t.voice_name = saved_voice_name(pick, voices);
+            std::vector<Note> kept;
+            for (Note n : t.notes) {
+                n.voice_id.reset();
+                n.voice_name.reset();
+                if (!n.controller || n.tempo > 0 || !n.controls.empty()) kept.push_back(n);
+            }
+            t.notes = kept;
         }
         say("every track is singing in " + Registry::get().voice_name(pick));
     }

@@ -36,8 +36,15 @@ struct PartRequest {
         double beats;
         std::vector<std::string> phonemes;
         std::string word = {};
+        int velocity = 0;                // 0: the part's
+        NoteControls controls = {};
     };
     std::vector<N> notes;
+    //: (beat, voice): where it goes on to another voice; `voice_id` is the
+    //: one it starts singing with
+    std::vector<std::pair<double, int>> voices;
+    //: the controls controllers set, each from its beat on
+    std::vector<ControlAt> controls;
     std::vector<BendPoint> bends;   // (beat, semitones, slides)
     std::vector<BendPoint> mods;    // (beat, mod wheel 0-127, slides)
 };

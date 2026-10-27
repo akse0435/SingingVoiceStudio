@@ -153,6 +153,18 @@ std::string hash_key(const std::string &s) {
     return buf;
 }
 
+//: A note's controls, written into a key in full.
+void controls_key(std::string &k, const NoteControls &controls) {
+    char buf[64];
+    for (const auto &c : controls) {
+        k += "C" + c.first + ":";
+        for (const auto &p : c.second) {
+            std::snprintf(buf, sizeof buf, "%.17g,%.17g,", p.first, p.second);
+            k += buf;
+        }
+    }
+}
+
 std::string request_key(const RenderRequest &r) {
     std::string k;
     char buf[64];
@@ -190,12 +202,24 @@ std::string request_key(const RenderRequest &r) {
         }
         if (t.consonants) num(*t.consonants);
         else k += "-,";
+        for (const auto &v : t.voices) {
+            k += "V";
+            num(v.first);
+            num(v.second);
+        }
+        for (const ControlAt &c : t.controls) {
+            k += "K" + c.name + ":";
+            num(c.beat);
+            num(c.value);
+        }
         for (const auto &n : t.notes) {
             k += "N";
             num(n.pitch);
             num(n.beats);
             for (const std::string &p : n.phonemes) k += p + " ";
             k += "W" + n.word + "|";
+            num(n.velocity);
+            controls_key(k, n.controls);
         }
         for (const BendPoint &b : t.bends) {
             k += "B";
@@ -276,6 +300,17 @@ void with_metronome(std::vector<float> &y, int channels, const Clock &clock, dou
         for (float &s : y) s /= peak;
 }
 
+//: The voice a track's first note is sung with: its own, or the last
+//: controller's before it.
+static int first_voice(const Track &t, const std::map<int, int> &program_map) {
+    int v = track_voice(t, program_map);
+    for (const Note &n : t.notes) {
+        if (!n.controller && !n.is_rest()) break;
+        if (n.controller && n.voice_id) v = *n.voice_id;
+    }
+    return v;
+}
+
 RenderRequest make_request(const Song &song, const std::vector<const Track *> &parts, double start,
                            const std::map<int, int> &program_map) {
     RenderRequest r;
@@ -296,7 +331,18 @@ RenderRequest make_request(const Song &song, const std::vector<const Track *> &p
         // a track of rests and controllers, as the tempo is kept on, sings nothing
         if (!sings(*t)) continue;
         PartRequest p;
-        p.voice_id = track_voice(*t, program_map);
+        // the voice it starts with is the one in force at its first note;
+        // every change is kept, where it stands
+        p.voice_id = first_voice(*t, program_map);
+        p.voices = voice_changes(*t);
+        // and the controls the controllers set, where they stand
+        double at = 0;
+        for (const Note &n : t->notes) {
+            if (n.controller)
+                for (const auto &c : n.controls)
+                    if (!c.second.empty()) p.controls.push_back({at, c.first, c.second.front().second});
+            at += n.beats;
+        }
         p.volume = t->volume / 100.0;
         p.pan = t->pan / 100.0;
         p.velocity = t->velocity;
@@ -307,14 +353,15 @@ RenderRequest make_request(const Song &song, const std::vector<const Track *> &p
         for (const Note &n : t->notes)
             if (!n.controller)
                 p.notes.push_back({n.pitch, n.beats,
-                                   n.phonemes.empty() ? std::vector<std::string>{kRest} : n.phonemes, n.word});
+                                   n.phonemes.empty() ? std::vector<std::string>{kRest} : n.phonemes, n.word,
+                                   n.velocity, n.controls});
         // a VocalWriter song gives every vocal track a speech channel, in
         // order, whether it is heard or not
         Family *f = Registry::get().family_of(p.voice_id);
         const Track *self = in_song(song, t);
         for (const Track &o : song.tracks) {
             if (&o == self) break;
-            if (!o.is_backing() && sings(o) && Registry::get().family_of(track_voice(o, program_map)) == f)
+            if (!o.is_backing() && sings(o) && Registry::get().family_of(first_voice(o, program_map)) == f)
                 ++p.channel;
         }
         for (BendPoint b : timeline(t->notes)) {
@@ -373,6 +420,16 @@ std::string phrase_key(int voice_id, const Phrase &p) {
         for (const std::string &ph : n.phonemes) k += ph + " ";
         for (double d : n.durations_ms) num(d);
         k += "W" + n.word + "|";
+        controls_key(k, n.controls);
+    }
+    for (const auto &h : p.held) {
+        k += "H" + h.first + ":";
+        num(h.second);
+    }
+    for (const ControlAt &c : p.controls) {
+        k += "K" + c.name + ":";
+        num(c.beat);
+        num(c.value);
     }
     for (const BendEvent &b : p.bends) {
         k += "B";
@@ -400,7 +457,14 @@ std::string part_key(int voice_id, const Part &p) {
     as_phrase.level = p.level;
     as_phrase.consonants = p.consonants;
     as_phrase.channel = p.channel;
-    return "part:" + phrase_key(voice_id, as_phrase);
+    as_phrase.controls = p.controls;
+    std::string voices;
+    for (const auto &v : p.voices) {
+        char buf[64];
+        std::snprintf(buf, sizeof buf, "V%.17g,%d,", v.first, v.second);
+        voices += buf;
+    }
+    return "part:" + phrase_key(voice_id, as_phrase) + voices;
 }
 
 //: A part as a whole, rests and all, for an engine that sings it so.
@@ -412,14 +476,17 @@ Part whole_part(const PartRequest &t, const Clock &clock, double consonants) {
     part.level = t.volume * Registry::get().headroom(t.voice_id);
     part.consonants = t.consonants ? *t.consonants : consonants;
     part.channel = t.channel;
+    part.voices = t.voices;
+    part.controls = t.controls;
     double total = 0;
     for (const auto &e : t.notes) {
         SungNote n;
         n.midi = e.pitch;
         n.beats = e.beats;
-        n.velocity = t.velocity;
+        n.velocity = e.velocity ? e.velocity : t.velocity;
         n.phonemes = e.phonemes.empty() ? std::vector<std::string>{kRest} : e.phonemes;
         n.word = e.word;
+        n.controls = e.controls;
         part.notes.push_back(n);
         total += e.beats;
     }
@@ -482,9 +549,6 @@ void Mixer::keep(const std::string &key, std::shared_ptr<const std::vector<float
 
 std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double consonants, double start,
                                 bool early, bool whole, bool *stopped_short, std::string *error) {
-    // The voice's own level, so that a part that would clip is turned down
-    // before an engine clamps it rather than after.
-    double level = t.volume * Registry::get().headroom(t.voice_id);
     if (t.consonants) consonants = *t.consonants;
     // the bends and the wheel on the clock: a tempo change moves them too
     std::vector<Pt> bends;
@@ -496,9 +560,18 @@ std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double
     for (const BendPoint &b : t.mods) mods.push_back({clock.seconds(b.beat), b.semitones, b.slides});
     std::stable_sort(mods.begin(), mods.end(), [](const Pt &a, const Pt &b) { return a.t < b.t; });
 
-    // the phrases between the rests, and the song's total length
+    // which voice sings from a beat on: the part's, then each change
+    auto voice_at = [&](double beat) {
+        int v = t.voice_id;
+        for (const auto &c : t.voices)
+            if (c.first <= beat + 1e-9) v = c.second;
+        return v;
+    };
+    // the phrases between the rests and the changes of voice, and the
+    // song's total length
     struct Run {
         double at;
+        int voice;
         std::vector<const PartRequest::N *> notes;
     };
     std::vector<Run> runs;
@@ -508,8 +581,9 @@ std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double
         if (is_rest(e.phonemes)) {
             open = false;
         } else {
-            if (!open) {
-                runs.push_back({at, {}});
+            int v = voice_at(at);
+            if (!open || v != runs.back().voice) {
+                runs.push_back({at, v, {}});
                 open = true;
             }
             runs.back().notes.push_back(&e);
@@ -525,6 +599,8 @@ std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double
     // and an export is sung as the whole track, as VocalWriter sang it
     Family *family = Registry::get().family_of(t.voice_id);
     bool own_time = family && family->sings_parts();
+    // so long as every voice it changes to is the same engine's
+    for (const auto &c : t.voices) own_time = own_time && Registry::get().family_of(c.second) == family;
     if (own_time && whole) {
         Part part = whole_part(t, clock, consonants);
         std::string key = part_key(t.voice_id, part);
@@ -560,18 +636,24 @@ std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double
     }
 
     // made the first time a phrase is not already in the store, so a song
-    // whose phrases are all there sings nothing and starts no engine
-    std::unique_ptr<Singer> singer;
+    // whose phrases are all there sings nothing and starts no engine; one
+    // for each voice the part sings with
+    std::map<int, std::unique_ptr<Singer>> singers;
     double was_over = 0.0;
     for (size_t r = 0; r < runs.size(); ++r) {
         Run &run = runs[r];
+        int voice = run.voice;
+        Family *f = Registry::get().family_of(voice);
+        bool own = f && f->sings_parts();
         Phrase phrase;
         phrase.style = t.voice;
-        phrase.level = level;
+        // the voice's own level, so that a part that would clip is turned
+        // down before an engine clamps it rather than after
+        phrase.level = t.volume * Registry::get().headroom(voice);
         phrase.any_bends = !bends.empty();
         double sum = 0;                               // the phrase's beats
         for (const auto *e : run.notes) sum += e->beats;
-        if (own_time) {
+        if (own) {
             // VocalWriter keeps the song's tempo changes itself
             phrase.consonants = consonants;
             // a beat of rest even where nothing comes before it, without which
@@ -580,6 +662,29 @@ std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double
             phrase.channel = t.channel;
             double from = run.at - phrase.room;
             phrase.bpm = clock.bpm_at(from);
+            // what the controllers and the notes before it set, the last of
+            // each, which the phrase starts with; and the controllers inside it
+            std::map<std::string, std::pair<double, double>> last;   // (beat, value)
+            for (const ControlAt &c : t.controls) {
+                if (c.beat > run.at + 1e-9) {
+                    if (c.beat < run.at + sum - 1e-9) phrase.controls.push_back({c.beat - run.at, c.name, c.value});
+                    continue;
+                }
+                auto it = last.find(c.name);
+                if (it == last.end() || c.beat >= it->second.first) last[c.name] = {c.beat, c.value};
+            }
+            double note_beat = 0;
+            for (const auto &e : t.notes) {
+                if (note_beat >= run.at - 1e-9) break;
+                for (const auto &c : e.controls)
+                    for (const auto &pt : c.second) {
+                        double b = note_beat + pt.first * e.beats;
+                        auto it = last.find(c.first);
+                        if (it == last.end() || b >= it->second.first) last[c.first] = {b, pt.second};
+                    }
+                note_beat += e.beats;
+            }
+            for (const auto &l : last) phrase.held[l.first] = l.second.second;
             for (const TempoChange &c : clock.changes)
                 if (c.beat > from) phrase.tempos.push_back({c.beat - from, c.bpm});
         } else {
@@ -590,17 +695,18 @@ std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double
         for (const auto *e : run.notes) {
             SungNote n;
             n.midi = e->pitch;
-            n.beats = own_time ? e->beats : (clock.seconds(note_at + e->beats) - clock.seconds(note_at)) / spb;
+            n.beats = own ? e->beats : (clock.seconds(note_at + e->beats) - clock.seconds(note_at)) / spb;
             note_at += e->beats;
             // only VocalWriter's voices are sung harder or softer; to the
             // others it would be loudness, which the part's volume is
-            n.velocity = is_vocalwriter_voice(t.voice_id) ? t.velocity : kDefaultVelocity;
+            n.velocity = !is_vocalwriter_voice(voice) ? kDefaultVelocity : e->velocity ? e->velocity : t.velocity;
             n.phonemes = e->phonemes.empty() ? std::vector<std::string>{kRest} : e->phonemes;
             n.durations_ms = syllable_lengths(n.phonemes, n.beats * 60000.0 / bpm, consonants);
             n.word = e->word;
+            if (own) n.controls = e->controls;
             phrase.notes.push_back(n);
         }
-        double lead = early && !own_time ? anticipate(phrase.notes, bpm, consonants, run.at - was_over) : 0.0;
+        double lead = early && !own ? anticipate(phrase.notes, bpm, consonants, run.at - was_over) : 0.0;
         was_over = run.at + sum - lead;
         // a marked rest to scale the last syllable against, and to let it
         // decay rather than being cut off
@@ -609,7 +715,7 @@ std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double
         tail.beats = 0.4;
         tail.velocity = 1;
         tail.phonemes = {kRest};
-        if (own_time) {
+        if (own) {
             // the rest the whole track has here, up to a beat, towards the
             // next note's key, so the phrase ends as it does there
             double gap = (r + 1 < runs.size() ? runs[r + 1].at : total) - (run.at + sum);
@@ -619,14 +725,14 @@ std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double
         phrase.notes.push_back(tail);
         // where the phrase's samples begin and end, in seconds
         double run_s = clock.seconds(run.at);
-        double from_s = own_time ? clock.seconds(run.at - phrase.room) : run_s - lead * spb;
+        double from_s = own ? clock.seconds(run.at - phrase.room) : run_s - lead * spb;
         double sung_beats = 0;
         for (const SungNote &n : phrase.notes) sung_beats += n.beats;
-        double end_s = own_time ? clock.seconds(run.at + sum + tail.beats) : from_s + sung_beats * spb;
+        double end_s = own ? clock.seconds(run.at + sum + tail.beats) : from_s + sung_beats * spb;
         if (end_s <= start_s) continue;               // over before the cursor
         phrase.bends = bend_events(bends, from_s, end_s);
         phrase.mods = bend_events(mods, from_s, end_s, wheel_step);
-        std::string key = phrase_key(t.voice_id, phrase);
+        std::string key = phrase_key(voice, phrase);
         std::shared_ptr<const std::vector<float>> sung;
         double before = 0.0;
         auto kept = phrases_.find(key);
@@ -636,18 +742,19 @@ std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double
             before = kept->second.starts_before;
             if (kept->second.stopped_short) *stopped_short = true;
         } else {
+            std::unique_ptr<Singer> &singer = singers[voice];
             if (!singer) {
                 std::string err;
-                singer = Registry::get().singer(t.voice_id, &err);
+                singer = Registry::get().singer(voice, &err);
                 if (!singer) {
-                    *error = "cannot sing " + Registry::get().voice_name(t.voice_id) + ": " + err;
+                    *error = "cannot sing " + Registry::get().voice_name(voice) + ": " + err;
                     return out;
                 }
             }
             Sung y = singer->sing(phrase);
             if (!y.error.empty()) {
                 // never kept: the next play asks the engine again
-                *error = Registry::get().voice_name(t.voice_id) + ": " + y.error;
+                *error = Registry::get().voice_name(voice) + ": " + y.error;
                 return out;
             }
             if (y.stopped_short) *stopped_short = true;
@@ -656,7 +763,7 @@ std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double
             keep(key, sung, y.stopped_short, before);
         }
         const std::vector<float> &ys = *sung;
-        if (own_time) from_s = run_s - before;
+        if (own) from_s = run_s - before;
         long i = round_half_even((from_s - start_s) * kSampleRate);
         size_t skip = 0;
         if (i < 0) {                                  // began before the cursor
@@ -841,6 +948,8 @@ bool Mixer::sung_together(const RenderRequest &req, std::vector<float> *out, int
         Family *f = Registry::get().family_of(t.voice_id);
         if (!f || !f->sings_parts() || std::fabs(t.pan) > 1e-6 || (t.reverb && clean_reverb(*t.reverb) != rev))
             return false;
+        for (const auto &v : t.voices)
+            if (Registry::get().family_of(v.second) != f) return false;
         parts.push_back({t.voice_id, whole_part(t, req.clock(), req.consonants)});
         key += part_key(t.voice_id, parts.back().second) + ";";
     }

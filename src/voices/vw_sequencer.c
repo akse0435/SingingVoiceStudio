@@ -20,7 +20,6 @@
 #define POLYPHONY 48
 #define MAX_PARTS 31                /* the tracks after the tempo track */
 #define REST_PHONEME 23
-#define SPARE_PROGRAM 127
 
 typedef struct {
     unsigned char *p;
@@ -351,6 +350,70 @@ static int make_speech(vw_engine *e, vw_song *s, int track, double consonants)
     return 0;
 }
 
+/* The programs a song's voices are reached by: the bank's own program for a
+   voice one reaches, and for any other one borrowed from the top, put back
+   when the song is over. */
+typedef struct {
+    int voice[128], program[128], count;
+    int patched[128], saved[128], npatched;
+} reach;
+
+static int program_of(const reach *r, int voice)
+{
+    int i;
+    for (i = 0; i < r->count; i++)
+        if (r->voice[i] == voice)
+            return r->program[i];
+    return -1;
+}
+
+static void need(reach *r, int voice)
+{
+    int i;
+    for (i = 0; i < r->count; i++)
+        if (r->voice[i] == voice)
+            return;
+    if (r->count < 128) {
+        r->voice[r->count] = voice;
+        r->program[r->count++] = -1;
+    }
+}
+
+static int settle(int16_t *map, reach *r)
+{
+    int i, k, p = 127;
+    for (i = 0; i < r->count; i++)
+        for (k = 0; k < 128 && r->program[i] < 0; k++)
+            if (map[k] == r->voice[i])
+                r->program[i] = k;
+    for (i = 0; i < r->count; i++) {
+        if (r->program[i] >= 0)
+            continue;
+        for (;; --p) {
+            int taken = 0;
+            if (p < 0)
+                return -1;
+            for (k = 0; k < r->count; k++)
+                if (r->program[k] == p)
+                    taken = 1;
+            if (!taken)
+                break;
+        }
+        r->program[i] = p;
+        r->patched[r->npatched] = p;
+        r->saved[r->npatched++] = map[p];
+        map[p] = (int16_t)r->voice[i];
+    }
+    return 0;
+}
+
+static void unsettle(int16_t *map, const reach *r)
+{
+    int i;
+    for (i = r->npatched - 1; i >= 0; i--)
+        map[r->patched[i]] = (int16_t)r->saved[i];
+}
+
 /* The parts as one song, played as the application plays it: `channels` 1
    gives the left channel (a voice is in the middle), 2 both. */
 static int sing(vwseq_engine *engine, const vwseq_part *parts, int count, int room, int wet,
@@ -359,53 +422,61 @@ static int sing(vwseq_engine *engine, const vwseq_part *parts, int count, int ro
     vw_engine *e = &engine->e;
     shellVarPtr svv = e->svv;
     synthVarsPtr xx = svv->ChannelGlobals;
-    int16_t *map = (int16_t *)e->voices, saved[MAX_PARTS], serr;
+    int16_t *map = (int16_t *)e->voices, serr;
     vw_song s;
     PlayRec pr;
     unsigned char *trk;
     size_t trk_len = 0;
-    int i, k, rc = 0, programs[MAX_PARTS], patched[MAX_PARTS];
+    int i, k, rc = 0, programs[MAX_PARTS];
     double seconds = 0.0, max_seconds = 0.0;
+    reach r;
+    vwseq_part sung[MAX_PARTS];
+    vwseq_event *events[MAX_PARTS];
 
     if (count < 1 || count > MAX_PARTS)
         return -1;
-    /* A voice is chosen as a song chooses it, by a program change at the
-       first tick; one no program reaches borrows one from the top. */
+    memset(&r, 0, sizeof r);
+    memset(events, 0, sizeof events);
+    /* A voice is chosen as a song chooses it, by a program change: at the
+       first tick, and wherever a part changes voice. */
     for (i = 0; i < count; i++) {
         if (parts[i].voice < 0 || parts[i].voice >= e->voiceCount)
             return -3;
+        need(&r, parts[i].voice);
+        for (k = 0; k < parts[i].event_count; k++)
+            if (parts[i].events[k].status == VWSEQ_SET_VOICE) {
+                if (parts[i].events[k].vol < 0 || parts[i].events[k].vol >= e->voiceCount)
+                    return -3;
+                need(&r, parts[i].events[k].vol);
+            }
         if (parts[i].max_seconds > max_seconds)
             max_seconds = parts[i].max_seconds;
     }
-    for (i = 0; i < count; i++) {
-        programs[i] = -1;
-        patched[i] = 0;
-        for (k = 0; k < 128 && programs[i] < 0; k++)
-            if (map[k] == parts[i].voice)
-                programs[i] = k;
+    if (settle(map, &r) != 0) {
+        rc = -1;
+        goto restore;
     }
     for (i = 0; i < count; i++) {
-        int p = SPARE_PROGRAM, taken = 1;
-        if (programs[i] >= 0)
+        sung[i] = parts[i];
+        programs[i] = program_of(&r, parts[i].voice);
+        if (parts[i].event_count == 0)
             continue;
-        while (taken && p >= 0) {
-            taken = 0;
-            for (k = 0; k < count; k++)
-                if (programs[k] == p)
-                    taken = 1;
-            if (taken)
-                --p;
-        }
-        if (p < 0) {
-            rc = -1;
+        events[i] = (vwseq_event *)malloc(sizeof(vwseq_event) * (size_t)parts[i].event_count);
+        if (events[i] == NULL) {
+            rc = -2;
             goto restore;
         }
-        programs[i] = p;
-        patched[i] = 1;
-        saved[i] = map[p];
-        map[p] = (int16_t)parts[i].voice;
+        for (k = 0; k < parts[i].event_count; k++) {
+            events[i][k] = parts[i].events[k];
+            if (events[i][k].status == VWSEQ_SET_VOICE) {
+                events[i][k].status = 3;
+                events[i][k].key = 0;
+                events[i][k].vol = program_of(&r, parts[i].events[k].vol);
+            }
+        }
+        sung[i].events = events[i];
     }
-    trk = write_song(parts, count, programs, &trk_len);
+    trk = write_song(sung, count, programs, &trk_len);
     rc = trk == NULL ? -2 : vw_song_load(&s, trk, trk_len, NULL, 0) != VW_OK ? -1 : 0;
     free(trk);
     if (rc != 0)
@@ -487,9 +558,9 @@ done:
     Synth_MakeAllTrackskNotSpeech(svv);
     vw_song_free(&s);
 restore:
-    for (i = count - 1; i >= 0; i--)
-        if (patched[i])
-            map[programs[i]] = saved[i];
+    unsettle(map, &r);
+    for (i = 0; i < count; i++)
+        free(events[i]);
     return rc;
 }
 

@@ -76,15 +76,22 @@ private:
     ReportList *list_;
 };
 
-//: The two curves a note carries, the bend and the mod wheel, edited the same way.
+//: The curves a note carries, the bend, the mod wheel and VocalWriter's
+//: controls, edited the same way.
 struct CurveKind {
     const char *title, *point_title, *list_caption, *value_label, *value_hint;
     double lo, hi;
     bool signed_values;
     const char *said, *unit;
     Bend Note::*field;
+    //: one of the note's controls instead of `field` (see kNoteControls)
+    const char *control = nullptr;
 };
 extern const CurveKind kBendCurve, kModCurve;
+//: the curve for one of VocalWriter's controls, by its key
+const CurveKind &control_curve(const std::string &key);
+//: what the list shows for a note's velocity and controls
+std::string describe_controls(const Note &note);
 
 //: One point on a curve: how far into the note, and its value.
 class PointDialog : public wxDialog {
@@ -119,6 +126,23 @@ private:
     wxButton *hear_ = nullptr;
 };
 
+//: A note's VocalWriter controls, one row each; Enter edits one as a curve.
+class ControlsDialog : public wxDialog, Alive {
+public:
+    ControlsDialog(wxWindow *parent, Studio *studio, const Note &note);
+    NoteControls result() const { return note_.controls; }
+
+private:
+    void sync(int select = 0);
+    void on_key(wxKeyEvent &evt);
+    void on_edit(wxCommandEvent &);
+    void on_clear(wxCommandEvent &);
+
+    Studio *studio_;
+    Note note_;
+    ReportList *list_;
+};
+
 //: Edit one note: the phonemes sung on it, its pitch and its length.
 class NoteDialog : public wxDialog, Alive {
 public:
@@ -129,11 +153,12 @@ private:
     void on_insert(wxCommandEvent &);
     void on_preview(wxCommandEvent &);
     void on_points(const CurveKind &kind);
+    void on_controls(wxCommandEvent &);
     int value_pitch() const;
 
     Studio *studio_;
     Note note_;
-    wxTextCtrl *phon_, *pitch_, *beats_, *bend_start_, *bend_end_, *mod_start_, *mod_end_;
+    wxTextCtrl *phon_, *pitch_, *beats_, *bend_start_, *bend_end_, *mod_start_, *mod_end_, *velocity_;
     wxButton *hear_;
 };
 
@@ -154,17 +179,31 @@ private:
     std::vector<std::pair<const VoiceControl *, wxSpinCtrl *>> voice_ctrls_;
 };
 
-//: A controller: a change from where it stands in the track on. Its tempo
-//: is the whole song's, whichever track it is on.
+//: A controller: one change from where it stands in the track on, chosen
+//: first. The voice is the track's from there, any engine's; the tempo is
+//: the whole song's, whichever track it is on; or one of VocalWriter's
+//: controls, as a note carries them.
 class ControllerDialog : public wxDialog {
 public:
-    ControllerDialog(wxWindow *parent, const Note &controller);
-    //: the controller as the fields have it; a blank field changes nothing
+    //: `voice_before`: the voice the track sings with up to the controller
+    ControllerDialog(wxWindow *parent, Studio *studio, const Note &controller, int voice_before);
+    //: the controller as the fields have it: the one change chosen, or
+    //: nothing if its field was left blank
     Note result() const;
 
 private:
+    void fill_voices(int select);
+    void show_kind();
     Note note_;
+    std::vector<VoiceListing> voices_;
+    std::vector<std::string> engine_names_;
+    std::vector<int> ids_;      // the voices in the voice box, in order
+    wxChoice *kind_, *engine_, *voice_;
     wxTextCtrl *tempo_;
+    std::vector<std::pair<const NoteControl *, wxTextCtrl *>> controls_;
+    //: the fields of each kind, in the order the first box lists them
+    wxBoxSizer *outer_;
+    std::vector<wxSizer *> groups_;
 };
 
 //: Where Panthera is, for the MacinTalk voices: a folder typed in or browsed
@@ -192,6 +231,7 @@ private:
     Studio *studio_;
     void fill_voices(int select);
     void sync_velocity();
+    bool changes_to_vocalwriter_ = false;
     struct Engine {
         std::string name;
         bool available;

@@ -43,7 +43,12 @@ enum {
     VWSEQ_VIB_DEPTH = 67,
     VWSEQ_VIB_FREQ = 68,
     VWSEQ_PORTAMENTO = 69,
-    VWSEQ_BREATH = 70
+    VWSEQ_BREATH = 70,
+    VWSEQ_NOISE = 71,
+    VWSEQ_VOLUME = 33,
+    /* not the file's: a change of voice, `vol` the bank's own index of it,
+       written as the program change that reaches that voice */
+    VWSEQ_SET_VOICE = 0x100
 };
 
 /* A change of tempo at a tick, as the song's tempo track has it. */

@@ -41,6 +41,18 @@ using Bend = std::vector<std::pair<double, double>>;
 //: [(where in the note 0..1, mod wheel 0..127)] -- the same shape as a bend
 using Mod = Bend;
 
+//: One of VocalWriter's controls a note may carry: its name in the file, what
+//: the window calls it, and its range -- 0-127 for most, chorus and detune
+//: 14-bit about zero.
+struct NoteControl {
+    const char *key, *label;
+    int lo, hi;
+    const char *hint;
+};
+extern const NoteControl kNoteControls[];
+extern const size_t kNoteControlCount;
+const NoteControl *note_control(const std::string &key);
+
 struct Note {
     std::vector<std::string> phonemes;
     int pitch = kDefaultPitch;
@@ -50,12 +62,20 @@ struct Note {
     //: The mod wheel across the note, attached to it the way the bend is, so
     //: moving or retiming the note takes it along. Empty is the wheel at rest.
     Mod mod;
+    //: How hard the note is sung, 1-127, as VocalWriter keeps it per note;
+    //: 0 leaves it to the track.
+    int velocity = 0;
+    //: VocalWriter's own controls, as its songs have them (see NoteControls)
+    NoteControls controls;
     //: A controller rather than a note: it takes no time and nobody sings
     //: it, it changes what comes after it. `tempo` is the beats a minute
     //: from here on, for the whole song whichever track it is on; 0 changes
-    //: nothing.
+    //: nothing. `voice_id` is the voice this track sings with from here on,
+    //: any engine's, its name kept as a track keeps it (Track::voice_name).
     bool controller = false;
     double tempo = 0;
+    std::optional<int> voice_id;
+    std::optional<std::string> voice_name;
 
     Note() = default;
     Note(std::vector<std::string> ph, int p = kDefaultPitch, double b = kDefaultBeats,
@@ -70,8 +90,9 @@ struct Note {
     std::string label() const;
     bool operator==(const Note &o) const {
         return phonemes == o.phonemes && pitch == o.pitch && beats == o.beats &&
-               word == o.word && bend == o.bend && mod == o.mod && controller == o.controller &&
-               tempo == o.tempo;
+               word == o.word && bend == o.bend && mod == o.mod && velocity == o.velocity &&
+               controls == o.controls && controller == o.controller && tempo == o.tempo &&
+               voice_id == o.voice_id && voice_name == o.voice_name;
     }
 };
 
@@ -174,6 +195,8 @@ Song fresh_song();
 Track tempo_track(const std::vector<TempoChange> &changes);
 //: whether a track has a note anybody sings
 bool sings(const Track &track);
+//: the track's changes of voice, as (beat, voice), in order
+std::vector<std::pair<double, int>> voice_changes(const Track &track);
 //: the song at its starting tempo throughout, every tempo change taken out
 void steady_tempo(Song &song);
 

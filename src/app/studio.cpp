@@ -196,7 +196,7 @@ void Studio::build() {
     list_ = new ReportList(p, wxLC_REPORT);
     const std::pair<const char *, int> columns[] = {{"Phonemes", 165}, {"Pitch", 55}, {"Beats", 150},
                                                     {"Word", 95},      {"Bend", 90},  {"Mod", 80},
-                                                    {"Bar", 55}};
+                                                    {"Bar", 55},       {"Controls", 160}};
     c = 0;
     for (const auto &col : columns) list_->InsertColumn(c++, col.first, wxLIST_FORMAT_LEFT, col.second);
     list_->OnActivated([this] {
@@ -767,7 +767,28 @@ std::string Studio::track_sound(const Track &t) const {
         for (const Note &n : t.notes)
             if (n.controller && n.tempo > 0) return "tempo changes";
     }
-    return voice_name(track_voice_of(t));
+    bool changes = !voice_changes(t).empty();
+    return voice_name(track_voice_of(t)) + (changes ? ", with voice changes" : "");
+}
+
+//: The voice the current track sings with after its first `upto` rows.
+int Studio::voice_at(int upto) const {
+    int v = track_voice_of(track());
+    const std::vector<Note> &all = track().notes;
+    for (int i = 0; i < upto && i < int(all.size()); ++i)
+        if (all[size_t(i)].controller && all[size_t(i)].voice_id) v = *all[size_t(i)].voice_id;
+    return v;
+}
+
+//: A row as the list shows it: a controller with the voice it changes to.
+std::string Studio::label_of(const Note &n) const {
+    if (!n.controller) return n.label();
+    std::string said;
+    auto add = [&](const std::string &s) { said += (said.empty() ? "" : ", ") + s; };
+    if (n.voice_id) add("voice change to " + voice_name(*n.voice_id));
+    if (n.tempo > 0) add("tempo change to " + fmt_g(n.tempo));
+    if (!n.controls.empty()) add(describe_controls(n));
+    return "(" + (said.empty() ? std::string("controller") : said) + ")";
 }
 
 bool Studio::takes_notes() {
@@ -960,6 +981,8 @@ void Studio::sync(int select) {
     }
     bars_shown_.clear();
     refresh_bars();
+    // a voice change added or taken away shows in the tracks list
+    refresh_track(current_);
     if (!notes().empty()) select_only({std::min(std::max(select, 0), int(notes().size()) - 1)});
 }
 
@@ -1002,10 +1025,10 @@ void Studio::on_key(wxKeyEvent &evt) {
 //: Update one row in place, so the selection and focus do not move.
 void Studio::refresh_row(int i) {
     const Note &n = notes()[size_t(i)];
-    list_->SetItem(i, 0, W(n.label()));
-    // a controller has no pitch, length or words of its own
+    list_->SetItem(i, 0, W(label_of(n)));
+    // a controller has no pitch, length, words or controls of its own
     if (n.controller) {
-        for (int c = 1; c <= 5; ++c) list_->SetItem(i, c, "");
+        for (int c : {1, 2, 3, 4, 5, 7}) list_->SetItem(i, c, "");
         return;
     }
     list_->SetItem(i, 1, W(pitch_name(n.pitch)));
@@ -1013,6 +1036,7 @@ void Studio::refresh_row(int i) {
     list_->SetItem(i, 3, W(n.word));
     list_->SetItem(i, 4, W(describe_bend(n.bend)));
     list_->SetItem(i, 5, W(describe_mod(n.mod)));
+    list_->SetItem(i, 7, W(describe_controls(n)));
 }
 
 //: The Bar column, worked out once and written only where it changed. It used
@@ -1322,10 +1346,10 @@ void Studio::on_add_rest(wxCommandEvent &) {
 void Studio::on_add_controller(wxCommandEvent &) {
     if (!takes_notes()) return;
     undoable("add controller", [&] {
-        ControllerDialog dlg(this, Note::tempo_change(0));
+        ControllerDialog dlg(this, this, Note::tempo_change(0), voice_at(insertion_point()));
         if (dlg.ShowModal() != wxID_OK) return;
         Note c = dlg.result();
-        if (c.tempo <= 0) {
+        if (c.tempo <= 0 && !c.voice_id && c.controls.empty()) {
             say("nothing was filled in, so no controller was added");
             return;
         }
@@ -1343,8 +1367,15 @@ std::string Studio::controller_said(int i) {
     double at = position(i);
     auto bb = bar_and_beat(at, signature());
     std::string where = "bar " + std::to_string(bb.first) + " beat " + fmt_g(std::nearbyint(bb.second * 1000) / 1000);
-    if (c.tempo <= 0) return "nothing at " + where + ". Delete removes it";
-    std::string out = "tempo " + fmt_g(c.tempo) + " from " + where + ", for the whole song";
+    if (c.tempo <= 0 && !c.voice_id && c.controls.empty()) return "nothing at " + where + ". Delete removes it";
+    std::string out;
+    auto add = [&](const std::string &s) { out += (out.empty() ? "" : ", ") + s; };
+    if (c.voice_id) add("voice " + voice_name(*c.voice_id));
+    if (!c.controls.empty()) add(describe_controls(c));
+    if (!out.empty()) out += " from " + where;
+    if (c.tempo <= 0) return out;
+    out += (out.empty() ? "tempo " + fmt_g(c.tempo) + " from " + where : ", and tempo " + fmt_g(c.tempo)) +
+           ", for the whole song";
     // the same beat changed elsewhere too: the track higher up wins
     for (size_t k = 0; k < song_.tracks.size(); ++k) {
         if (int(k) == current_) continue;
@@ -1368,7 +1399,7 @@ void Studio::on_edit(wxCommandEvent &) {
             return;
         }
         if (notes()[size_t(i)].controller) {
-            ControllerDialog dlg(this, notes()[size_t(i)]);
+            ControllerDialog dlg(this, this, notes()[size_t(i)], voice_at(i));
             if (dlg.ShowModal() != wxID_OK) return;
             notes()[size_t(i)] = dlg.result();
             touch();
@@ -1419,7 +1450,7 @@ RenderRequest Studio::request(const std::vector<Note> *only, double start,
         sing = audible(song_.tracks);
     } else {
         copy = track();
-        copy.voice_id = track_voice_of(track());
+        copy.voice_id = current_voice();
         copy.notes = *only;
         sing = {&copy};
     }

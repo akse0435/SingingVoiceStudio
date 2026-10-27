@@ -8,6 +8,7 @@
 // translates into its own.
 #pragma once
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -21,6 +22,21 @@ constexpr int kSampleRate = 44100;
 //: The phoneme that is silence. A note holding nothing else is a rest.
 inline const char *const kRest = "%";
 
+//: VocalWriter's own controls on a note, by name ("volume", "color", "noise",
+//: "breath", "vibrato", "vibrato_rate", "portamento", "chorus", "detune"),
+//: each [(where in the note 0..1, value)]. A value holds, as a control does
+//: in VocalWriter, until the next one. Only VocalWriter's voices sing them;
+//: see kNoteControls in core/project.h for the ranges.
+using NoteControls = std::map<std::string, std::vector<std::pair<double, double>>>;
+
+//: One of those controls set where a controller stands, between two notes:
+//: from `beat` on, `name` is `value`.
+struct ControlAt {
+    double beat;
+    std::string name;
+    double value;
+};
+
 //: One sung note. `durations_ms` has one entry per phoneme and they add up
 //: to the note's length: the consonants at the length the singer gives them
 //: and the vowels holding the rest (see phonology.h, syllable_lengths).
@@ -32,6 +48,7 @@ struct SungNote {
     std::vector<double> durations_ms;
     //: the lyric as written; "ov-" joins it to the next note's syllable
     std::string word;
+    NoteControls controls;
 };
 
 //: A bend in force from `seconds` (from the start of the phrase) onwards, in
@@ -95,6 +112,10 @@ struct Phrase {
     //: from its start, bpm), `bpm` being the tempo it starts at. Any other
     //: engine is given the notes already at `bpm`.
     std::vector<std::pair<double, double>> tempos;
+    //: and the controls the notes before the phrase left standing
+    std::map<std::string, double> held;
+    //: and the controllers' controls inside it, in beats from its first note
+    std::vector<ControlAt> controls;
 };
 
 //: A whole part, rests and all, from the song's first beat: for an engine
@@ -110,6 +131,10 @@ struct Part {
     double consonants = 1.0;
     int channel = 0;
     std::vector<std::pair<double, double>> tempos;   // (beats from the start, bpm)
+    //: (beats from the start, voice): the voices of the same engine the part
+    //: goes on to, each from its beat on
+    std::vector<std::pair<double, int>> voices;
+    std::vector<ControlAt> controls;                 // beats from the start
 };
 
 //: The rendered phrase. `stopped_short` says the engine ran out of room or

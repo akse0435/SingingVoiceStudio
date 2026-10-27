@@ -193,6 +193,17 @@ void control(std::vector<vwseq_event> &ev, int32_t t, int status, int value) {
     ev.push_back({t, status, 0, std::max(0, std::min(127, value))});
 }
 
+//: the sequencer's status for one of a note's controls (NoteControls), or 0
+int control_status(const std::string &key) {
+    static const std::map<std::string, int> statuses = {
+        {"volume", VWSEQ_VOLUME},         {"color", VWSEQ_COLOR},     {"noise", VWSEQ_NOISE},
+        {"breath", VWSEQ_BREATH},         {"vibrato", VWSEQ_VIB_DEPTH}, {"vibrato_rate", VWSEQ_VIB_FREQ},
+        {"portamento", VWSEQ_PORTAMENTO}, {"chorus", VWSEQ_CHORUS},   {"detune", VWSEQ_DETUNE},
+    };
+    auto it = statuses.find(key);
+    return it == statuses.end() ? 0 : it->second;
+}
+
 //: a 14-bit control about 8192: pitch bend, detune and chorus
 void control14(std::vector<vwseq_event> &ev, int32_t t, int status, int value) {
     int v = std::max(0, std::min(16383, value + 8192));
@@ -257,10 +268,21 @@ bool to_seq(const Part &part, int voice, SeqPart *sp) {
     std::vector<vwseq_note> &notes = sp->notes;
     double beat = 0.0;
     int32_t end = 0;
+    std::vector<vwseq_event> note_ev;
     for (size_t i = 0; i < part.notes.size(); ++i) {
         const SungNote &n = part.notes[i];
         int32_t a = ticks(beat), b = ticks(beat + n.beats);
         beat += n.beats;
+        // the note's own controls, at their ticks
+        for (const auto &ctl : n.controls) {
+            int status = control_status(ctl.first);
+            for (const auto &pt : ctl.second) {
+                int32_t t = a + int32_t(std::llround(pt.first * std::max(0, b - a)));
+                int value = int(std::lrint(pt.second));
+                if (status == VWSEQ_CHORUS || status == VWSEQ_DETUNE) control14(note_ev, t, status, value);
+                else if (status) control(note_ev, t, status, value);
+            }
+        }
         if (b <= a) continue;
         vwseq_note v{};
         v.start = a;
@@ -307,6 +329,15 @@ bool to_seq(const Part &part, int voice, SeqPart *sp) {
         notes.push_back(r);
     }
 
+    // the controllers' controls, each where it stands: before a note that
+    // starts there
+    for (const ControlAt &c : part.controls) {
+        int status = control_status(c.name);
+        int value = int(std::lrint(c.value));
+        if (status == VWSEQ_CHORUS || status == VWSEQ_DETUNE) control14(note_ev, ticks(c.beat), status, value);
+        else if (status) control(note_ev, ticks(c.beat), status, value);
+    }
+
     // The part's settings at the start, only those off their defaults,
     // so the voice starts as a VocalWriter song starts it; then the
     // bends and the wheel as they move.
@@ -344,6 +375,11 @@ bool to_seq(const Part &part, int voice, SeqPart *sp) {
             last = v;
         }
     }
+    ev.insert(ev.end(), note_ev.begin(), note_ev.end());
+    // the voice changes, each where it stands: before a note that starts
+    // there, which VocalWriter sings the same as after it
+    for (const auto &v : part.voices)
+        ev.push_back({ticks(v.first), VWSEQ_SET_VOICE, 0, v.second - kVocalWriterBase});
     std::stable_sort(ev.begin(), ev.end(),
                      [](const vwseq_event &a, const vwseq_event &b) { return a.time < b.time; });
 
@@ -398,6 +434,12 @@ public:
         }
         part.notes.insert(part.notes.end(), phrase.notes.begin(), phrase.notes.end());
         part.tempos = phrase.tempos;
+        // the controls the notes before it left standing, at its start
+        for (const auto &h : phrase.held) {
+            auto &pts = part.notes.front().controls[h.first];
+            pts.insert(pts.begin(), {0.0, h.second});
+        }
+        for (const ControlAt &c : phrase.controls) part.controls.push_back({c.beat + phrase.room, c.name, c.value});
         Sung out = sing_part(part);
         out.starts_before = seconds_into(phrase.bpm, phrase.tempos, phrase.room);
         return out;

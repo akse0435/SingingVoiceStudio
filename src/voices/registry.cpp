@@ -84,20 +84,27 @@ std::vector<std::string> Registry::status() {
 
 namespace svs {
 
+//: One voice put back by its name; true if it moved.
+static bool by_name(std::optional<int> &id, const std::optional<std::string> &name,
+                    const std::vector<VoiceListing> &voices) {
+    if (!name || name->empty()) return false;
+    for (const VoiceListing &v : voices)
+        if (id && v.id == *id && v.name == *name) return false;
+    for (const VoiceListing &v : voices)
+        if (v.name == *name) {
+            id = v.id;
+            return true;
+        }
+    return false;
+}
+
 bool resolve_voice_names(Song &song, const std::vector<VoiceListing> &voices) {
     bool moved = false;
     for (Track &t : song.tracks) {
-        if (!t.voice_name || t.voice_name->empty()) continue;
-        bool same = false;
-        for (const VoiceListing &v : voices)
-            if (t.voice_id && v.id == *t.voice_id && v.name == *t.voice_name) same = true;
-        if (same) continue;
-        for (const VoiceListing &v : voices)
-            if (v.name == *t.voice_name) {
-                t.voice_id = v.id;
-                moved = true;
-                break;
-            }
+        moved = by_name(t.voice_id, t.voice_name, voices) || moved;
+        // and every voice a controller changes to
+        for (Note &n : t.notes)
+            if (n.controller) moved = by_name(n.voice_id, n.voice_name, voices) || moved;
     }
     return moved;
 }

@@ -58,8 +58,14 @@ public:
     int consonant_pct() const { return int(std::lround(song_.consonants * 100)); }
     const VoiceStyle &song_voice() const { return song_.voice; }
     Reverb song_reverb() const { return song_.reverb; }
-    //: the voice of the track being worked on, for previews
-    int current_voice() const { return track_voice_of(track()); }
+    //: the voice of the track being worked on where the cursor is, for
+    //: previews: a controller before it may have changed it
+    int current_voice() const {
+        int i = list_ ? list_->FirstSelected() : -1;
+        return voice_at(i < 0 ? int(track().notes.size()) : i + 1);
+    }
+    int voice_at(int upto) const;
+    std::string label_of(const Note &n) const;
     //: render notes on the current track's voice and play them
     void preview(const std::vector<Note> &notes, std::function<void()> done);
     //: `marked`: with the dictionary's syllables marked (Lexicon::phonemes)

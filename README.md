@@ -68,6 +68,21 @@ each one falls exactly where the file has it. The project keeps a track's
 controllers beside its notes, so a song without any is the same file as
 before.
 
+**VocalWriter's controls** are kept on the notes as its songs keep them: a
+velocity, and the volume, colour, noise, breath, vibrato, portamento, chorus
+and detune from a point in a note on, each holding until the next (Edit
+note, VocalWriter controls). Only VocalWriter's voices sing them, the
+velocity too -- to another engine a velocity would only be loudness, which a
+track's volume is -- so they are greyed for a note another engine sings.
+
+**A voice change** is a controller too: from where it stands, the track
+sings with another voice, any engine's. A track that only ever changes
+between VocalWriter's voices is sung as VocalWriter sang one, the change
+being its program change; one that goes from engine to engine is sung phrase
+by phrase, each phrase cut where the voice changes and sung by the voice in
+force. A controller sets VocalWriter's controls as well, from where it stands
+on, as a note sets them from a point inside it.
+
 Notes are written in VocalWriter's phoneme symbols whichever engine sings
 them; each engine translates (the tables are at the top of
 `src/voices/<engine>.cpp`). Add word uses VocalWriter's own dictionary.

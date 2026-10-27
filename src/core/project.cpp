@@ -26,6 +26,25 @@ const char *const kProjectWildcard = "Singing Voice Studio project (*.vws)|*.vws
 const char *const kMidiWildcard = "MIDI files (*.mid;*.midi)|*.mid;*.midi";
 const char *const kDefaultPhoneme = "AA";
 
+const NoteControl kNoteControls[] = {
+    {"volume", "Volume", 0, 127, "0 to 127"},
+    {"color", "Colour", 0, 127, "0 to 127, brighter as it rises"},
+    {"noise", "Noise", 0, 127, "0 to 127, the hiss in the voice"},
+    {"breath", "Breath", 0, 127, "0 to 127, air in the tone"},
+    {"vibrato", "Vibrato depth", 0, 127, "0 to 127"},
+    {"vibrato_rate", "Vibrato rate", 0, 127, "0 to 127"},
+    {"portamento", "Portamento", 0, 127, "0 to 127, the glide between notes"},
+    {"chorus", "Chorus", -8192, 8191, "-8192 to 8191"},
+    {"detune", "Detune", -8192, 8191, "-8192 to 8191"},
+};
+const size_t kNoteControlCount = sizeof kNoteControls / sizeof kNoteControls[0];
+
+const NoteControl *note_control(const std::string &key) {
+    for (const NoteControl &c : kNoteControls)
+        if (key == c.key) return &c;
+    return nullptr;
+}
+
 namespace {
 //: Bumped only if an older file would otherwise be read wrongly. Version 2
 //: keeps the notes under `tracks`; a version 1 file is read as one track.
@@ -79,7 +98,17 @@ bool Note::is_rest() const {
 }
 
 std::string Note::label() const {
-    if (controller) return tempo > 0 ? "(tempo change to " + fmt_g(tempo) + ")" : "(controller)";
+    if (controller) {
+        std::string said;
+        if (tempo > 0) said = "tempo change to " + fmt_g(tempo);
+        if (voice_id) said += std::string(said.empty() ? "" : ", ") + "voice change";
+        for (const auto &c : controls) {
+            const NoteControl *k = note_control(c.first);
+            if (k && !c.second.empty())
+                said += std::string(said.empty() ? "" : ", ") + k->label + " " + fmt_g(c.second.front().second);
+        }
+        return "(" + (said.empty() ? std::string("controller") : said) + ")";
+    }
     return is_rest() ? "(rest)" : text();
 }
 
@@ -354,6 +383,11 @@ Reverb read_reverb(const json &doc) {
 json controller_doc(const Note &n) {
     json c = json::object();
     if (n.tempo > 0) c["tempo"] = round_to(n.tempo, 3);
+    if (n.voice_id) c["voice_id"] = *n.voice_id;
+    if (n.voice_name) c["voice_name"] = *n.voice_name;
+    // VocalWriter's controls, each as the value it sets
+    for (const auto &k : n.controls)
+        if (!k.second.empty()) c["controls"][k.first] = k.second.front().second;
     return c;
 }
 
@@ -379,6 +413,17 @@ json note_doc(const Note &n) {
         json m = json::array();
         for (const auto &p : n.mod) m.push_back({round_to(p.first, 4), round_to(p.second, 4)});
         d["mod"] = m;
+    }
+    // VocalWriter's own, again only when there are any
+    if (n.velocity) d["velocity"] = n.velocity;
+    if (!n.controls.empty()) {
+        json c = json::object();
+        for (const auto &kv : n.controls) {
+            json pts = json::array();
+            for (const auto &p : kv.second) pts.push_back({round_to(p.first, 6), round_to(p.second, 4)});
+            c[kv.first] = pts;
+        }
+        d["controls"] = c;
     }
     return d;
 }
@@ -455,6 +500,12 @@ void read_controller(const json &c, Note &n) {
     n = Note::tempo_change(0);
     if (!c.is_object()) return;
     if (c.contains("tempo")) n.tempo = std::max(0.0, as_double(c["tempo"], 0));
+    if (c.contains("voice_id") && !c["voice_id"].is_null()) n.voice_id = as_int(c["voice_id"], 0);
+    if (c.contains("voice_name") && c["voice_name"].is_string()) n.voice_name = c["voice_name"].get<std::string>();
+    if (c.contains("controls") && c["controls"].is_object())
+        for (auto it = c["controls"].begin(); it != c["controls"].end(); ++it)
+            if (const NoteControl *k = note_control(it.key()))
+                n.controls[it.key()] = {{0.0, std::max(double(k->lo), std::min(double(k->hi), as_double(it.value(), 0)))}};
 }
 
 std::vector<Note> read_notes(const json &entries) {
@@ -488,6 +539,23 @@ std::vector<Note> read_notes(const json &entries) {
                 for (const json &pt : *md)
                     n.mod.push_back({pt.at(0).get<double>(),
                                      std::max(0.0, std::min(127.0, pt.at(1).get<double>()))});
+            auto vel = e.find("velocity");
+            if (vel != e.end()) n.velocity = std::max(0, std::min(127, as_int(*vel, 0)));
+            auto ctl = e.find("controls");
+            if (ctl != e.end() && ctl->is_object())
+                for (auto it = ctl->begin(); it != ctl->end(); ++it) {
+                    const NoteControl *c = note_control(it.key());
+                    if (!c || !it->is_array()) continue;
+                    auto &pts = n.controls[c->key];
+                    for (const json &pt : *it)
+                        pts.push_back({std::max(0.0, std::min(1.0, pt.at(0).get<double>())),
+                                       std::max(double(c->lo), std::min(double(c->hi), pt.at(1).get<double>()))});
+                    std::stable_sort(pts.begin(), pts.end(), [](const std::pair<double, double> &a,
+                                                                const std::pair<double, double> &b) {
+                        return a.first < b.first;
+                    });
+                    if (pts.empty()) n.controls.erase(c->key);
+                }
             out.push_back(n);
         } catch (...) {
             continue;
@@ -1209,6 +1277,16 @@ Track tempo_track(const std::vector<TempoChange> &changes) {
     return t;
 }
 
+std::vector<std::pair<double, int>> voice_changes(const Track &track) {
+    std::vector<std::pair<double, int>> out;
+    double at = 0;
+    for (const Note &n : track.notes) {
+        if (n.controller && n.voice_id) out.push_back({at, *n.voice_id});
+        at += n.beats;
+    }
+    return out;
+}
+
 bool sings(const Track &track) {
     for (const Note &n : track.notes)
         if (!n.controller && !n.is_rest()) return true;
@@ -1218,8 +1296,11 @@ bool sings(const Track &track) {
 void steady_tempo(Song &song) {
     for (Track &t : song.tracks) {
         std::vector<Note> kept;
-        for (const Note &n : t.notes)
-            if (!n.controller || n.tempo <= 0) kept.push_back(n);
+        for (Note n : t.notes) {
+            // a controller that changes something else too keeps doing that
+            if (n.controller) n.tempo = 0;
+            if (!n.controller || n.voice_id || !n.controls.empty()) kept.push_back(n);
+        }
         t.notes = kept;
     }
 }

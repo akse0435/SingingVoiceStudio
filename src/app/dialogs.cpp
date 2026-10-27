@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <deque>
 
 #include <wx/dirdlg.h>
 #include <wx/tokenzr.h>
@@ -10,6 +11,7 @@
 #include "audio/decode.h"
 #include "core/paths.h"
 #include "core/phonology.h"
+#include "voices/registry.h"
 
 namespace svs {
 
@@ -297,10 +299,53 @@ const CurveKind kModCurve = {"Mod wheel", "Mod point", "Mod wheel points", "Mod 
                              "0 is at rest, 127 is the deepest vibrato", 0, 127, false, "mod wheel",
                              "", &Note::mod};
 
+const CurveKind &control_curve(const std::string &key) {
+    // made once, so the dialogs can hold on to them
+    static std::deque<std::string> words;
+    static std::deque<CurveKind> kinds;
+    if (kinds.empty())
+        for (size_t i = 0; i < kNoteControlCount; ++i) {
+            const NoteControl &c = kNoteControls[i];
+            words.push_back(std::string(c.label) + " point");
+            const char *point = words.back().c_str();
+            words.push_back(std::string(c.label) + " points");
+            const char *list = words.back().c_str();
+            words.push_back(std::string(c.label));
+            for (char &ch : words.back()) ch = char(std::tolower((unsigned char)ch));
+            kinds.push_back({c.label, point, list, c.label, c.hint, double(c.lo), double(c.hi), c.lo < 0,
+                             words.back().c_str(), "", nullptr, c.key});
+        }
+    for (const CurveKind &k : kinds)
+        if (key == k.control) return k;
+    return kinds.front();
+}
+
+//: the curve a kind edits on a note
+static Bend &curve_of(Note &n, const CurveKind &k) { return k.field ? n.*(k.field) : n.controls[k.control]; }
+static Bend curve_in(const Note &n, const CurveKind &k) {
+    if (k.field) return n.*(k.field);
+    auto it = n.controls.find(k.control);
+    return it == n.controls.end() ? Bend() : it->second;
+}
+
 static std::string value_text(const CurveKind &k, double v) {
     char buf[32];
     std::snprintf(buf, sizeof buf, k.signed_values ? "%+g" : "%g", std::nearbyint(v * 1000) / 1000);
     return buf;
+}
+
+std::string describe_controls(const Note &note) {
+    std::string out;
+    auto add = [&](const std::string &s) { out += (out.empty() ? "" : ", ") + s; };
+    if (note.velocity) add("velocity " + std::to_string(note.velocity));
+    for (const auto &c : note.controls) {
+        if (c.second.empty()) continue;
+        const CurveKind &k = control_curve(c.first);
+        std::string s = k.said + std::string(" ") + value_text(k, c.second.front().second);
+        if (c.second.size() > 1) s += " to " + value_text(k, c.second.back().second);
+        add(s);
+    }
+    return out;
 }
 
 static void by_position(Bend &points) {
@@ -337,7 +382,7 @@ std::pair<double, double> PointDialog::result() const {
 
 CurveDialog::CurveDialog(wxWindow *parent, Studio *studio, const Note &note, const CurveKind &kind)
     : wxDialog(parent, wxID_ANY, kind.title), studio_(studio), note_(note), kind_(kind),
-      points_(note.*(kind.field)) {
+      points_(curve_in(note, kind)) {
     wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
     list_ = new ReportList(this, wxLC_REPORT | wxLC_SINGLE_SEL, wxSize(340, 170));
     list_->InsertColumn(0, "Position", wxLIST_FORMAT_LEFT, 150);
@@ -430,7 +475,7 @@ void CurveDialog::on_remove(wxCommandEvent &) {
 void CurveDialog::on_preview(wxCommandEvent &) {
     hear_->Disable();
     Note n = note_;
-    n.*(kind_.field) = result();
+    curve_of(n, kind_) = result();
     auto alive = token();
     wxButton *b = hear_;
     studio_->preview({n}, [alive, b]() {
@@ -442,6 +487,78 @@ Bend CurveDialog::result() const {
     Bend out = points_;
     by_position(out);
     return out;
+}
+
+// -- ControlsDialog --------------------------------------------------------------------
+
+ControlsDialog::ControlsDialog(wxWindow *parent, Studio *studio, const Note &note)
+    : wxDialog(parent, wxID_ANY, "VocalWriter controls"), studio_(studio), note_(note) {
+    wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
+    list_ = new ReportList(this, wxLC_REPORT | wxLC_SINGLE_SEL, wxSize(380, 250));
+    list_->InsertColumn(0, "Control", wxLIST_FORMAT_LEFT, 130);
+    list_->InsertColumn(1, "On this note", wxLIST_FORMAT_LEFT, 230);
+    list_->OnActivated([this] {
+        wxCommandEvent e;
+        on_edit(e);
+    });
+    list_->OnKey([this](wxKeyEvent &e) { on_key(e); });
+    caption(this, outer, "Controls, each holding until the next one, as in VocalWriter", list_);
+    wxBoxSizer *row = new wxBoxSizer(wxHORIZONTAL);
+    wxButton *edit = new wxButton(this, wxID_ANY, "&Edit control...");
+    edit->Bind(wxEVT_BUTTON, &ControlsDialog::on_edit, this);
+    row->Add(edit, 0, wxALL, 3);
+    wxButton *clear = new wxButton(this, wxID_ANY, "C&lear control");
+    clear->Bind(wxEVT_BUTTON, &ControlsDialog::on_clear, this);
+    row->Add(clear, 0, wxALL, 3);
+    outer->Add(row, 0);
+    outer->Add(buttons(this), 0, wxEXPAND | wxALL, 8);
+    SetSizerAndFit(outer);
+    sync();
+    list_->SetFocus();
+}
+
+void ControlsDialog::sync(int select) {
+    list_->DeleteAllItems();
+    for (size_t i = 0; i < kNoteControlCount; ++i) {
+        const CurveKind &k = control_curve(kNoteControls[i].key);
+        Bend pts = curve_in(note_, k);
+        std::string text;
+        for (const auto &p : pts)
+            text += (text.empty() ? "" : "; ") + value_text(k, p.second) + " at " +
+                    fmt_g(std::nearbyint(p.first * 100 * 1000) / 1000) + " per cent";
+        list_->InsertItem(long(i), W(k.title));
+        list_->SetItem(long(i), 1, W(text.empty() ? std::string("none") : text));
+    }
+    list_->SelectRow(std::min(std::max(select, 0), int(kNoteControlCount) - 1));
+    list_->FocusRow(std::min(std::max(select, 0), int(kNoteControlCount) - 1));
+}
+
+void ControlsDialog::on_key(wxKeyEvent &evt) {
+    int code = evt.GetKeyCode();
+    wxCommandEvent e;
+    if (code == WXK_RETURN || code == WXK_NUMPAD_ENTER) on_edit(e);
+    else if (code == WXK_DELETE || code == WXK_NUMPAD_DELETE) on_clear(e);
+    else evt.Skip();
+}
+
+void ControlsDialog::on_edit(wxCommandEvent &) {
+    int i = list_->FirstSelected();
+    if (i < 0) return;
+    const CurveKind &k = control_curve(kNoteControls[i].key);
+    CurveDialog dlg(this, studio_, note_, k);
+    if (dlg.ShowModal() != wxID_OK) return;
+    Bend pts = dlg.result();
+    if (pts.empty()) note_.controls.erase(k.control);
+    else note_.controls[k.control] = pts;
+    sync(i);
+}
+
+void ControlsDialog::on_clear(wxCommandEvent &) {
+    int i = list_->FirstSelected();
+    if (i < 0) return;
+    note_.controls.erase(kNoteControls[i].key);
+    sync(i);
+    studio_->say(W(std::string(kNoteControls[i].label) + " cleared"));
 }
 
 // -- NoteDialog ------------------------------------------------------------------------
@@ -486,6 +603,18 @@ NoteDialog::NoteDialog(wxWindow *parent, Studio *studio, const Note *note, const
     wxButton *mods = new wxButton(this, wxID_ANY, "&Mod points...");
     mods->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) { on_points(kModCurve); });
     outer->Add(mods, 0, wxALL, 6);
+
+    // VocalWriter keeps a velocity and its controls on each note, which
+    // only its voices sing: greyed for a note another engine sings
+    bool vocalwriter = is_vocalwriter_voice(studio_->current_voice());
+    velocity_ = new wxTextCtrl(this, wxID_ANY, note_.velocity ? W(std::to_string(note_.velocity)) : wxString(),
+                               wxDefaultPosition, wxSize(90, -1));
+    labelled(this, outer, "Velocity", velocity_, 0, "1 to 127, blank for the track's; VocalWriter's voices only");
+    enable_labelled(velocity_, vocalwriter);
+    wxButton *controls = new wxButton(this, wxID_ANY, "VocalWriter &controls...");
+    controls->Bind(wxEVT_BUTTON, &NoteDialog::on_controls, this);
+    controls->Enable(vocalwriter);
+    outer->Add(controls, 0, wxALL, 6);
     outer->Add(buttons(this), 0, wxEXPAND | wxALL, 8);
     SetSizerAndFit(outer);
     phon_->SetFocus();
@@ -536,6 +665,14 @@ void NoteDialog::on_points(const CurveKind &kind) {
                    (curve.size() == 1 ? "" : "s") + ", " + (described.empty() ? "none" : described)));
 }
 
+void NoteDialog::on_controls(wxCommandEvent &) {
+    ControlsDialog dlg(this, studio_, result());
+    if (dlg.ShowModal() != wxID_OK) return;
+    note_.controls = dlg.result();
+    std::string said = describe_controls(note_);
+    studio_->say(W(said.empty() ? std::string("no controls") : said));
+}
+
 int NoteDialog::value_pitch() const {
     try {
         return parse_pitch(U(pitch_->GetValue()));
@@ -557,6 +694,8 @@ Note NoteDialog::result() {
         return std::max(0.0, std::min(127.0, *v));
     };
     note_.mod = with_ends(note_.mod, wheel(read_bend(mod_start_->GetValue())), wheel(read_bend(mod_end_->GetValue())));
+    double vel;
+    note_.velocity = read_number(velocity_->GetValue(), &vel) ? std::max(0, std::min(127, int(std::lrint(vel)))) : 0;
     return note_;
 }
 
@@ -659,24 +798,133 @@ void SongSettingsDialog::apply(Song &song) const {
 
 // -- ControllerDialog --------------------------------------------------------------------
 
-ControllerDialog::ControllerDialog(wxWindow *parent, const Note &controller)
-    : wxDialog(parent, wxID_ANY, "Controller"), note_(controller) {
-    wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
+ControllerDialog::ControllerDialog(wxWindow *parent, Studio *studio, const Note &controller, int voice_before)
+    : wxDialog(parent, wxID_ANY, "Controller"), note_(controller), voices_(studio->voice_list()) {
+    outer_ = new wxBoxSizer(wxVERTICAL);
+    // What it changes comes first, and only that one's fields follow it, so
+    // Tab goes from the choice to them and on to OK.
+    wxArrayString kinds;
+    kinds.Add("Voice change");
+    kinds.Add("Tempo change");
+    kind_ = new wxChoice(this, wxID_ANY, wxDefaultPosition, wxSize(220, -1), kinds);
+    labelled(this, outer_, "Controller", kind_, 0, "what it changes from here on");
+
+    // the voice as a track's is chosen: the engine, then its voice
+    int start = controller.voice_id ? *controller.voice_id : voice_before;
+    wxArrayString engines;
+    int engine = 0;
+    for (const VoiceListing &v : voices_) {
+        if (engine_names_.empty() || engine_names_.back() != v.family) {
+            engine_names_.push_back(v.family);
+            engines.Add(W(v.available ? v.family : v.family + " (not installed)"));
+        }
+        if (v.id == start) engine = int(engine_names_.size()) - 1;
+    }
+    wxBoxSizer *voice_group = new wxBoxSizer(wxHORIZONTAL);
+    engine_ = new wxChoice(this, wxID_ANY, wxDefaultPosition, wxSize(170, -1), engines);
+    if (!engines.empty()) engine_->SetSelection(engine);
+    labelled(this, voice_group, "Engine", engine_);
+    voice_ = new wxChoice(this, wxID_ANY, wxDefaultPosition, wxSize(200, -1));
+    labelled(this, voice_group, "Voice", voice_);
+    outer_->Add(voice_group, 0, wxEXPAND);
+    groups_.push_back(voice_group);
+    fill_voices(start);
+    engine_->Bind(wxEVT_CHOICE, [this](wxCommandEvent &) { fill_voices(-1); });
+
+    wxBoxSizer *tempo_group = new wxBoxSizer(wxVERTICAL);
     tempo_ = new wxTextCtrl(this, wxID_ANY, controller.tempo > 0 ? W(fmt_g(controller.tempo)) : wxString(),
                             wxDefaultPosition, wxSize(80, -1));
-    labelled(this, outer, "Tempo change (applies to the entire song)", tempo_, 0,
-             "beats per minute from here on, 10 to 250; blank for no change");
-    outer->Add(buttons(this), 0, wxEXPAND | wxALL, 8);
-    SetSizerAndFit(outer);
-    tempo_->SetFocus();
+    labelled(this, tempo_group, "Tempo change (applies to the entire song)", tempo_, 0,
+             "beats per minute from here on, 10 to 250");
+    outer_->Add(tempo_group, 0, wxEXPAND);
+    groups_.push_back(tempo_group);
+
+    // VocalWriter's controls, each from here on, as a note's own can be set
+    // inside it; only VocalWriter's voices sing them, so they are greyed
+    // where the track is sung by another engine
+    for (size_t i = 0; i < kNoteControlCount; ++i) {
+        const NoteControl &k = kNoteControls[i];
+        auto it = controller.controls.find(k.key);
+        wxString shown = it != controller.controls.end() && !it->second.empty()
+                             ? W(fmt_g(it->second.front().second))
+                             : wxString();
+        wxBoxSizer *group = new wxBoxSizer(wxVERTICAL);
+        wxTextCtrl *field = new wxTextCtrl(this, wxID_ANY, shown, wxDefaultPosition, wxSize(80, -1));
+        labelled(this, group, k.label, field, 0, W(std::string(k.hint) + "; VocalWriter's voices only"));
+        enable_labelled(field, is_vocalwriter_voice(voice_before));
+        outer_->Add(group, 0, wxEXPAND);
+        groups_.push_back(group);
+        controls_.push_back({&k, field});
+        kind_->Append(k.label);
+    }
+    // an existing controller shows what it changes
+    int kind = controller.tempo > 0 && !controller.voice_id ? 1 : 0;
+    for (size_t i = 0; i < controls_.size() && !controller.voice_id && controller.tempo <= 0; ++i)
+        if (controller.controls.count(controls_[i].first->key)) {
+            kind = 2 + int(i);
+            break;
+        }
+    kind_->SetSelection(kind);
+    kind_->Bind(wxEVT_CHOICE, [this](wxCommandEvent &) { show_kind(); });
+    outer_->Add(buttons(this), 0, wxEXPAND | wxALL, 8);
+    SetSizer(outer_);
+    show_kind();
+    kind_->SetFocus();
+}
+
+//: Only the fields of the kind chosen are there, and the window fits them.
+void ControllerDialog::show_kind() {
+    int k = kind_->GetSelection();
+    for (size_t i = 0; i < groups_.size(); ++i) outer_->Show(groups_[i], int(i) == k, true);
+    Layout();
+    Fit();
+}
+
+//: The voice box for the engine chosen, `select` chosen in it if it is
+//: one of its voices, and otherwise its first.
+void ControllerDialog::fill_voices(int select) {
+    voice_->Clear();
+    ids_.clear();
+    int e = engine_->GetSelection();
+    if (e < 0 || size_t(e) >= engine_names_.size()) return;
+    int at = 0;
+    for (const VoiceListing &v : voices_) {
+        if (v.family != engine_names_[size_t(e)]) continue;
+        // "Betty" rather than "DECtalk Betty", as the track's voice box has it
+        std::string name = v.name, prefix = v.family + " ";
+        if (name.size() > prefix.size() && name.compare(0, prefix.size(), prefix) == 0)
+            name = name.substr(prefix.size());
+        if (v.id == select) at = int(ids_.size());
+        ids_.push_back(v.id);
+        voice_->Append(W(name));
+    }
+    if (!ids_.empty()) voice_->SetSelection(at);
 }
 
 Note ControllerDialog::result() const {
+    // one change to a controller: the kind chosen, and nothing else
     Note n = note_;
-    double bpm = 0;
-    n.tempo = read_number(tempo_->GetValue(), &bpm) && bpm > 0
-                  ? std::max(10.0, std::min(250.0, std::nearbyint(bpm * 1e3) / 1e3))
-                  : 0.0;
+    n.tempo = 0;
+    n.voice_id.reset();
+    n.voice_name.reset();
+    n.controls.clear();
+    int k = kind_->GetSelection();
+    if (k == 0) {
+        int i = voice_->GetSelection();
+        if (i >= 0 && i < int(ids_.size())) {
+            n.voice_id = ids_[size_t(i)];
+            n.voice_name = saved_voice_name(*n.voice_id, voices_);
+        }
+    } else if (k == 1) {
+        double bpm = 0;
+        if (read_number(tempo_->GetValue(), &bpm) && bpm > 0)
+            n.tempo = std::max(10.0, std::min(250.0, std::nearbyint(bpm * 1e3) / 1e3));
+    } else if (k >= 2 && size_t(k - 2) < controls_.size()) {
+        const auto &c = controls_[size_t(k - 2)];
+        double v = 0;
+        if (read_number(c.second->GetValue(), &v))
+            n.controls[c.first->key] = {{0.0, std::max(double(c.first->lo), std::min(double(c.first->hi), std::nearbyint(v)))}};
+    }
     return n;
 }
 
@@ -684,6 +932,7 @@ Note ControllerDialog::result() const {
 
 TrackDialog::TrackDialog(wxWindow *parent, Studio *studio, const Track &track)
     : wxDialog(parent, wxID_ANY, "Track"), studio_(studio) {
+    for (const auto &v : voice_changes(track)) changes_to_vocalwriter_ = changes_to_vocalwriter_ || is_vocalwriter_voice(v.second);
     wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
     name_ = new wxTextCtrl(this, wxID_ANY, W(track.name), wxDefaultPosition, wxSize(220, -1));
     labelled(this, outer, "Name", name_);
@@ -810,7 +1059,8 @@ void TrackDialog::fill_voices(int select) {
 //: The velocity is VocalWriter's alone, so it is greyed for another engine.
 void TrackDialog::sync_velocity() {
     const Engine &e = engines_[size_t(std::max(0, engine_->GetSelection()))];
-    enable_labelled(velocity_, !e.voices.empty() && is_vocalwriter_voice(e.voices.front().id));
+    // or one of VocalWriter's the track changes to further on
+    enable_labelled(velocity_, changes_to_vocalwriter_ || (!e.voices.empty() && is_vocalwriter_voice(e.voices.front().id)));
 }
 
 void TrackDialog::on_own_voice(wxCommandEvent &) {
