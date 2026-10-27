@@ -50,9 +50,13 @@ private:
 class AddWordDialog : public wxDialog, Alive {
 public:
     AddWordDialog(wxWindow *parent, Studio *studio, int pitch, double beats);
+    //: Add word to existing notes: the word goes on `existing`, the notes
+    //: that sound from the cursor on, each keeping all but what it sings
+    AddWordDialog(wxWindow *parent, Studio *studio, std::vector<Note> existing);
     std::vector<Note> result() const { return rows_; }
 
 private:
+    void build(double beats);
     std::pair<std::string, int> typed() const;
     void on_look(wxCommandEvent &);
     void looked(const std::string &word, int wanted, const std::vector<std::string> &phones);
@@ -68,9 +72,10 @@ private:
 
     Studio *studio_;
     int pitch_;
+    std::vector<Note> existing_;
     std::vector<std::string> phonemes_;
     std::vector<Note> rows_;
-    wxTextCtrl *word_, *beats_;
+    wxTextCtrl *word_, *beats_ = nullptr;
     wxButton *hear_, *ok_;
     wxSpinCtrl *count_;
     ReportList *list_;

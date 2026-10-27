@@ -44,7 +44,7 @@ enum {
     ID_TRACK_NEW, ID_TRACK_BACKING, ID_TRACK_EDIT, ID_TRACK_REMOVE, ID_TRACK_MUTE, ID_TRACK_SOLO,
     ID_TRACK_UP, ID_TRACK_DOWN, ID_PREVIEW_TIMER, ID_RECOVERY_TIMER, ID_ADD_CONTROLLER, ID_CLOSE_RESTS,
     ID_REMOVE_VELOCITIES, ID_APPEND, ID_OWN_PATH, ID_PLAIN_HELD, ID_FOLLOW, ID_FOLLOW_TIMER, ID_EXPORT_TIMER,
-    ID_EXPORT_MIDI,
+    ID_EXPORT_MIDI, ID_ADD_WORD_EXISTING,
 };
 
 //: A beat is a quarter note, so a sixteenth is a quarter of a beat: the step
@@ -63,6 +63,8 @@ const int kFollowStep = 40;
 const int kExportPoll = 200;
 
 const int kMaxUndo = 100;
+//: the most existing notes a word is offered, more than any word has syllables
+const size_t kMaxWordNotes = 64;
 
 //: The system's exclamation, so that a question is heard as well as read.
 void exclaim() {
@@ -252,6 +254,8 @@ void Studio::build_menu() {
 
     wxMenu *note = new wxMenu();
     note->Append(ID_ADD_WORD, K("Add &word...\tCtrl+W"), "Look a word up and spread it over one note or several");
+    note->Append(ID_ADD_WORD_EXISTING, K("Add word to ex&isting notes...\tCtrl+Shift+W"),
+                 "Look a word up and put it on the notes already there, from the selected one on");
     note->Append(ID_ADD_NOTE, K("Add &note...\tCtrl+N"), "Add a note and choose its phonemes");
     note->Append(ID_ADD_REST, K("Add &rest\tCtrl+R"), "Add a silent break of the same length");
     note->Append(ID_BAR_REST, K("Rest to the end of the &bar\tCtrl+Shift+R"),
@@ -380,6 +384,7 @@ void Studio::build_menu() {
 
     auto on = [this](int id, void (Studio::*fn)(wxCommandEvent &)) { Bind(wxEVT_MENU, fn, this, id); };
     on(ID_ADD_WORD, &Studio::on_add_word);
+    on(ID_ADD_WORD_EXISTING, &Studio::on_add_word_existing);
     on(ID_ADD_NOTE, &Studio::on_add_note);
     on(ID_ADD_REST, &Studio::on_add_rest);
     on(ID_BAR_REST, &Studio::on_bar_rest);
@@ -666,6 +671,7 @@ void Studio::on_keys(wxCommandEvent &) {
         "Delete on a track  remove it, or every selected track: Shift with the arrow keys selects more than one",
         "Ctrl+Up or Ctrl+Down on a track  reorder the parts",
         "Ctrl+W  add a word after the selected note, or at the end",
+        "Ctrl+Shift+W  add a word to the notes already there, from the selected one on",
         "Ctrl+N  add a note after the selected note, or at the end",
         "Ctrl+R  add a rest, a silent break",
         "Ctrl+Shift+R  rest to the end of the bar",
@@ -1562,6 +1568,41 @@ void Studio::on_add_word(wxCommandEvent &) {
         for (const Note &n : added) all += (all.empty() ? "" : ", ") + n.text();
         say(W("added " + (added[0].word.empty() ? std::string("the word") : added[0].word) + " over " +
               plural(added.size(), "note") + ": " + all));
+    });
+}
+
+//: A word on the notes already there, from the one the cursor is on: a
+//: melody given its words without a phoneme typed.
+void Studio::on_add_word_existing(wxCommandEvent &) {
+    if (!takes_notes()) return;
+    // the notes that sound, from the cursor on, a chord's last alone
+    std::vector<int> spots;
+    std::vector<Note> existing;
+    int from = list_->FocusedRow();
+    if (from < 0 && !selected().empty()) from = selected().front();
+    for (int i = std::max(0, from); from >= 0 && i < int(notes().size()) && spots.size() < kMaxWordNotes; ++i) {
+        const Note &n = notes()[size_t(i)];
+        if (n.controller || n.is_rest() || n.beats <= 0) continue;
+        spots.push_back(i);
+        existing.push_back(n);
+    }
+    if (spots.empty()) {
+        say("there is no note from the cursor on to put a word on");
+        return;
+    }
+    undoable("add word to existing notes", [&] {
+        AddWordDialog dlg(this, this, existing);
+        if (dlg.ShowModal() != wxID_OK) return;
+        std::vector<Note> put = dlg.result();
+        if (put.empty()) return;
+        for (size_t k = 0; k < put.size() && k < spots.size(); ++k) notes()[size_t(spots[k])] = put[k];
+        touch();
+        // on to the note after, ready for the next word
+        sync(put.size() < spots.size() ? spots[put.size()] : spots[std::min(put.size(), spots.size()) - 1]);
+        std::string all;
+        for (const Note &n : put) all += (all.empty() ? "" : ", ") + n.text();
+        say(W("put " + (put[0].word.empty() ? std::string("the word") : put[0].word) + " on " +
+              plural(put.size(), "note") + ": " + all));
     });
 }
 

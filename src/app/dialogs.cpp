@@ -102,6 +102,16 @@ void PhonemePicker::on_preview(wxCommandEvent &) {
 
 AddWordDialog::AddWordDialog(wxWindow *parent, Studio *studio, int pitch, double beats)
     : wxDialog(parent, wxID_ANY, "Add word"), studio_(studio), pitch_(pitch) {
+    build(beats);
+}
+
+AddWordDialog::AddWordDialog(wxWindow *parent, Studio *studio, std::vector<Note> existing)
+    : wxDialog(parent, wxID_ANY, "Add word to existing notes"), studio_(studio), pitch_(kDefaultPitch),
+      existing_(std::move(existing)) {
+    build(kDefaultBeats);
+}
+
+void AddWordDialog::build(double beats) {
     wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
     word_ = new wxTextCtrl(this, wxID_ANY, "", wxDefaultPosition, wxSize(220, -1), wxTE_PROCESS_ENTER);
     word_->Bind(wxEVT_TEXT_ENTER, &AddWordDialog::on_look, this);
@@ -122,11 +132,14 @@ AddWordDialog::AddWordDialog(wxWindow *parent, Studio *studio, int pitch, double
     // no hint here: a spin control's edit box takes its name from the
     // caption as written, so the name has to stand on its own
     labelled(this, outer, "Notes to use", count_);
-    beats_ = new wxTextCtrl(this, wxID_ANY, W(fmt_g(beats)), wxDefaultPosition, wxSize(80, -1),
-                            wxTE_PROCESS_ENTER);
-    beats_->Bind(wxEVT_TEXT_ENTER, [this](wxCommandEvent &e) { on_beats(e); });
-    beats_->Bind(wxEVT_KILL_FOCUS, [this](wxFocusEvent &e) { on_beats(e); });
-    labelled(this, outer, "Beats", beats_, 0, "for each note");
+    // the existing notes keep their own lengths
+    if (existing_.empty()) {
+        beats_ = new wxTextCtrl(this, wxID_ANY, W(fmt_g(beats)), wxDefaultPosition, wxSize(80, -1),
+                                wxTE_PROCESS_ENTER);
+        beats_->Bind(wxEVT_TEXT_ENTER, [this](wxCommandEvent &e) { on_beats(e); });
+        beats_->Bind(wxEVT_KILL_FOCUS, [this](wxFocusEvent &e) { on_beats(e); });
+        labelled(this, outer, "Beats", beats_, 0, "for each note");
+    }
 
     list_ = new ReportList(this, wxLC_REPORT | wxLC_SINGLE_SEL, wxSize(380, 140));
     list_->InsertColumn(0, "Phonemes", wxLIST_FORMAT_LEFT, 165);
@@ -189,9 +202,11 @@ void AddWordDialog::looked(const std::string &word, int wanted, const std::vecto
     phonemes_ = phones;
     auto parts = syllabify(phones);
     int n = int(parts.size());
-    count_->SetRange(1, std::max(1, n));
+    // no more notes than there are syllables, nor than there are existing notes
+    int most = existing_.empty() ? n : std::min(n, int(existing_.size()));
+    count_->SetRange(1, std::max(1, most));
     // one note per syllable unless the hyphens said otherwise
-    count_->SetValue(wanted <= 1 ? n : std::min(wanted, n));
+    count_->SetValue(std::min(wanted <= 1 ? n : std::min(wanted, n), std::max(1, most)));
     build_rows();
     hear_->Enable();
     if (ok_) ok_->Enable();
@@ -204,7 +219,7 @@ void AddWordDialog::looked(const std::string &word, int wanted, const std::vecto
 
 double AddWordDialog::value_beats() const {
     double v;
-    if (!read_number(beats_->GetValue(), &v)) return kDefaultBeats;
+    if (!beats_ || !read_number(beats_->GetValue(), &v)) return kDefaultBeats;
     return std::max(0.05, v);
 }
 
@@ -213,7 +228,16 @@ void AddWordDialog::build_rows() {
     auto groups = regroup(phonemes_, count_->GetValue());
     double b = value_beats();
     rows_.clear();
-    for (size_t i = 0; i < groups.size(); ++i) rows_.push_back(Note(groups[i], pitch_, b, i == 0 ? word : ""));
+    for (size_t i = 0; i < groups.size(); ++i) {
+        if (existing_.empty()) {
+            rows_.push_back(Note(groups[i], pitch_, b, i == 0 ? word : ""));
+            continue;
+        }
+        Note n = existing_[i];
+        n.phonemes = groups[i];
+        n.word = i == 0 ? word : "";
+        rows_.push_back(n);
+    }
     sync();
 }
 

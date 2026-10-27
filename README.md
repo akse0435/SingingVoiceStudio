@@ -190,6 +190,11 @@ tracks with the track's alone. A VocalWriter song keeps them all.
 Notes are written in VocalWriter's phoneme symbols whichever engine sings
 them; each engine translates (the tables are at the top of
 `src/voices/<engine>.cpp`). Add word uses VocalWriter's own dictionary.
+Note > Add word to existing notes (Ctrl+Shift+W) looks a word up the same
+way and puts it on the notes already in the track, from the one the cursor
+is on, rests and controllers passed over; each keeps its pitch, length and
+the rest, so a melody can be given its words without typing a phoneme. The
+cursor then goes on to the note after, ready for the next word.
 
 ## Data you supply
 
@@ -369,6 +374,7 @@ Ctrl and Option for Alt, and Option+H to hear a note.
 | Delete on a track | remove it, or every selected track |
 | Ctrl+Up / Ctrl+Down | reorder the parts, or move a note |
 | Ctrl+W / Ctrl+N / Ctrl+R | add a word / a note / a rest, after the selected note |
+| Ctrl+Shift+W | add a word to the notes already there, from the selected one on |
 | Ctrl+Shift+R | a rest to the end of the bar |
 | Ctrl+Shift+C | add a controller: a tempo change for the entire song |
 | Ctrl+E, or Enter on a note | edit it, including its pitch bend |
