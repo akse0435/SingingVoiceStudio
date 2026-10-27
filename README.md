@@ -230,7 +230,9 @@ same way Settings > Remove volume changes from sung tracks when importing
 MIDI (Ctrl+Shift+L, off until it is turned on; `--remove-volumes` on the
 command line) leaves the sung tracks the track's volume without the changes
 on their notes, for a file that swells and fades its melody on every phrase
-as an instrument would.
+as an instrument would. A track's velocity changed in its settings takes
+the notes' own with it, in proportion: 49 on a track going from 50 to 100
+becomes 98, up to 127.
 
 Notes are written in VocalWriter's phoneme symbols whichever engine sings
 them; each engine translates (the tables are at the top of

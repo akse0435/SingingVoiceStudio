@@ -1663,7 +1663,13 @@ void TrackDialog::apply(Track &track) const {
     track.voice_name = saved_voice_name(*track.voice_id, studio_->voice_list());
     track.volume = volume_->GetValue();
     track.pan = pan_->GetValue();
-    track.velocity = velocity_->GetValue();
+    // the notes' own velocities scaled with the track's, so they keep their
+    // place against it: 49 on a track going from 50 to 100 becomes 98
+    int was = track.velocity, now = velocity_->GetValue();
+    if (was > 0 && now != was)
+        for (Note &n : track.notes)
+            if (n.velocity > 0) n.velocity = std::max(1, std::min(127, int(std::lrint(n.velocity * double(now) / was))));
+    track.velocity = now;
     // None when the part is following the song, which is not the same as
     // holding a copy of what the song says now: a part that follows keeps
     // following when the song settings change.
