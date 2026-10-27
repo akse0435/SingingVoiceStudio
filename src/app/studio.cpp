@@ -797,9 +797,15 @@ void Studio::set_voices(std::vector<VoiceListing> v) {
 }
 
 std::string Studio::voice_name(int id) const {
+    // with its engine's name, as every engine but VocalWriter names its
+    // voices; an instrument by its own name alone
     for (const VoiceListing &v : voices_)
-        if (v.id == id) return v.name;
-    if (voices_.empty() && id == 0) return "Robert";
+        if (v.id == id) {
+            if (is_gm_voice(id)) return short_voice_name(v.name, v.family);
+            if (is_vocalwriter_voice(id)) return v.family + " " + v.name;
+            return v.name;
+        }
+    if (voices_.empty() && id == 0) return "VocalWriter Robert";
     return "voice " + std::to_string(id);
 }
 

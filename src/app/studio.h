@@ -56,6 +56,7 @@ public:
     std::vector<PaletteRow> singable() const;
     Sig signature() const { return song_.sig; }
     const std::vector<VoiceListing> &voice_list() const { return voices_; }
+    //: a voice as the window names it, "VocalWriter Robert" or "Acoustic Grand Piano"
     std::string voice_name(int id) const;
     int track_voice_of(const Track &t) const { return track_voice(t, program_map_); }
     int consonant_pct() const { return int(std::lround(song_.consonants * 100)); }
