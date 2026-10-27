@@ -24,6 +24,12 @@ namespace {
 const double kPi = 3.14159265358979323846;
 //: how long after the last note the file runs on, so its decay is not clipped
 const double kTailSeconds = 0.4;
+//: How much of what the notes from the cursor on sing before it is kept
+//: when playing: VocalWriter's sequencer sings "s t" ahead of the beat, and
+//: a note heard alone lost it. An export, from the song's start, keeps none.
+const double kPreRoll = 0.5;
+//: quieter than this, the start of a mix is silence
+const float kSilent = 1e-5f;
 //: how often a bend in motion is sent: one VocalWriter frame, about 5 ms
 const double kBendStep = 0.005;
 //: The most of a note that may be given to the note in front of it so that a
@@ -153,8 +159,8 @@ struct MixStep {
 
 //: The part's pan from each frame on, its own and then each controller's,
 //: and the volume control as a gain wherever its engine does not follow it
-//: itself; counted from `start` (beats).
-std::vector<MixStep> mix_steps(const PartRequest &t, const Clock &clock, double start) {
+//: itself; counted from `lead` frames before `start` (beats).
+std::vector<MixStep> mix_steps(const PartRequest &t, const Clock &clock, double start, long lead) {
     struct Event {
         double beat;
         int kind;      // 0 pan, 1 volume, 2 voice
@@ -182,7 +188,7 @@ std::vector<MixStep> mix_steps(const PartRequest &t, const Clock &clock, double 
         if (e.kind == 0) pan = e.value;
         else if (e.kind == 1) volume = e.value;
         else voice = int(e.value);
-        long long f = std::llround((clock.seconds(e.beat) - from) * kSampleRate);
+        long long f = std::llround((clock.seconds(e.beat) - from) * kSampleRate) + lead;
         if (f <= 0) out.front() = {0, pan, gain()};
         else if (size_t(f) == out.back().frame) out.back() = {size_t(f), pan, gain()};
         else out.push_back({size_t(f), pan, gain()});
@@ -399,7 +405,7 @@ const Track *in_song(const Song &song, const Track *t) {
 }  // namespace
 
 void with_metronome(std::vector<float> &y, int channels, const Clock &clock, double bar_beats,
-                    double start) {
+                    double start, double lead) {
     const double kClickHz = 1000.0, kAccentHz = 1600.0, kLevel = 0.22;
     std::vector<float> plain = click(kClickHz, kLevel), accent = click(kAccentHz, kLevel * 1.4);
     size_t n = y.size() / size_t(channels);
@@ -407,7 +413,7 @@ void with_metronome(std::vector<float> &y, int channels, const Clock &clock, dou
     long beats = std::max(1L, round_half_even(bar_beats));   // keeps 3/4, 6/8 and 7/8
     long k = long(std::ceil(start - 1e-9));
     while (true) {
-        long at = round_half_even((clock.seconds(double(k)) - clock.seconds(start)) * kSampleRate);
+        long at = round_half_even((clock.seconds(double(k)) - clock.seconds(start) + lead) * kSampleRate);
         if (at >= long(n)) break;
         const std::vector<float> &tick = (k % beats == 0) ? accent : plain;
         for (size_t i = 0; i < tick.size(); ++i) {
@@ -772,7 +778,9 @@ std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double
     int ch = played(t.voice_id) ? 2 : 1;
     for (const auto &c : t.voices) ch = played(c.second) ? 2 : ch;
     *channels = ch;
-    std::vector<float> out(size_t(round_half_even(length * kSampleRate)) * size_t(ch), 0.0f);
+    // the time before the cursor its notes may sing in (kPreRoll)
+    const long pre = whole ? 0 : round_half_even(kPreRoll * kSampleRate);
+    std::vector<float> out((size_t(round_half_even(length * kSampleRate)) + size_t(pre)) * size_t(ch), 0.0f);
     if (watch_) watch_->length = length;
 
     // VocalWriter's sequencer places the consonants before the beats itself,
@@ -822,7 +830,7 @@ std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double
             keep(key, sung, y.stopped_short, 0.0, sung_ch);
         }
         size_t skip = size_t(std::max(0L, round_half_even(start_s * kSampleRate)));
-        lay(out, ch, 0, *sung, sung_ch, skip);
+        lay(out, ch, pre, *sung, sung_ch, skip);
         return out;
     }
 
@@ -996,7 +1004,15 @@ std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double
             keep(key, sung, y.stopped_short, before, sung_ch);
         }
         if (own) from_s = run_s - before;
-        lay(out, ch, round_half_even((from_s - start_s) * kSampleRate), *sung, sung_ch);
+        // a phrase begun before the cursor is heard from it on; one from the
+        // cursor keeps what it sings ahead of it
+        long at = round_half_even((from_s - start_s) * kSampleRate) + pre;
+        size_t skip = 0;
+        if (run.at < start - 1e-9 && at < pre) {
+            skip = size_t(pre - at);
+            at = pre;
+        }
+        lay(out, ch, at, *sung, sung_ch, skip);
         if (watch_ && !watch_->at((end_s - start_s) / length)) {
             *error = "the export was cancelled";
             return out;
@@ -1011,7 +1027,7 @@ Mixed Mixer::mix(const RenderRequest &req) {
     if (res.ok && req.metronome_bar) {
         // on a copy: the song kept for next time is only ever the singing
         auto ticked = std::make_shared<std::vector<float>>(*res.samples);
-        with_metronome(*ticked, res.channels, req.clock(), *req.metronome_bar, req.start);
+        with_metronome(*ticked, res.channels, req.clock(), *req.metronome_bar, req.start, res.lead);
         res.samples = ticked;
     }
     return res;
@@ -1045,7 +1061,7 @@ RenderResult Mixer::render(const RenderRequest &req, const std::string &out_path
     res.path = out_path;
     if (!m.ok) return res;
     std::vector<float> y = *m.samples;
-    if (req.metronome_bar) with_metronome(y, m.channels, req.clock(), *req.metronome_bar, req.start);
+    if (req.metronome_bar) with_metronome(y, m.channels, req.clock(), *req.metronome_bar, req.start, m.lead);
     if (!write_wav(out_path, y, m.channels)) {
         res.ok = false;
         res.error = "could not write " + out_path;
@@ -1122,6 +1138,8 @@ Mixed Mixer::mix_locked(const RenderRequest &req, bool whole) {
         else g->second.push_back(k);
     }
     size_t n = 0;                                     // frames
+    // the tracks begin the pre-roll before the cursor when playing
+    const long pre = whole ? 0 : round_half_even(kPreRoll * kSampleRate);
     for (size_t k = 0; k < ys.size(); ++k) n = std::max(n, ys[k].size() / size_t(chans[k]));
     bool stereo = false;
     for (const PartRequest &t : req.tracks) stereo = stereo || panned(t);
@@ -1143,7 +1161,7 @@ Mixed Mixer::mix_locked(const RenderRequest &req, bool whole) {
             for (size_t k : g.second) {
                 const auto &y = ys[k];
                 size_t frames = y.size() / size_t(chans[k]);
-                auto steps = mix_steps(req.tracks[k], req.clock(), req.start);
+                auto steps = mix_steps(req.tracks[k], req.clock(), req.start, pre);
                 for (size_t j = 0; j < steps.size(); ++j) {
                     size_t a = std::min(steps[j].frame, frames);
                     size_t b = j + 1 < steps.size() ? std::min(steps[j + 1].frame, frames) : frames;
@@ -1216,7 +1234,7 @@ Mixed Mixer::mix_locked(const RenderRequest &req, bool whole) {
     } else {
         out.assign(n, 0.0f);
         for (size_t k = 0; k < req.tracks.size(); ++k) {
-            auto steps = mix_steps(req.tracks[k], req.clock(), req.start);
+            auto steps = mix_steps(req.tracks[k], req.clock(), req.start, pre);
             for (size_t j = 0; j < steps.size(); ++j) {
                 double gl = pan_gains(steps[j].pan).first, g = steps[j].gain;
                 size_t a = std::min(steps[j].frame, ys[k].size());
@@ -1229,8 +1247,18 @@ Mixed Mixer::mix_locked(const RenderRequest &req, bool whole) {
             for (float &v : out) v = float(v / peak);
     }
 
-    if (!add_backings(req, out, channels, peak, &res.error)) return res;
-    return finished(key, std::move(out), channels, peak, stopped);
+    // the time before the cursor, as much of it as is sung in
+    long lead = 0;
+    if (!whole) {
+        long frames = long(out.size()) / channels, first = pre;
+        for (long i = 0; i < std::min(pre, frames) && first == pre; ++i)
+            for (int c = 0; c < channels; ++c)
+                if (std::fabs(out[size_t(i * channels + c)]) > kSilent) first = i;
+        out.erase(out.begin(), out.begin() + std::min(first, frames) * channels);
+        lead = pre - first;
+    }
+    if (!add_backings(req, out, channels, peak, &res.error, lead)) return res;
+    return finished(key, std::move(out), channels, peak, stopped, double(lead) / kSampleRate);
 }
 
 bool Mixer::sung_together(const RenderRequest &req, std::vector<float> *out, int *channels) {
@@ -1291,13 +1319,14 @@ bool Mixer::sung_together(const RenderRequest &req, std::vector<float> *out, int
 }
 
 Mixed Mixer::finished(const std::string &key, std::vector<float> out, int channels, double peak,
-                      bool stopped) {
+                      bool stopped, double lead) {
     Mixed res;
     res.ok = true;
     res.channels = channels;
     res.seconds = double(out.size() / size_t(channels)) / kSampleRate;
     res.peak = peak;
     res.stopped_short = stopped;
+    res.lead = lead;
     res.samples = std::make_shared<const std::vector<float>>(std::move(out));
     last_key_ = key;
     last_ = res;
@@ -1309,7 +1338,7 @@ Mixed Mixer::finished(const std::string &key, std::vector<float> out, int channe
 // is placed by the clock, not the beat: it is the same recording at any
 // tempo, and the cursor's beat is only where in it playing begins.
 bool Mixer::add_backings(const RenderRequest &req, std::vector<float> &out, int &channels, double &peak,
-                         std::string *error) {
+                         std::string *error, long lead) {
     if (req.backings.empty()) return true;
     if (channels == 1) {
         std::vector<float> two(out.size() * 2);
@@ -1327,8 +1356,9 @@ bool Mixer::add_backings(const RenderRequest &req, std::vector<float> &out, int 
         }
         const std::vector<float> &x = *file;
         size_t frames = x.size() / 2;
-        long at = round_half_even((b.start - from) * kSampleRate);
-        size_t skip = at < 0 ? size_t(-at) : 0, to = at < 0 ? 0 : size_t(at);
+        // nothing of it before the cursor, where the mix may begin `lead` early
+        long at = round_half_even((b.start - from) * kSampleRate) + lead;
+        size_t skip = at < lead ? size_t(lead - at) : 0, to = size_t(std::max(at, lead));
         if (skip >= frames) continue;               // over before the cursor
         size_t need = (to + frames - skip) * 2;
         if (out.size() < need) out.resize(need, 0.0f);

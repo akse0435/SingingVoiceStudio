@@ -628,7 +628,8 @@ void Studio::follow() {
         follow_timer_.Stop();
         return;
     }
-    double beat = play_clock_.beat_at(play_clock_.seconds(play_from_) + player_.seconds());
+    // the sound may begin a little before the beat it was played from
+    double beat = play_clock_.beat_at(std::max(0.0, play_clock_.seconds(play_from_) + player_.seconds() - play_lead_));
     for (size_t k = 0; k < song_.tracks.size(); ++k) {
         const std::vector<Note> &all = song_.tracks[k].notes;
         if (all.empty()) continue;
@@ -2039,6 +2040,7 @@ void Studio::played(const Mixed &res, bool quiet) {
     play_audio(res, quiet);
     // the song, not a note heard on its own, is what the cursors follow
     play_clock_ = song_.clock();
+    play_lead_ = res.lead;
     following_ = player_.playing();
     if (following_ && settings_.follow_playback) follow_timer_.Start(kFollowStep);
 }

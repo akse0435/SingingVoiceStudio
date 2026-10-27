@@ -282,6 +282,7 @@ private:
     //: what is playing, for the cursors to follow: the song from a beat, on its clock
     bool following_ = false;
     double play_from_ = 0;
+    double play_lead_ = 0;      // seconds the sound began before play_from_
     Clock play_clock_;
     int preview_row_ = -1;
     std::unique_ptr<Worker> worker_;

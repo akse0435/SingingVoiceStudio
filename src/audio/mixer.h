@@ -91,6 +91,9 @@ struct Mixed {
     bool stopped_short = false;
     //: given up part of the way, as an export can be
     bool cancelled = false;
+    //: seconds it begins before the beat it was asked from: what the notes
+    //: there sing ahead of it
+    double lead = 0;
 };
 
 //: The same, written to a WAV file: an export.
@@ -143,9 +146,10 @@ private:
     //: song, or VocalWriter could not; it is then sung part by part.
     bool sung_together(const RenderRequest &req, std::vector<float> *out, int *channels);
     bool add_backings(const RenderRequest &req, std::vector<float> &out, int &channels, double &peak,
-                      std::string *error);
+                      std::string *error, long lead = 0);
     //: the mix made, kept as the last one
-    Mixed finished(const std::string &key, std::vector<float> out, int channels, double peak, bool stopped);
+    Mixed finished(const std::string &key, std::vector<float> out, int channels, double peak, bool stopped,
+                   double lead = 0);
     //: a backing track's file, read the first time it is played and kept
     //: until it changes on disk
     std::shared_ptr<const std::vector<float>> backing(const std::string &path, std::string *error);
@@ -185,8 +189,9 @@ private:
 };
 
 //: One tick of the metronome mixed in, accented at each bar line; `start` is
-//: the beat the audio begins on so the ticks stay on the song's beats.
+//: the beat the audio begins on, `lead` seconds into it, so the ticks stay
+//: on the song's beats.
 void with_metronome(std::vector<float> &y, int channels, const Clock &clock, double bar_beats,
-                    double start);
+                    double start, double lead = 0);
 
 }  // namespace svs
