@@ -70,6 +70,8 @@ public:
     }
     int voice_at(int upto) const;
     std::string label_of(const Note &n) const;
+    //: a vowel held over several notes sings its first sound until the last
+    bool plain_held() const { return settings_.plain_held_vowels; }
     //: render notes on the current track's voice and play them
     void preview(const std::vector<Note> &notes, std::function<void()> done);
     //: `marked`: with the dictionary's syllables marked (Lexicon::phonemes)

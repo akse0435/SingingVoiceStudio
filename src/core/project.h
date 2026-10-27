@@ -382,6 +382,15 @@ int common_velocity(std::vector<Note> &notes);
 //: rest, "right"). Returns how many were closed.
 int close_short_rests(std::vector<Note> &notes, double longest, bool in_words = false);
 
+//: A word's phonemes, the dictionary's syllables marked, on `count` notes, as
+//: Add word lays it out: as the pieces typed with hyphens divide it when
+//: there are no more of them than notes ("did-", "n't"), else a syllable to
+//: a note; with notes over, each is split at its vowel, the first ones
+//: taking the extra ("d EY", "EY", "z IY"), `plain` as on import.
+std::vector<std::vector<std::string>> word_on_notes(const std::vector<std::string> &phonemes,
+                                                    const std::vector<std::string> &pieces, int count,
+                                                    bool plain = false);
+
 //: Put looked-up pronunciations on the notes an import left blank. Returns
 //: how many words were pronounced. A word the dictionary does not know leaves
 //: its notes singing kDefaultPhoneme. `plain_held`: a vowel held over several

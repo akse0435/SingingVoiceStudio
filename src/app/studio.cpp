@@ -427,7 +427,8 @@ void Studio::build_menu() {
                                "Give the sung parts of a MIDI file the track's velocity alone");
     mi_remove_velocities_->Check(settings_.remove_note_velocities);
     mi_plain_held_ = prefs->AppendCheckItem(
-        ID_PLAIN_HELD, K("Sing a vowel &held over several notes on its first sound when importing MIDI\tCtrl+Shift+D"),
+        ID_PLAIN_HELD,
+        K("Sing a vowel &held over several notes on its first sound when importing MIDI or adding a word\tCtrl+Shift+D"),
         "The vowel's whole sound on the last note alone: \"day\" over three notes is d EH, EH, EY rather than d EY, EY, "
         "EY; YU on the first alone, \"few\" as f YU, UW, UW");
     mi_plain_held_->Check(settings_.plain_held_vowels);
@@ -646,14 +647,16 @@ void Studio::follow() {
     }
 }
 
-//: A setting of the program too: whether a vowel a MIDI import holds over
-//: several notes sings its first sound until the last of them.
+//: A setting of the program too: whether a vowel a MIDI import or Add word
+//: holds over several notes sings its first sound until the last of them.
 void Studio::on_plain_held(wxCommandEvent &) {
     bool on = mi_plain_held_->IsChecked();
     settings_.plain_held_vowels = on;
     bool kept = save_settings(settings_);
-    say(wxString(on ? "importing MIDI sings a vowel held over several notes on its first sound until the last of them"
-                    : "importing MIDI sings a vowel held over several notes whole on every one of them") +
+    say(wxString(on ? "importing MIDI and adding a word sing a vowel held over several notes on its first sound "
+                      "until the last of them"
+                    : "importing MIDI and adding a word sing a vowel held over several notes whole on every one of "
+                      "them") +
         (kept ? "" : ", for this sitting only: the settings file could not be written"));
 }
 
@@ -775,8 +778,8 @@ void Studio::on_keys(wxCommandEvent &) {
         "place of the song's",
         "Ctrl+Shift+I  whether importing MIDI closes the short rests between notes",
         "Ctrl+Shift+E  whether importing MIDI removes the note velocities from the sung tracks",
-        "Ctrl+Shift+D  whether importing MIDI sings a vowel held over several notes on its first sound until "
-        "the last of them: day over three notes as d EH, EH, EY",
+        "Ctrl+Shift+D  whether importing MIDI and adding a word sing a vowel held over several notes on its "
+        "first sound until the last of them: day over three notes as d EH, EH, EY",
         "Ctrl+Shift+F  whether every track's cursor follows the note being sung while the song plays, staying "
         "where it got to when it stops",
         "Ctrl+Shift+V  whether VocalWriter's voices are sung through its own sequencer, sample for sample as "

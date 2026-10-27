@@ -1759,6 +1759,36 @@ std::string sound_after(const ImportedPart &part, int after,
 
 }  // namespace
 
+std::vector<std::vector<std::string>> word_on_notes(const std::vector<std::string> &phonemes,
+                                                    const std::vector<std::string> &pieces, int count, bool plain) {
+    count = std::max(count, 1);
+    // the pieces typed, as an import reads a word's lyrics on its notes, a
+    // note left for one holding its vowel; the first take any notes over
+    int m = int(pieces.size());
+    if (m > 1 && m <= count) {
+        std::vector<std::string> texts;
+        for (int k = 0; k < m; ++k) {
+            texts.push_back(pieces[size_t(k)]);
+            texts.resize(texts.size() + size_t(count / m + (k < count % m ? 1 : 0) - 1));
+        }
+        return on_notes(phonemes, texts, plain);
+    }
+    std::vector<std::string> sounds;
+    for (const std::string &p : phonemes)
+        if (p != kSyllableBreak) sounds.push_back(p);
+    auto syls = syllabify(sounds);
+    int n = int(syls.size());
+    if (count <= n || n == 0) return regroup(sounds, count);
+    // more notes than syllables: each split at its vowel, the first taking
+    // a note more where they do not share evenly
+    std::vector<std::vector<std::string>> out;
+    for (int k = 0; k < n; ++k) {
+        auto part = split_held(syls[size_t(k)], count / n + (k < count % n ? 1 : 0), plain);
+        out.insert(out.end(), part.begin(), part.end());
+    }
+    return out;
+}
+
 int pronounce(std::vector<ImportedPart> &parts,
               const std::map<std::string, std::vector<std::string>> &found, bool plain_held) {
     int got = 0;

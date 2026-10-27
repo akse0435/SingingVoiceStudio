@@ -57,7 +57,9 @@ public:
 
 private:
     void build(double beats);
+    std::string raw() const;
     std::pair<std::string, int> typed() const;
+    std::vector<std::string> pieces() const;
     void on_look(wxCommandEvent &);
     void looked(const std::string &word, int wanted, const std::vector<std::string> &phones);
     double value_beats() const;

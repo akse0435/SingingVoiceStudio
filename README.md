@@ -198,9 +198,10 @@ command line does as the window was last set to. A VocalWriter song keeps its
 rests: it was made for VocalWriter already.
 
 **A vowel held over several notes**, as a MIDI file's lyrics leave a word
-sung on more than one note, can be sung on its first sound until the last of
-them (Settings > Sing a vowel held over several notes on its first sound when
-importing MIDI, Ctrl+Shift+D, off until it is turned on): "day" over three
+sung on more than one note, or Add word lays one over more notes than it has
+syllables, can be sung on its first sound until the last of them (Settings >
+Sing a vowel held over several notes on its first sound when importing MIDI
+or adding a word, Ctrl+Shift+D, off until it is turned on): "day" over three
 notes is d EH, EH, EY rather than d EY, EY, EY, and in the same way AY, AW
 and AR are held on AA, OY and OR on O, IR on IY, UR on UH and XR on EH. YU
 goes the other way, its y sung once: "few" over three notes is f YU, UW, UW
@@ -216,7 +217,10 @@ tracks with the track's alone. A VocalWriter song keeps them all.
 
 Notes are written in VocalWriter's phoneme symbols whichever engine sings
 them; each engine translates (the tables are at the top of
-`src/voices/<engine>.cpp`). Add word uses VocalWriter's own dictionary.
+`src/voices/<engine>.cpp`). Add word uses VocalWriter's own dictionary,
+and lays a word over as many notes as are asked for: as its hyphens divide
+it, "did-n't" on two, or a syllable to a note, or with more notes than
+syllables each split at its vowel, "night" on two as n AY, AY t.
 Note > Add word to existing notes (Ctrl+Shift+W) looks a word up the same
 way and puts it on the notes already in the track, from the one the cursor
 is on, rests and controllers passed over; each keeps its pitch, length and
@@ -423,7 +427,7 @@ Ctrl and Option for Alt, and Option+H to hear a note.
 | Ctrl+Shift+A | append a MIDI file under the song's tracks |
 | Ctrl+Shift+I | whether importing MIDI closes the short rests between notes |
 | Ctrl+Shift+E | whether importing MIDI removes the note velocities from the sung tracks |
-| Ctrl+Shift+D | whether importing MIDI sings a vowel held over several notes on its first sound |
+| Ctrl+Shift+D | whether importing MIDI and adding a word sing a vowel held over several notes on its first sound |
 | Ctrl+Shift+V | whether VocalWriter's voices are sung through its own sequencer |
 | Ctrl+Shift+S / Ctrl+Shift+T | export one WAV / one WAV per track |
 | Ctrl+Shift+M | export a MIDI file |

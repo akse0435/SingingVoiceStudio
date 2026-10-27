@@ -40,6 +40,9 @@ bool read_number(const wxString &raw, double *out) {
 
 wxSizer *buttons(wxDialog *d) { return d->CreateStdDialogButtonSizer(wxOK | wxCANCEL); }
 
+//: the most new notes Add word lays one word over
+const int kMostWordNotes = 16;
+
 //: Whether `field` holds a number from `lo` to `hi`, or is blank where
 //: `blank` allows it. If not, it is said, and the field is given back to be
 //: put right rather than the value quietly moved into range.
@@ -159,8 +162,15 @@ void AddWordDialog::build(double beats) {
     word_->SetFocus();
 }
 
+//: The word as typed, a curly apostrophe made a plain one.
+std::string AddWordDialog::raw() const {
+    std::string s = U(word_->GetValue());
+    for (size_t at; (at = s.find("\xE2\x80\x99")) != std::string::npos;) s.replace(at, 3, "'");
+    return s;
+}
+
 std::pair<std::string, int> AddWordDialog::typed() const {
-    std::string raw = U(word_->GetValue());
+    std::string raw = this->raw();
     raw.erase(0, raw.find_first_not_of(" \t"));
     raw.erase(raw.find_last_not_of(" \t") + 1);
     int parts = 0;
@@ -178,6 +188,19 @@ std::pair<std::string, int> AddWordDialog::typed() const {
     return {clean, parts};
 }
 
+//: The pieces the hyphens divide the word into, each but the last ending
+//: in one, as a MIDI file's lyrics have them: "did-", "n't".
+std::vector<std::string> AddWordDialog::pieces() const {
+    std::vector<std::string> out(1);
+    for (unsigned char c : raw()) {
+        if (c == '-' && !out.back().empty()) out.emplace_back();
+        else if (std::isalpha(c) || c == '\'') out.back().push_back(char(c));
+    }
+    if (out.back().empty()) out.pop_back();
+    for (size_t i = 0; i + 1 < out.size(); ++i) out[i] += '-';
+    return out;
+}
+
 void AddWordDialog::on_look(wxCommandEvent &) {
     auto [word, wanted] = typed();
     if (word.empty()) {
@@ -188,9 +211,13 @@ void AddWordDialog::on_look(wxCommandEvent &) {
     auto alive = token();
     std::string w = word;
     int n = wanted;
-    studio_->lookup({word}, [this, alive, w, n](std::map<std::string, std::vector<std::string>> res) {
-        if (auto a = alive.lock(); a && *a) looked(w, n, res[w]);
-    });
+    // with the dictionary's syllables marked, for word_on_notes
+    studio_->lookup(
+        {word},
+        [this, alive, w, n](std::map<std::string, std::vector<std::string>> res) {
+            if (auto a = alive.lock(); a && *a) looked(w, n, res[w]);
+        },
+        true);
 }
 
 void AddWordDialog::looked(const std::string &word, int wanted, const std::vector<std::string> &phones) {
@@ -200,18 +227,21 @@ void AddWordDialog::looked(const std::string &word, int wanted, const std::vecto
         return;
     }
     phonemes_ = phones;
-    auto parts = syllabify(phones);
-    int n = int(parts.size());
-    // no more notes than there are syllables, nor than there are existing notes
-    int most = existing_.empty() ? n : std::min(n, int(existing_.size()));
+    std::vector<std::string> sounds;
+    for (const auto &p : phones)
+        if (p != kSyllableBreak) sounds.push_back(p);
+    int n = int(syllabify(sounds).size());
+    // more notes than syllables as well, a vowel held over them; no more
+    // than there are existing notes
+    int most = existing_.empty() ? std::max(n, kMostWordNotes) : int(existing_.size());
     count_->SetRange(1, std::max(1, most));
     // one note per syllable unless the hyphens said otherwise
-    count_->SetValue(std::min(wanted <= 1 ? n : std::min(wanted, n), std::max(1, most)));
+    count_->SetValue(std::min(wanted <= 1 ? n : wanted, std::max(1, most)));
     build_rows();
     hear_->Enable();
     if (ok_) ok_->Enable();
     std::string joined;
-    for (const auto &p : phones) joined += (joined.empty() ? "" : " ") + p;
+    for (const auto &p : sounds) joined += (joined.empty() ? "" : " ") + p;
     studio_->say(W(word + " is " + joined + ", " + std::to_string(n) + " syllable" +
                    (n == 1 ? "" : "s")));
     count_->SetFocus();
@@ -225,7 +255,7 @@ double AddWordDialog::value_beats() const {
 
 void AddWordDialog::build_rows() {
     std::string word = typed().first;
-    auto groups = regroup(phonemes_, count_->GetValue());
+    auto groups = word_on_notes(phonemes_, pieces(), count_->GetValue(), studio_->plain_held());
     double b = value_beats();
     rows_.clear();
     for (size_t i = 0; i < groups.size(); ++i) {
