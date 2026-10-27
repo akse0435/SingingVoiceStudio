@@ -114,6 +114,10 @@ private:
     void on_track_remove(wxCommandEvent &);
     void move_tracks(int delta);
     void on_panes(wxCommandEvent &);
+    void on_app_activate(wxActivateEvent &evt);
+    void come_back();
+    bool returning();
+    void give_back_focus();
 
     // -- notes ------------------------------------------------------------
     int selection() const;
@@ -283,6 +287,12 @@ private:
 
     ReportList *tracks_list_ = nullptr;
     ReportList *list_ = nullptr;
+    wxWindow *last_list_ = nullptr;     // the list the keyboard was last in
+    wxWindow *left_list_ = nullptr;     // the one it was in when the program was left
+    //: the list the keyboard is being given back to, and since when
+    wxWindow *return_to_ = nullptr;
+    wxLongLong returned_at_;
+    static constexpr int kReturnMs = 1500;
     wxTextCtrl *messages_ = nullptr;
     wxStatusBar *status_ = nullptr;
     wxMenuItem *mi_play_ = nullptr;

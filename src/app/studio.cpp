@@ -188,6 +188,33 @@ Studio::Studio(const std::string &path)
     worker_->ask<std::vector<int>>([] { return vocalwriter_program_voices(); },
                                    [this](std::vector<int> picks) { set_program_map(picks); });
     Bind(wxEVT_CLOSE_WINDOW, &Studio::on_close, this);
+    // the list the keyboard was last in, to be given back when the program is
+    // come back to (on_app_activate)
+    Bind(wxEVT_CHILD_FOCUS, [this](wxChildFocusEvent &e) {
+        e.Skip();
+        wxWindow *w = e.GetWindow(), *list = nullptr;
+        for (wxWindow *l : {static_cast<wxWindow *>(tracks_list_), static_cast<wxWindow *>(list_)})
+            if (w && (w == l || l->IsDescendant(w))) list = l;
+        // coming back, the system's first choice is not where it was left
+        if (returning()) {
+            if (list != return_to_) {
+                CallAfter([this] { give_back_focus(); });
+                return;
+            }
+            return_to_ = nullptr;
+        }
+        if (list) last_list_ = list;
+    });
+    wxTheApp->Bind(wxEVT_ACTIVATE_APP, &Studio::on_app_activate, this);
+    Bind(wxEVT_ICONIZE, [this](wxIconizeEvent &e) {
+        e.Skip();
+        if (e.IsIconized()) left_list_ = last_list_;
+        else come_back();
+    });
+    Bind(wxEVT_ACTIVATE, [this](wxActivateEvent &e) {
+        e.Skip();
+        if (e.GetActive() && returning()) CallAfter([this] { give_back_focus(); });
+    });
     if (!path.empty()) {
         // a song named on the command line, or opened from the desktop
         std::string p = path;
@@ -199,7 +226,43 @@ Studio::Studio(const std::string &path)
 }
 
 Studio::~Studio() {
+    wxTheApp->Unbind(wxEVT_ACTIVATE_APP, &Studio::on_app_activate, this);
     if (worker_) worker_->close();
+}
+
+//: Back in the program, the keyboard is back in the list it was in, not on
+//: the window's first control, where the system would put it. Not while a
+//: dialog of the program's is what is active: it keeps the keyboard.
+void Studio::on_app_activate(wxActivateEvent &evt) {
+    evt.Skip();
+    if (!evt.GetActive()) left_list_ = last_list_;
+    else come_back();
+}
+
+//: For a moment after coming back or a restore, the keyboard is sent back
+//: to the list it was left in, however often the system moves it first.
+void Studio::come_back() {
+    if (!left_list_) return;
+    return_to_ = left_list_;
+    returned_at_ = wxGetLocalTimeMillis();
+    CallAfter([this] { give_back_focus(); });
+}
+
+bool Studio::returning() {
+    if (return_to_ && wxGetLocalTimeMillis() - returned_at_ > kReturnMs) return_to_ = nullptr;
+    return return_to_ != nullptr;
+}
+
+void Studio::give_back_focus() {
+    // a minimised window, or a dialog in front, is left to call again
+    if (!returning() || !IsActive() || IsIconized()) return;
+    wxWindow *f = wxWindow::FindFocus();
+    if (f == return_to_ || (f && return_to_->IsDescendant(f))) {
+        last_list_ = return_to_;
+        return_to_ = nullptr;
+        return;
+    }
+    return_to_->SetFocus();
 }
 
 void Studio::build() {
