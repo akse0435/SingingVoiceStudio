@@ -59,6 +59,7 @@ struct RawTrack {
 
 RawTrack read_track(const unsigned char *b, size_t n) {
     RawTrack trk;
+    for (int ch = 0; ch < 16; ++ch) trk.channel[ch].channel = ch;
     size_t i = 0;
     long tick = 0;
     int running = -1;
@@ -147,6 +148,14 @@ RawTrack read_track(const unsigned char *b, size_t n) {
                 // exports change mid-song
                 if (a == 1)
                     c.mods.push_back({tick, v});
+                else if (a == 7)
+                    c.volumes.push_back({tick, v});
+                else if (a == 11)
+                    c.expressions.push_back({tick, v});
+                else if (a == 64)
+                    c.sustains.push_back({tick, v});
+                else if (a == 10)
+                    c.pans.push_back({tick, v});
                 else if (a == 6 && rpn_msb[ch] == 0 && rpn_lsb[ch] == 0)
                     c.bend_range.push_back({tick, v});
                 else if (a == 101)
@@ -376,6 +385,8 @@ MidiFile read_midi(const std::string &path) {
     mf.division = b[12] << 8 | b[13];
     double div = mf.division ? mf.division : 480;
     size_t pos = 8 + hlen;
+    // the programs and volumes set on a track that plays nothing on the channel
+    MidiTrack setup[16];
     for (int k = 0; k < ntracks; ++k) {
         if (pos + 8 > b.size() || std::string(b.begin() + pos, b.begin() + pos + 4) != "MTrk")
             throw std::runtime_error("a track is missing or damaged");
@@ -384,8 +395,18 @@ MidiFile read_midi(const std::string &path) {
         RawTrack trk = read_track(&b[pos + 8], len);
         pos += 8 + len;
         std::vector<int> used;
-        for (int ch = 0; ch < 16; ++ch)
-            if (!trk.channel[ch].notes.empty()) used.push_back(ch);
+        for (int ch = 0; ch < 16; ++ch) {
+            const MidiTrack &c = trk.channel[ch];
+            if (!c.notes.empty()) {
+                used.push_back(ch);
+                continue;
+            }
+            MidiTrack &to = setup[ch];
+            to.programs.insert(to.programs.end(), c.programs.begin(), c.programs.end());
+            to.volumes.insert(to.volumes.end(), c.volumes.begin(), c.volumes.end());
+            to.expressions.insert(to.expressions.end(), c.expressions.begin(), c.expressions.end());
+            to.pans.insert(to.pans.end(), c.pans.begin(), c.pans.end());
+        }
         // A track playing on several channels -- a type 0 file's only track
         // -- is a part for each, as a type 1 file has them; the tempo and
         // time signature stay on a track of their own. Unnamed in a type 0
@@ -411,6 +432,14 @@ MidiFile read_midi(const std::string &path) {
             if (ch == sung) put_words(t.notes, trk, div);
             mf.tracks.push_back(t);
         }
+    }
+    for (MidiTrack &t : mf.tracks) {
+        if (t.notes.empty() || t.channel < 0) continue;
+        const MidiTrack &from = setup[t.channel];
+        if (t.programs.empty()) t.programs = from.programs;
+        if (t.volumes.empty()) t.volumes = from.volumes;
+        if (t.expressions.empty()) t.expressions = from.expressions;
+        if (t.pans.empty()) t.pans = from.pans;
     }
     return mf;
 }

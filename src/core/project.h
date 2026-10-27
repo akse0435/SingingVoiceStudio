@@ -27,6 +27,8 @@ extern const char *const kDefaultPhoneme;
 constexpr int kDefaultPitch = 60;
 //: how hard a part's notes are sung when it says nothing, 1-127
 constexpr int kDefaultVelocity = 64;
+//: the loudest a track may be turned up, in per cent
+constexpr int kMaxVolume = 200;
 constexpr double kDefaultBeats = 0.5;
 //: semitones below which a bend point is not worth keeping
 constexpr double kBendEpsilon = 0.01;
@@ -67,6 +69,10 @@ struct Note {
     int velocity = 0;
     //: VocalWriter's own controls, as its songs have them (see NoteControls)
     NoteControls controls;
+    //: How long an instrument sounds the note, in beats, if not `beats`,
+    //: which is always the time to the next note: a chord is its notes in a
+    //: row, all but the last at 0 beats with a hold. Voices ignore it.
+    double hold = 0;
     //: A controller rather than a note: it takes no time and nobody sings
     //: it, it changes what comes after it. `tempo` is the beats a minute
     //: from here on, for the whole song whichever track it is on; 0 changes
@@ -86,12 +92,14 @@ struct Note {
     static Note tempo_change(double bpm);
     std::string text() const;
     bool is_rest() const;
+    //: its hold, or its beats
+    double sounds() const { return hold > 0 ? hold : beats; }
     //: what the list shows: a rest reads as one, not as a per cent sign
     std::string label() const;
     bool operator==(const Note &o) const {
         return phonemes == o.phonemes && pitch == o.pitch && beats == o.beats &&
                word == o.word && bend == o.bend && mod == o.mod && velocity == o.velocity &&
-               controls == o.controls && controller == o.controller && tempo == o.tempo &&
+               controls == o.controls && hold == o.hold && controller == o.controller && tempo == o.tempo &&
                voice_id == o.voice_id && voice_name == o.voice_name;
     }
 };
@@ -111,7 +119,8 @@ struct Track {
     //: fixed per engine, but the name is what a person chose, and it wins if
     //: the two ever disagree (see resolve_voice_names)
     std::optional<std::string> voice_name;
-    int volume = 100;   // per cent
+    //: per cent, up to kMaxVolume: VocalWriter's songs go past 100 now and then
+    int volume = 100;
     int pan = 0;        // -100 .. 100
     //: how hard the notes are sung: louder for most engines, and for
     //: VocalWriter's the vowels against the consonants
@@ -261,12 +270,35 @@ std::string song_fingerprint(const Song &song);
 //: The tracks worth importing, as [(name, note count)].
 std::vector<std::pair<std::string, int>> midi_tracks(const std::string &path);
 
+//: A track of a MIDI file as the import offers it.
+struct MidiPart {
+    std::string name;
+    int notes = 0;
+    bool words = false;
+    bool drums = false;
+    int program = 0;
+    //: the GM Soundbank voice it would be played with
+    int voice() const;
+};
+std::vector<MidiPart> midi_parts(const std::string &path);
+//: The parts an import plays on the GM Soundbank: every one without words,
+//: so only a part with words is sung, and none in a file without them.
+std::vector<std::string> parts_to_play(const std::vector<MidiPart> &parts);
+
 struct ImportedPart {
     std::string name;
     std::vector<Note> notes;
     //: words still to be looked up: (word, [note index...])
     std::vector<std::pair<std::string, std::vector<int>>> pending;
+    //: played by the GM Soundbank rather than sung, with this instrument,
+    //: velocity and pan
+    bool played = false;
+    std::optional<int> voice_id;
+    int velocity = kDefaultVelocity;
+    int pan = 0;
 };
+//: The part as a track of the song.
+Track imported_track(const ImportedPart &part);
 struct Imported {
     double bpm = 120;
     //: the tempo changes after the start, in the file's beats
@@ -277,8 +309,33 @@ struct Imported {
     int closed_rests = 0;
 };
 //: `close_rests`: the longest rest between two notes to close, in beats; 0
-//: keeps every rest
-Imported import_midi(const std::string &path, const std::vector<std::string> &names, double close_rests = 0);
+//: keeps every rest. The tracks named in `played` are played by the GM
+//: Soundbank, chords and all; the rest are sung.
+Imported import_midi(const std::string &path, const std::vector<std::string> &names, double close_rests = 0,
+                     const std::vector<std::string> &played = {});
+
+// -- tracks an instrument plays ---------------------------------------------
+
+//: A note as an instrument plays it, in beats from the song's start.
+struct PlayedNote {
+    double start = 0, length = 0;
+    int pitch = 60, velocity = 0;
+};
+//: A change from `beat` on: a note control ("volume", "sustain",
+//: "bend_range", "detune"), "" for the bend in semitones, or "voice".
+struct PlayedChange {
+    double beat = 0;
+    std::string name;
+    double value = 0;
+};
+//: The notes as rows in order of start: a chord's notes but the last at 0
+//: beats, each held as long as it sounds, a rest wherever nothing sounds for
+//: `rest_gap` beats. The controls and the bend go on the rows they fall in,
+//: a change of instrument is a controller.
+std::vector<Note> lay_out_played(std::vector<PlayedNote> notes, std::vector<PlayedChange> changes,
+                                 double rest_gap = 0.25);
+//: The commonest velocity, for the track; notes keep theirs only if it differs.
+int common_velocity(std::vector<Note> &notes);
 
 //: The rests between two notes no longer than `longest` beats taken out, the
 //: note before each one held through it, its bend, wheel and controls

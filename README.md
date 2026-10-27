@@ -4,7 +4,7 @@ VocalWriter Studio rebuilt in C++ and wxWidgets, with more singers in it, for
 Windows and macOS. The window, the menus, the keys, the dialogs, the messages
 and the project files are VocalWriter Studio's own (see
 `C:\stuff\VocalWriter\app`); what is new is that a track can be sung by any of
-five synthesisers:
+five synthesisers, or played by VocalWriter's own General MIDI instruments:
 
 | engine | voices | numbers | what it is |
 |---|---|---|---|
@@ -13,6 +13,7 @@ five synthesisers:
 | **SSI-263** | SSI-263, Deep, Bright, Child | 2000 - 2003 | the chip itself, driven at register level (github.com/tgeczy/ssi263-speech) |
 | **Microsoft** | Sam, Mike, Mary, each plain, in Hall, in Stadium, in Space, Whisper, RoboSoft One to Six | 3000 - 3050 | the SAPI 5 engine rebuilt in C, with the SAPI 4 voice modes (github.com/KamiKitsune420/ms-sam-mike-mary-decomp) |
 | **MacinTalk** | Agnes, Albert, Bad News, Bahh, Bells, Boing, Bruce, Bubbles, Cellos, Deranged, Fred, Good News, Hysterical, Junior, Kathy, Pipe Organ, Princess, Ralph, Trinoids, Vicki, Victoria, Whisper, Zarvox, from each of Mac OS X 10.4 Tiger, 10.5 Leopard, 10.6 Snow Leopard and 10.7 Lion, and Alex from 10.5 on | 4000 - 4022, 4100 - 4123, 4200 - 4223, 4300 - 4323 | Apple's own engines: on Windows run by Panthera's host (github.com/tgeczy/panthera-speech) and sung through Apple's TUNE notation; on a Mac the system's own voices, spoken from phonemes and retuned to the score (see below) |
+| **GM Soundbank** | the 128 General MIDI instruments and a drum kit | 5000 - 5127, 5128 | VocalWriter 2.0's own instrument bank and wavetable synthesiser, which played its MIDI tracks (see below) |
 
 A voice's number is what a song saves, and it is fixed per engine, so a song
 written with DECtalk Betty still says Betty on a machine without DECtalk and
@@ -84,15 +85,38 @@ by phrase, each phrase cut where the voice changes and sung by the voice in
 force. A controller sets VocalWriter's controls as well, from where it stands
 on, as a note sets them from a point inside it.
 
+**The GM Soundbank** is VocalWriter's General MIDI bank (`GMBank.rsrc`) and
+the synthesiser it played a song's instrument tracks with, as an engine of
+its own: a track it plays has an instrument for its voice. It plays rather
+than sings, so a track can hold chords: a chord is its notes in a row, all
+but the last at 0 beats, and Edit note, Sounds for, says how long a note
+sounds when that is not its beats. Several pitches typed into Pitch, as
+`C4 E4 G4`, make a chord, and Ctrl+H plays the whole chord. The list shows
+"(note)" in place of the phonemes, or on the drum kit the drum. Each note
+keeps its velocity, and of VocalWriter's controls an instrument takes the
+volume, the bend range, the detune and the sustain pedal. Like VocalWriter's
+voices it plays the whole track, in stereo, and exported with them and
+nothing panned the song is played as VocalWriter played it.
+
 **VocalWriter's own songs** (.trk) open with File > Import (Ctrl+I) or on the
 command line. Each vocal track comes in as a part with everything VocalWriter
 sang it with: the syllables, phonemes and lyrics, the velocities, the
 controls above, the pitch bends and a voice change wherever the track has
-one. The song's tempo changes come in on a Tempo track at the top, as a MIDI
+one. Each instrument track comes in played by the GM Soundbank, with its
+notes, velocities, program changes and controls, the drum track on the drum
+kit. The song's tempo changes come in on a Tempo track at the top, as a MIDI
 file's do, with its reverb and its end (File > Song settings, Song end).
-Instrument and karaoke tracks are left out, and a note says so. A song
-opened this way and exported to WAV is, sample for sample, VocalWriter
-singing its vocal tracks, and so is the project it is saved as.
+The karaoke track is left out. A song opened this way and exported to WAV is,
+sample for sample, VocalWriter playing it, and so is the project it is saved
+as. Its songs turn a track up past 100% now and then, so a track's volume
+goes to 200%.
+
+**A MIDI file's instruments** come in on the GM Soundbank, as VocalWriter
+took them in: the parts with words are sung, and the others are played with
+the programs the file gives them, channel 10 on the drum kit; a file without
+words is played throughout. A part the file leaves unnamed is named after its
+instrument, the drum kit's "Drums". On the command line the same;
+`--sing-all` sings every part.
 
 **Short rests** between two notes can be closed as a MIDI file comes in
 (Settings > Close short rests when importing MIDI, Ctrl+Shift+I, off until it
@@ -309,6 +333,7 @@ Ctrl and Option for Alt, and Option+H to hear a note.
 ```
 svs song.vws -o song.wav
 svs tune.mid -o tune.wav --voice "DECtalk Betty" --tempo 96
+svs band.mid -o band.wav --sing-all
 svs song.vws --tracks stems
 svs --list-voices
 svs --pronounce daisy bicycle

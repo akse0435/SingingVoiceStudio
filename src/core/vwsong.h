@@ -2,7 +2,8 @@
 //
 // Each vocal track comes in with all VocalWriter sings it with: syllables,
 // phonemes, lyric text, velocity, voice changes and controls; the tempo
-// changes become the song's. Instrument tracks are left out.
+// changes become the song's. Each instrument track comes in played by the GM
+// Soundbank, the bank VocalWriter played it with.
 #pragma once
 
 #include <string>

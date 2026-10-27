@@ -34,6 +34,10 @@ struct MidiTrack {
     std::vector<std::pair<long, int>> bend_range;     // (tick, semitones)
     std::vector<std::pair<long, int>> programs;
     std::vector<std::pair<long, int>> mods;           // (tick, CC 1, the mod wheel)
+    //: CC 7, CC 11, CC 64 and CC 10
+    std::vector<std::pair<long, int>> volumes, expressions, sustains, pans;
+    //: the channel it plays on, 0-15 (9 is the drums), or -1
+    int channel = -1;
     struct TimeSig {
         long tick;
         int num;

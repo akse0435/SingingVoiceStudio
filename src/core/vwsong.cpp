@@ -23,15 +23,20 @@ const size_t kHeaderSize = 758;
 const size_t kTrackInfoSize = 88;
 const size_t kTracks = 32;
 const int kVocal = 0x1;
+const int kDrums = 0x2;              // an instrument track on MIDI's channel 10
 const int kKaraoke = 0x10;
 
 // a track's events: 12 bytes each, a 24-bit time first, 0xffffff ending them
+const int kPlayed = 1;               // an instrument's note, with its length
 const int kNote = 6;
 const int kRestEvent = 8;
 const int kProgram = 3;
 const int kTempo = 4;
 const int kPitchBend = 32;
+const int kVolume = 33;
+const int kSustain = 34;
 const int kBendRange = 38;
+const int kDetune = 39;
 const int kEnd = 9;
 
 uint32_t be32(const unsigned char *p) {
@@ -244,6 +249,47 @@ std::vector<Note> lay_out(const std::vector<SungAt> &sung, const std::vector<Con
     return all;
 }
 
+//: An instrument track: its notes, volume, pedal, bend, bend range and
+//: detune, and program changes as changes of instrument. The drum track has
+//: the kit; VocalWriter ignores its program changes.
+template <class Beat>
+Track instrument_track(const std::vector<Event> &events, bool drums, Beat beat) {
+    std::vector<PlayedNote> notes;
+    std::vector<PlayedChange> changes;
+    int program = -1, range = 2;
+    for (const Event &e : events) {
+        double b = beat(e.time);
+        if (e.status == kPlayed || e.status == kNote) {
+            notes.push_back({b, beat(e.time + std::max<uint32_t>(e.dur, 1)) - b, e.key, std::max(1, e.vol)});
+        } else if (e.status == kProgram && !drums) {
+            // the first program is the track's, any later a change
+            bool changed = changes.end() != std::find_if(changes.begin(), changes.end(),
+                                                         [](const PlayedChange &c) { return c.name == "voice"; });
+            if (!changed && (notes.empty() || b <= notes.front().start))
+                program = e.vol;
+            else
+                changes.push_back({b, "voice", double(kGmBase + e.vol)});
+        } else if (e.status == kVolume) {
+            changes.push_back({b, "volume", double(e.vol)});
+        } else if (e.status == kSustain) {
+            changes.push_back({b, "sustain", double(e.vol)});
+        } else if (e.status == kBendRange) {
+            range = std::max(1, std::min(12, e.vol));
+            changes.push_back({b, "bend_range", double(range)});
+        } else if (e.status == kPitchBend) {
+            changes.push_back({b, "", ((e.vol << 7) + e.key - 8192) / 8192.0 * range});
+        } else if (e.status == kDetune) {
+            changes.push_back({b, "detune", double((e.vol << 7) + e.key - 8192)});
+        }
+    }
+    Track t;
+    t.notes = lay_out_played(notes, changes);
+    t.velocity = common_velocity(t.notes);
+    // with no program VocalWriter plays the piano
+    t.voice_id = drums ? kGmDrums : kGmBase + std::max(0, program);
+    return t;
+}
+
 }  // namespace
 
 bool is_vocalwriter_song(const std::string &path) { return extension_lower(path) == ".trk"; }
@@ -285,7 +331,6 @@ VwSongImport import_vocalwriter_song(const std::string &path, const std::vector<
     std::vector<TrackRec> tracks;
     std::vector<std::pair<uint32_t, int>> tempos;       // (tick, bpm)
     const unsigned char *info = &d[seq];
-    int instruments = 0;
     for (size_t i = 0; i < kTracks; ++i) {
         const unsigned char *t = info + i * kTrackInfoSize;
         TrackRec r;
@@ -318,10 +363,6 @@ VwSongImport import_vocalwriter_song(const std::string &path, const std::vector<
                 }
                 r.lyrics.push_back({text, ph});
             }
-        } else {
-            bool notes = false;
-            for (const Event &e : r.events) notes = notes || e.status == 1 || e.status == kNote;
-            if (notes) ++instruments;
         }
         tracks.push_back(r);
     }
@@ -348,11 +389,30 @@ VwSongImport import_vocalwriter_song(const std::string &path, const std::vector<
 
     // a song with every track switched off (CrazyThing among the demos) is
     // not one that plays nothing: the switches mean nothing then
+    auto plays_notes = [](const TrackRec &r) {
+        if (r.flags & kKaraoke) return false;
+        for (const Event &e : r.events)
+            if (e.status == kPlayed || e.status == kNote) return true;
+        return false;
+    };
     bool any_on = false;
     for (const TrackRec &r : tracks)
-        if ((r.flags & kVocal) && !(r.flags & kKaraoke)) any_on = any_on || !r.muted;
+        if (plays_notes(r)) any_on = any_on || !r.muted;
 
-    for (const TrackRec &r : tracks) {
+    int instruments = 0, instruments_muted = 0;
+    for (size_t ti = 0; ti < tracks.size(); ++ti) {
+        const TrackRec &r = tracks[ti];
+        if (!(r.flags & kVocal) && plays_notes(r) && ti > 0) {
+            // an instrument track, on the GM Soundbank
+            Track t = instrument_track(r.events, r.flags & kDrums, beat);
+            t.name = r.name.empty() ? "Instrument" : r.name;
+            t.volume = std::max(0, std::min(kMaxVolume, r.level));
+            t.mute = r.muted && any_on;
+            ++instruments;
+            instruments_muted += t.mute;
+            song.tracks.push_back(t);
+            continue;
+        }
         if (!(r.flags & kVocal) || (r.flags & kKaraoke)) continue;
         // the notes, the voice the track starts with, and the controls
         std::vector<SungAt> sung;
@@ -405,7 +465,7 @@ VwSongImport import_vocalwriter_song(const std::string &path, const std::vector<
         Track t;
         t.name = r.name.empty() ? "Vocals" : r.name;
         t.voice_id = kVocalWriterBase + first_voice;
-        t.volume = std::max(0, std::min(100, r.level));
+        t.volume = std::max(0, std::min(kMaxVolume, r.level));
         t.mute = r.muted && any_on;
         t.notes = lay_out(sung, controls);
         // the velocity most of the notes have is the track's, and a note
@@ -420,16 +480,22 @@ VwSongImport import_vocalwriter_song(const std::string &path, const std::vector<
             if (n.velocity == most || n.is_rest()) n.velocity = 0;
         song.tracks.push_back(t);
     }
-    if (song.tracks.empty()) throw std::runtime_error("this song has no vocal tracks with notes");
+    if (song.tracks.empty()) throw std::runtime_error("this song has no tracks with notes");
     // the tempo changes on a track of their own at the top, each where it falls
     if (!changes.empty()) song.tracks.insert(song.tracks.begin(), tempo_track(changes));
     // where the song ends, which VocalWriter keeps on the tempo track
     for (const TrackRec &r : tracks)
         for (const Event &e : r.events)
             if (e.status == kEnd) song.end = beat(e.time);
-    if (instruments)
-        res.notes.push_back(std::to_string(instruments) + " instrument track" + (instruments == 1 ? " was" : "s were") +
-                            " left out: they can come back as a backing track");
+    if (instruments) {
+        std::string n = std::to_string(instruments) + " instrument track" + (instruments == 1 ? "" : "s");
+        std::string said = n + " play" + (instruments == 1 ? "s" : "") +
+                           " on the GM Soundbank, VocalWriter's own instruments";
+        if (instruments_muted)
+            said += "; " + std::to_string(instruments_muted) + " of them " + (instruments_muted == 1 ? "is" : "are") +
+                    " muted, as the song was saved. M on a track unmutes it";
+        res.notes.push_back(said);
+    }
     return res;
 }
 

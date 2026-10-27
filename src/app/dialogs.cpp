@@ -563,13 +563,52 @@ void ControlsDialog::on_clear(wxCommandEvent &) {
 
 // -- NoteDialog ------------------------------------------------------------------------
 
+std::vector<Note> chord_rows(const Note &note, const std::vector<int> &pitches) {
+    if (pitches.size() < 2) return {note};
+    std::vector<Note> rows;
+    for (size_t k = 0; k < pitches.size(); ++k) {
+        Note n = note;
+        n.pitch = pitches[k];
+        if (k + 1 < pitches.size()) {
+            n.hold = note.sounds();
+            n.beats = 0;
+            // the curves go on the last, which carries the time
+            n.bend.clear();
+            n.mod.clear();
+            n.controls.clear();
+        }
+        rows.push_back(n);
+    }
+    return rows;
+}
+
+bool control_reaches(const std::string &key, int voice) {
+    if (is_vocalwriter_voice(voice)) return key != "sustain";
+    if (is_gm_voice(voice)) return key == "volume" || key == "sustain" || key == "bend_range" || key == "detune";
+    return false;
+}
+
+std::string short_voice_name(const std::string &name, const std::string &engine) {
+    // the engine's name, or its first word: "GM" of "GM Soundbank"
+    for (std::string prefix : {engine, engine.substr(0, engine.find(' '))}) {
+        prefix += " ";
+        if (name.size() > prefix.size() && name.compare(0, prefix.size(), prefix) == 0)
+            return name.substr(prefix.size());
+    }
+    return name;
+}
+
 NoteDialog::NoteDialog(wxWindow *parent, Studio *studio, const Note *note, const Note &seed)
     : wxDialog(parent, wxID_ANY, note ? "Edit note" : "Add note"),
       studio_(studio),
       note_(note ? *note : seed) {
+    int voice = studio_->current_voice();
+    played_ = is_gm_voice(voice);
     wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
     phon_ = new wxTextCtrl(this, wxID_ANY, W(note_.text()), wxDefaultPosition, wxSize(300, -1));
-    labelled(this, outer, "Phonemes", phon_, 1, "separated by spaces");
+    labelled(this, outer, "Phonemes", phon_, 1,
+             played_ ? "what a voice would sing; an instrument plays the note whatever they are"
+                     : "separated by spaces");
 
     wxBoxSizer *row = new wxBoxSizer(wxHORIZONTAL);
     wxButton *ins = new wxButton(this, wxID_ANY, "&Insert phoneme...");
@@ -580,10 +619,19 @@ NoteDialog::NoteDialog(wxWindow *parent, Studio *studio, const Note *note, const
     row->Add(hear_, 0, wxALL, 3);
     outer->Add(row, 0);
 
-    pitch_ = new wxTextCtrl(this, wxID_ANY, W(pitch_name(note_.pitch)), wxDefaultPosition, wxSize(90, -1));
-    labelled(this, outer, "Pitch", pitch_, 0, "a name like C4, or a MIDI number");
+    pitch_ = new wxTextCtrl(this, wxID_ANY, W(pitch_name(note_.pitch)), wxDefaultPosition, wxSize(played_ ? 160 : 90, -1));
+    labelled(this, outer, "Pitch", pitch_, 0,
+             played_ ? "a name like C4, or a MIDI number; several, as C4 E4 G4, make a chord"
+                     : "a name like C4, or a MIDI number");
     beats_ = new wxTextCtrl(this, wxID_ANY, W(fmt_g(note_.beats)), wxDefaultPosition, wxSize(90, -1));
-    labelled(this, outer, "Beats", beats_);
+    labelled(this, outer, "Beats", beats_, 0,
+             played_ ? "to the next note; 0 plays it with the next one, as a chord" : "");
+    // how long an instrument holds it, if not its beats
+    hold_ = new wxTextCtrl(this, wxID_ANY, note_.hold > 0 ? W(fmt_g(note_.hold)) : wxString(), wxDefaultPosition,
+                           wxSize(90, -1));
+    labelled(this, outer, "Sounds for", hold_, 0,
+             "beats an instrument holds it, blank for its beats; the GM Soundbank's instruments only");
+    enable_labelled(hold_, played_);
     auto ends = bend_ends(note_.bend);
     bend_start_ = new wxTextCtrl(this, wxID_ANY, W(bend_text(ends.first)), wxDefaultPosition, wxSize(90, -1));
     labelled(this, outer, "Bend at start", bend_start_, 0, "semitones, blank for none");
@@ -605,11 +653,12 @@ NoteDialog::NoteDialog(wxWindow *parent, Studio *studio, const Note *note, const
     outer->Add(mods, 0, wxALL, 6);
 
     // VocalWriter keeps a velocity and its controls on each note, which
-    // only its voices sing: greyed for a note another engine sings
-    bool vocalwriter = is_vocalwriter_voice(studio_->current_voice());
+    // only its voices and instruments hear: greyed for another engine
+    bool vocalwriter = uses_velocity(voice);
     velocity_ = new wxTextCtrl(this, wxID_ANY, note_.velocity ? W(std::to_string(note_.velocity)) : wxString(),
                                wxDefaultPosition, wxSize(90, -1));
-    labelled(this, outer, "Velocity", velocity_, 0, "1 to 127, blank for the track's; VocalWriter's voices only");
+    labelled(this, outer, "Velocity", velocity_, 0,
+             "1 to 127, blank for the track's; VocalWriter's voices and the GM Soundbank only");
     enable_labelled(velocity_, vocalwriter);
     wxButton *controls = new wxButton(this, wxID_ANY, "VocalWriter &controls...");
     controls->Bind(wxEVT_BUTTON, &NoteDialog::on_controls, this);
@@ -674,11 +723,22 @@ void NoteDialog::on_controls(wxCommandEvent &) {
 }
 
 int NoteDialog::value_pitch() const {
-    try {
-        return parse_pitch(U(pitch_->GetValue()));
-    } catch (...) {
-        return kDefaultPitch;
+    std::vector<int> all = pitches();
+    return all.empty() ? kDefaultPitch : all.front();
+}
+
+std::vector<int> NoteDialog::pitches() const {
+    std::vector<int> out;
+    wxStringTokenizer tok(pitch_->GetValue(), " ,\t", wxTOKEN_STRTOK);
+    while (tok.HasMoreTokens()) {
+        try {
+            out.push_back(std::max(0, std::min(127, parse_pitch(U(tok.GetNextToken())))));
+        } catch (...) {
+        }
+        // only an instrument plays a chord
+        if (!played_ && !out.empty()) break;
     }
+    return out;
 }
 
 Note NoteDialog::result() {
@@ -686,8 +746,11 @@ Note NoteDialog::result() {
     wxStringTokenizer tok(phon_->GetValue(), " \t\r\n", wxTOKEN_STRTOK);
     while (tok.HasMoreTokens()) note_.phonemes.push_back(U(tok.GetNextToken()));
     note_.pitch = value_pitch();
-    double b;
-    if (read_number(beats_->GetValue(), &b)) note_.beats = std::max(0.05, b);
+    double b, h;
+    note_.hold = played_ && read_number(hold_->GetValue(), &h) && h > 0 ? std::max(0.01, h) : 0.0;
+    // 0 beats only for a note that sounds, as a chord's do
+    if (read_number(beats_->GetValue(), &b)) note_.beats = b <= 0 && note_.hold > 0 ? 0.0 : std::max(0.05, b);
+    if (std::fabs(note_.hold - note_.beats) < 1e-9) note_.hold = 0;
     note_.bend = with_ends(note_.bend, read_bend(bend_start_->GetValue()), read_bend(bend_end_->GetValue()));
     auto wheel = [](std::optional<double> v) -> std::optional<double> {
         if (!v) return v;
@@ -907,8 +970,10 @@ ControllerDialog::ControllerDialog(wxWindow *parent, Studio *studio, const Note 
                              : wxString();
         wxBoxSizer *group = new wxBoxSizer(wxVERTICAL);
         wxTextCtrl *field = new wxTextCtrl(this, wxID_ANY, shown, wxDefaultPosition, wxSize(80, -1));
-        labelled(this, group, k.label, field, 0, W(std::string(k.hint) + "; VocalWriter's voices only"));
-        enable_labelled(field, is_vocalwriter_voice(voice_before));
+        labelled(this, group, k.label, field, 0,
+                 W(std::string(k.hint) + (std::string(k.key) == "sustain" ? "" : "; VocalWriter's voices only" +
+                                          std::string(control_reaches(k.key, kGmBase) ? ", and its instruments" : ""))));
+        enable_labelled(field, control_reaches(k.key, voice_before));
         outer_->Add(group, 0, wxEXPAND);
         groups_.push_back(group);
         controls_.push_back({&k, field});
@@ -948,9 +1013,7 @@ void ControllerDialog::fill_voices(int select) {
     for (const VoiceListing &v : voices_) {
         if (v.family != engine_names_[size_t(e)]) continue;
         // "Betty" rather than "DECtalk Betty", as the track's voice box has it
-        std::string name = v.name, prefix = v.family + " ";
-        if (name.size() > prefix.size() && name.compare(0, prefix.size(), prefix) == 0)
-            name = name.substr(prefix.size());
+        std::string name = short_voice_name(v.name, v.family);
         if (v.id == select) at = int(ids_.size());
         ids_.push_back(v.id);
         voice_->Append(W(name));
@@ -989,7 +1052,7 @@ Note ControllerDialog::result() const {
 
 TrackDialog::TrackDialog(wxWindow *parent, Studio *studio, const Track &track)
     : wxDialog(parent, wxID_ANY, "Track"), studio_(studio) {
-    for (const auto &v : voice_changes(track)) changes_to_vocalwriter_ = changes_to_vocalwriter_ || is_vocalwriter_voice(v.second);
+    for (const auto &v : voice_changes(track)) changes_to_vocalwriter_ = changes_to_vocalwriter_ || uses_velocity(v.second);
     wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
     name_ = new wxTextCtrl(this, wxID_ANY, W(track.name), wxDefaultPosition, wxSize(220, -1));
     labelled(this, outer, "Name", name_);
@@ -1030,14 +1093,14 @@ TrackDialog::TrackDialog(wxWindow *parent, Studio *studio, const Track &track)
         if (i >= 0 && i < int(ids_.size())) engines_[size_t(std::max(0, engine_->GetSelection()))].last = ids_[size_t(i)];
     });
 
-    volume_ = spin(this, 0, 100, track.volume, 80);
+    volume_ = spin(this, 0, kMaxVolume, track.volume, 80);
     labelled(this, outer, "Volume", volume_, 0, "per cent");
     pan_ = spin(this, -100, 100, track.pan, 80);
     labelled(this, outer, "Pan", pan_, 0, "-100 far left to 100 far right");
     velocity_ = spin(this, 1, 127, track.velocity, 80);
     labelled(this, outer, "Velocity", velocity_, 0,
-             "how hard the notes are sung, by VocalWriter's voices only; its songs used about 114");
-    sync_velocity();
+             "how hard the notes are sung or struck, by VocalWriter's voices and the GM Soundbank only; its songs "
+             "used about 114");
 
     own_consonants_ = new wxCheckBox(this, wxID_ANY, "&Consonant length just for this track");
     own_consonants_->SetValue(bool(track.consonants));
@@ -1081,6 +1144,7 @@ TrackDialog::TrackDialog(wxWindow *parent, Studio *studio, const Track &track)
         voice_ctrls_.push_back({&c[i], s});
     }
     own_voice_->Bind(wxEVT_CHECKBOX, &TrackDialog::on_own_voice, this);
+    sync_velocity();
 
     outer->Add(buttons(this), 0, wxEXPAND | wxALL, 8);
     SetSizerAndFit(outer);
@@ -1102,10 +1166,7 @@ void TrackDialog::fill_voices(int select) {
         // The engine's name is in the box beside it, so it is not said again:
         // "Betty" rather than "DECtalk Betty". A voice that is nothing but the
         // engine's name -- the SSI-263's own -- keeps it.
-        std::string name = v.name;
-        std::string prefix = engine.name + " ";
-        if (name.size() > prefix.size() && name.compare(0, prefix.size(), prefix) == 0)
-            name = name.substr(prefix.size());
+        std::string name = short_voice_name(v.name, engine.name);
         if (v.id == select) at = int(ids_.size());
         ids_.push_back(v.id);
         voice_->Append(W(name));
@@ -1113,11 +1174,18 @@ void TrackDialog::fill_voices(int select) {
     voice_->SetSelection(at);
 }
 
-//: The velocity is VocalWriter's alone, so it is greyed for another engine.
+//: The velocity is VocalWriter's alone, its voices' and its instruments',
+//: so it is greyed for another engine.
 void TrackDialog::sync_velocity() {
     const Engine &e = engines_[size_t(std::max(0, engine_->GetSelection()))];
     // or one of VocalWriter's the track changes to further on
-    enable_labelled(velocity_, changes_to_vocalwriter_ || (!e.voices.empty() && is_vocalwriter_voice(e.voices.front().id)));
+    enable_labelled(velocity_, changes_to_vocalwriter_ || (!e.voices.empty() && uses_velocity(e.voices.front().id)));
+    // an instrument has no consonants and no voice to set up
+    bool sings = e.voices.empty() || !is_gm_voice(e.voices.front().id);
+    own_consonants_->Enable(sings);
+    consonants_->Enable(sings && own_consonants_->GetValue());
+    own_voice_->Enable(sings);
+    for (auto &vc : voice_ctrls_) vc.second->Enable(sings && own_voice_->GetValue());
 }
 
 void TrackDialog::on_own_voice(wxCommandEvent &) {
@@ -1170,7 +1238,7 @@ BackingDialog::BackingDialog(wxWindow *parent, const Track &track)
     start_ = new wxTextCtrl(this, wxID_ANY, W(fmt_g(track.audio_start)), wxDefaultPosition, wxSize(80, -1));
     labelled(this, outer, "Starts at", start_, 0,
              "seconds into the song the file begins; below 0 leaves out that much of its opening");
-    volume_ = spin(this, 0, 100, track.volume, 80);
+    volume_ = spin(this, 0, kMaxVolume, track.volume, 80);
     labelled(this, outer, "Volume", volume_, 0, "per cent");
     pan_ = spin(this, -100, 100, track.pan, 80);
     labelled(this, outer, "Pan", pan_, 0, "-100 far left to 100 far right");

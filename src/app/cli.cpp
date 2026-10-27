@@ -122,17 +122,23 @@ bool is_midi(const std::string &path) {
 
 //: A project, a VocalWriter song or a MIDI file, the MIDI imported exactly as
 //: the window does it.
-Song open_song(const std::string &path, double close_rests) {
+Song open_song(const std::string &path, double close_rests, bool sing_all) {
     if (is_vocalwriter_song(path)) {
         VwSongImport got = import_vocalwriter_song(path, vocalwriter_program_voices());
         for (const std::string &n : got.notes) say(n);
         return got.song;
     }
     if (!is_midi(path)) return load_project(path);
-    std::vector<std::string> names;
-    for (const auto &p : midi_tracks(path)) names.push_back(p.first);
+    std::vector<std::string> names, played;
+    std::vector<MidiPart> parts = midi_parts(path);
+    for (const auto &p : parts) names.push_back(p.name);
     if (names.empty()) throw std::runtime_error(base_name(path) + " has no notes in it");
-    Imported got = import_midi(path, names, close_rests);
+    // the parts without words played by the GM Soundbank, if it can play
+    std::string why;
+    Family *gm = Registry::get().family_of(kGmBase);
+    if (!sing_all && gm && gm->available(&why)) played = parts_to_play(parts);
+    else if (!sing_all) say("every part is sung: the GM Soundbank cannot play here (" + why + ")");
+    Imported got = import_midi(path, names, close_rests, played);
     if (got.closed_rests) say(std::to_string(got.closed_rests) + " short rest" + s_if(size_t(got.closed_rests)) + " closed");
     std::vector<std::string> words;
     size_t pending = 0;
@@ -157,17 +163,17 @@ Song open_song(const std::string &path, double close_rests) {
     if (!got.tempo_changes.empty()) song.tracks.push_back(tempo_track(got.tempo_changes));
     size_t total = 0;
     for (const auto &p : got.parts) {
-        Track t;
-        t.name = p.name;
-        t.notes = p.notes;
-        total += p.notes.size();
-        song.tracks.push_back(t);
+        song.tracks.push_back(imported_track(p));
+        for (const Note &n : p.notes) total += !n.controller;
     }
     say("imported " + std::to_string(got.parts.size()) + " track" + s_if(got.parts.size()) + ", " +
         std::to_string(total) + " notes, " + fmt_g(std::nearbyint(got.bpm)) + " bpm" +
         (got.tempo_changes.empty() ? std::string()
                                    : ", " + std::to_string(got.tempo_changes.size()) + " tempo change" +
                                          s_if(got.tempo_changes.size()) + " on a Tempo track"));
+    if (!played.empty())
+        say(std::to_string(played.size()) + " of them, the part" + s_if(played.size()) +
+            " without words, played on the GM Soundbank");
     return song;
 }
 
@@ -201,6 +207,7 @@ std::string usage() {
     return "usage: svs [FILE] [-o FILE] [--tracks FOLDER] [--save FILE] [--track NAME]...\n"
            "           [--tempo BPM] [--voice NAME] [--consonants PERCENT] [--reverb ROOM,WET]\n"
            "           [--anticipate | --no-anticipate] [--from BEATS] [--close-rests BEATS]\n"
+           "           [--sing-all]\n"
            "           [--list-voices] [--list-tracks] [--pronounce WORD...] [--version] [-q]\n"
            "\n"
            "Sing a Singing Voice Studio project, a VocalWriter song (.trk) or a MIDI file.\n"
@@ -213,7 +220,9 @@ std::string usage() {
            "how to sing it (each overrides what the file says):\n"
            "  --track NAME          sing only this track, by name or number; may be repeated\n"
            "  --tempo BPM           a steady tempo, the song's own changes left out\n"
-           "  --voice NAME          sing every track with this voice, by name or number\n"
+           "  --voice NAME          sing every track with this voice, by name or number;\n"
+           "                        a GM Soundbank instrument plays every instrument\n"
+           "                        track instead\n"
            "  --consonants PERCENT  consonant length, 10 to 100\n"
            "  --reverb ROOM,WET     room size and amount, each 0 to 100, as in 40,24\n"
            "  --anticipate          sing a note's consonants before its beat\n"
@@ -222,6 +231,9 @@ std::string usage() {
            "  --close-rests BEATS   on importing a MIDI file, close every rest between\n"
            "                        two notes this long or shorter, the note before\n"
            "                        held on\n"
+           "  --sing-all            on importing a MIDI file, sing every part; otherwise\n"
+           "                        the parts without words are played on the GM\n"
+           "                        Soundbank, VocalWriter's own instruments\n"
            "\n"
            "what it can tell you:\n"
            "  --list-voices         every voice of every engine, numbered\n"
@@ -279,6 +291,7 @@ CliArgs parse_args(const std::vector<std::string> &argv) {
         else if (s == "--no-anticipate") a.anticipate = 0;
         else if (s == "--from") number(s, need(i, s), &a.start);
         else if (s == "--close-rests") number(s, need(i, s), &a.close_rests);
+        else if (s == "--sing-all") a.sing_all = true;
         else if (s == "--list-voices") a.list_voices = true;
         else if (s == "--list-tracks") a.list_tracks = true;
         else if (s == "--version") a.version = true;
@@ -345,7 +358,7 @@ int run_cli(const CliArgs &args) {
 
     Song song;
     try {
-        song = open_song(args.file, args.close_rests);
+        song = open_song(args.file, args.close_rests, args.sing_all);
     } catch (const std::exception &e) {
         return fail("cannot open " + args.file + ": " + e.what());
     }
@@ -393,8 +406,12 @@ int run_cli(const CliArgs &args) {
         } catch (const std::exception &e) {
             return fail(e.what());
         }
-        // the whole song: the changes of voice go too
+        // the whole song: the changes of voice go too. An instrument named
+        // changes only the instrument tracks, a voice only the others.
+        int changed = 0;
         for (Track &t : song.tracks) {
+            if (t.is_backing() || is_gm_voice(track_voice(t, programs)) != is_gm_voice(pick)) continue;
+            ++changed;
             t.voice_id = pick;
             t.voice_name = saved_voice_name(pick, voices);
             std::vector<Note> kept;
@@ -405,7 +422,8 @@ int run_cli(const CliArgs &args) {
             }
             t.notes = kept;
         }
-        say("every track is singing in " + Registry::get().voice_name(pick));
+        say(std::string(is_gm_voice(pick) ? "every instrument track is playing " : "every track is singing in ") +
+            Registry::get().voice_name(pick) + " (" + std::to_string(changed) + " track" + s_if(size_t(changed)) + ")");
     }
     std::vector<const Track *> wanted;
     try {

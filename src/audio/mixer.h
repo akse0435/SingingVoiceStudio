@@ -1,7 +1,8 @@
 // mixer.h -- a song in, a WAV out.
 //
 // Each part is cut into phrases at its rests, each phrase sung by the part's
-// voice and placed at the time the score puts it; the parts are panned, the
+// voice and placed at the time the score puts it (an instrument plays its part
+// whole, in stereo); the parts are panned, the
 // ones sharing a reverb setting go through one reverberator together, and the
 // whole is turned down if it adds up past full scale. A backing track's file
 // is laid under the voices after the reverb, which is the voices' room alone. Finished renders are
@@ -38,6 +39,7 @@ struct PartRequest {
         std::string word = {};
         int velocity = 0;                // 0: the part's
         NoteControls controls = {};
+        double hold = 0;                 // Note::hold
     };
     std::vector<N> notes;
     //: (beat, voice): where it goes on to another voice; `voice_id` is the
@@ -115,10 +117,12 @@ private:
     //: `whole`: an export, which an engine that keeps its own time sings
     //: part by part rather than phrase by phrase
     Mixed mix_locked(const RenderRequest &req, bool whole = false);
+    //: One part from `start`: mono, or stereo (`*channels` 2) if an
+    //: instrument plays any of it.
     std::vector<float> track(const PartRequest &t, const Clock &clock, double end, double consonants, double start,
-                             bool early, bool whole, bool *stopped_short, std::string *error);
+                             bool early, bool whole, bool *stopped_short, std::string *error, int *channels);
     void keep(const std::string &key, std::shared_ptr<const std::vector<float>> sung,
-              bool stopped_short, double starts_before);
+              bool stopped_short, double starts_before, int channels = 1);
     //: An export of a song VocalWriter sings every part of, with no part
     //: panned or in a room of its own, sung as VocalWriter played a song:
     //: all the parts at once, through its reverb. False if it is not such a
@@ -150,6 +154,7 @@ private:
         bool stopped_short;
         unsigned long long used;
         double starts_before;
+        int channels;
     };
     std::map<std::string, Kept> phrases_;
     size_t phrase_bytes_ = 0;

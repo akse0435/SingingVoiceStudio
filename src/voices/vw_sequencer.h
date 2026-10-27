@@ -15,7 +15,8 @@
 extern "C" {
 #endif
 
-/* One note of the part, or a rest. Times in ticks, 240 to the beat. */
+/* One note of the part, or a rest. Times in ticks, 240 to the beat. An
+   instrument's notes may overlap, as a chord's do. */
 typedef struct vwseq_note {
     int32_t start;
     int32_t duration;
@@ -49,6 +50,7 @@ enum {
     VWSEQ_BREATH = 70,
     VWSEQ_NOISE = 71,
     VWSEQ_VOLUME = 33,
+    VWSEQ_SUSTAIN = 34,             /* an instrument's pedal */
     /* not the file's: a change of voice, `vol` the bank's own index of it,
        written as the program change that reaches that voice */
     VWSEQ_SET_VOICE = 0x100
@@ -83,7 +85,16 @@ typedef struct vwseq_part {
        opening ones are shortened by the factor, the closing ones by half */
     double consonants;
     double max_seconds;             /* a stop, should the song never end */
+    /* VWSEQ_VOCAL, or an instrument track of the General MIDI bank, `voice`
+       then its GM program (ignored for the drum kit) */
+    int kind;
 } vwseq_part;
+
+enum {
+    VWSEQ_VOCAL = 0,
+    VWSEQ_INSTRUMENT = 1,
+    VWSEQ_DRUMS = 2
+};
 
 /* A song's parts, each on its own vocal track in order, with the song's
    reverb in whole percent (no wet, no reverb). */
@@ -93,8 +104,8 @@ typedef struct vwseq_song {
     int reverb_room, reverb_wet;
 } vwseq_song;
 
-/* Samples as they come, 16-bit, 44100 Hz: mono for a part, left and right
-   in turn for a song. Nonzero stops. */
+/* Samples as they come, 16-bit, 44100 Hz: mono for a vocal part, left and
+   right in turn for an instrument part or a song. Nonzero stops. */
 typedef int (*vwseq_sink)(void *user, const int16_t *samples, size_t count);
 
 typedef struct vwseq_engine vwseq_engine;
@@ -106,8 +117,12 @@ vwseq_engine *vwseq_open(const char *rsrc_path, const char *gmspeech_path,
 void vwseq_close(vwseq_engine *engine);
 
 /* Sing the part; one caller at a time. 0, or a negative error: -1 refused,
-   -2 out of memory, -3 no such voice; or the engine's own error code. */
+   -2 out of memory, -3 no such voice, -4 no instrument bank; or the
+   engine's own error code. An instrument part is in stereo. */
 int vwseq_sing(vwseq_engine *engine, const vwseq_part *part, vwseq_sink sink, void *user);
+
+/* Whether the engine was started with the General MIDI bank. */
+int vwseq_has_bank(vwseq_engine *engine);
 
 /* Sing a song's parts together, as VocalWriter played the song: one mix,
    its reverb, its clipping. The parts share the first one's tempo. The same

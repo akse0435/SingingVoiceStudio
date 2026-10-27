@@ -143,11 +143,14 @@ private:
     ReportList *list_;
 };
 
-//: Edit one note: the phonemes sung on it, its pitch and its length.
+//: Edit one note: the phonemes sung on it, its pitch and its length, and
+//: for an instrument how long it sounds and the rest of its chord.
 class NoteDialog : public wxDialog, Alive {
 public:
     NoteDialog(wxWindow *parent, Studio *studio, const Note *note, const Note &seed = Note());
     Note result();
+    //: every pitch typed, in order; more than one is a chord (chord_rows)
+    std::vector<int> pitches() const;
 
 private:
     void on_insert(wxCommandEvent &);
@@ -158,9 +161,20 @@ private:
 
     Studio *studio_;
     Note note_;
-    wxTextCtrl *phon_, *pitch_, *beats_, *bend_start_, *bend_end_, *mod_start_, *mod_end_, *velocity_;
+    bool played_ = false;
+    wxTextCtrl *phon_, *pitch_, *beats_, *hold_, *bend_start_, *bend_end_, *mod_start_, *mod_end_, *velocity_;
     wxButton *hear_;
 };
+
+//: A note as a chord: a row for each pitch, all but the last taking no time
+//: and sounding as long as the note.
+std::vector<Note> chord_rows(const Note &note, const std::vector<int> &pitches);
+//: Whether a note control (kNoteControls) reaches a voice: all but the
+//: pedal reach VocalWriter's voices; the volume, pedal, bend range and
+//: detune reach its instruments.
+bool control_reaches(const std::string &key, int voice);
+//: A voice's name without its engine's: "Betty", "Cello" for "GM Cello".
+std::string short_voice_name(const std::string &name, const std::string &engine);
 
 //: Settings that belong to the whole song rather than to one part.
 class SongSettingsDialog : public wxDialog {

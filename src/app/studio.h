@@ -122,7 +122,12 @@ private:
     std::vector<std::string> bars();
     void sync(int select = 0);
     void on_key(wxKeyEvent &evt);
-    void refresh_row(int i);
+    //: `voice`: the voice in force at the row, if the caller knows it
+    void refresh_row(int i, int voice = -1);
+    //: whether an instrument plays the current track's row `i`
+    bool played_at(int i) const { return is_gm_voice(voice_at(i)); }
+    //: the rows of the chord row `i` is in
+    std::vector<int> chord_of(int i) const;
     void refresh_bars();
     void nudge_pitch(int by);
     void nudge_length(bool up);

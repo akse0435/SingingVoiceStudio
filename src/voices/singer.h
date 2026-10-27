@@ -50,6 +50,9 @@ struct SungNote {
     //: the lyric as written; "ov-" joins it to the next note's syllable
     std::string word;
     NoteControls controls;
+    //: How long an instrument sounds it, if not `beats` (see Note::hold);
+    //: only an engine that plays (Family::plays) hears it.
+    double hold = 0;
 };
 
 //: A bend in force from `seconds` (from the start of the phrase) onwards, in
@@ -149,6 +152,8 @@ struct Sung {
     std::string error;
     //: how many seconds before the phrase's first beat the samples begin
     double starts_before = 0.0;
+    //: 2 when `samples` are stereo, as an instrument's are
+    int channels = 1;
 };
 
 //: How far into a phrase or part `beats` falls, in seconds, its tempo

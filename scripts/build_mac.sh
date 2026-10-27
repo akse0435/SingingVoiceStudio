@@ -197,7 +197,7 @@ say "checking the engines from the new bundle"
 # only the bundle itself counts: not the source tree the program was built from
 STATUS=$(SVS_ONLY_BESIDE=1 "$APP/Contents/MacOS/svs" --version 2>&1)
 echo "$STATUS" | sed 's/^/   /'
-echo "$STATUS" | grep -E '^(VocalWriter|DECtalk|SSI-263|Microsoft): ' | grep -v 'voices ready' | while read -r line; do
+echo "$STATUS" | grep -E '^(VocalWriter|DECtalk|SSI-263|Microsoft|GM Soundbank): ' | grep -v 'voices ready' | while read -r line; do
     warn "engine not ready: $line"
 done
 TMP=$(mktemp -d)

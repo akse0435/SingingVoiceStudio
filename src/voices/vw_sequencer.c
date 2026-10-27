@@ -90,15 +90,26 @@ static void event(buf *b, int channel, int32_t time, int status, int key, int vo
 
 static const unsigned char kEnd[4] = {0xff, 0xff, 0xff, 0xff};
 
-/* One part as a vocal track: its events, the controls at and before a note
-   in front of it, and its lyrics. Returns the last tick it sings. */
+/* A key folded into C1 to C7, as VocalWriter's MIDI import folds it. */
+static int instrument_key(int key)
+{
+    while (key > 96)
+        key -= 12;
+    while (key <= 23)
+        key += 12;
+    return key;
+}
+
+/* One part as a track: its events, the controls at and before a note in
+   front of it, and a vocal track's lyrics. Returns the last tick it sings. */
 static int32_t write_part(const vwseq_part *part, int track, int program, buf *vocal, buf *lyrics,
                           int *lyric_count)
 {
     int32_t last_sung = 0;
     int i, ei = 0, lyric = 0;
 
-    if (!part->voice_later)
+    /* the drum kit has no program: its keys are its drums */
+    if (part->kind != VWSEQ_DRUMS && !part->voice_later)
         event(vocal, track, 0, 3, 0, program, 0, 0);
     for (i = 0; i < part->note_count; i++) {
         const vwseq_note *n = &part->notes[i];
@@ -106,6 +117,14 @@ static int32_t write_part(const vwseq_part *part, int track, int program, buf *v
                                           (part->events[ei].time == n->start && !part->events[ei].after_note))) {
             const vwseq_event *e = &part->events[ei++];
             event(vocal, track, e->time, e->status, e->key, e->vol, 0, 0);
+        }
+        if (part->kind != VWSEQ_VOCAL) {
+            /* a note with its length; the song's end is the singing's */
+            if (n->rest)
+                continue;
+            event(vocal, track, n->start, 1, instrument_key(n->key), clamp(n->velocity, 1, 127),
+                  n->duration < 1 ? 1 : n->duration, 0);
+            continue;
         }
         if (n->rest) {
             event(vocal, track, n->start, 8, n->key, 0, n->duration, 0);
@@ -176,7 +195,7 @@ static unsigned char *write_song(const vwseq_part *parts, int count, const int *
     be16(header + 0x12, TICKS_PER_BEAT);
     be16(header + 0x14, 32);
     for (i = 0; i < 32; i++) {
-        be16(header + 0x16 + 2 * i, i >= 1 && i <= count ? clamp(parts[i - 1].track_level, 0, 100) : 100);
+        be16(header + 0x16 + 2 * i, i >= 1 && i <= count ? clamp(parts[i - 1].track_level, 0, 200) : 100);
         be16(header + 0x56 + 2 * i, 1);
     }
     memset(info, 0, sizeof info);
@@ -189,6 +208,12 @@ static unsigned char *write_song(const vwseq_part *parts, int count, const int *
             be32(t + 0x8, offset);
             be32(t + 0xc, (int32_t)tempo.len);
             offset += (int32_t)tempo.len;
+        } else if (i <= count && parts[i - 1].kind != VWSEQ_VOCAL) {
+            /* an instrument track, flagged 2 for the drum kit */
+            be32(t + 0x4, parts[i - 1].kind == VWSEQ_DRUMS ? 2 : 0);
+            be32(t + 0x8, offset);
+            be32(t + 0xc, (int32_t)vocal[i - 1].len);
+            offset += (int32_t)vocal[i - 1].len;
         } else if (i <= count) {
             be32(t + 0x4, 1);                    /* a vocal track */
             be32(t + 0x8, offset);
@@ -297,6 +322,11 @@ vwseq_engine *vwseq_open(const char *rsrc_path, const char *gmspeech_path,
     }
     *error = 0;
     return s;
+}
+
+int vwseq_has_bank(vwseq_engine *s)
+{
+    return s != NULL && s->e.hasBank;
 }
 
 void vwseq_close(vwseq_engine *s)
@@ -443,6 +473,16 @@ static int sing(vwseq_engine *engine, const vwseq_part *parts, int count, int ro
     /* A voice is chosen as a song chooses it, by a program change: at the
        first tick, and wherever a part changes voice. */
     for (i = 0; i < count; i++) {
+        if (parts[i].max_seconds > max_seconds)
+            max_seconds = parts[i].max_seconds;
+        if (parts[i].kind != VWSEQ_VOCAL) {
+            /* an instrument is the bank's, by GM program */
+            if (!e->hasBank)
+                return -4;
+            if (parts[i].kind == VWSEQ_INSTRUMENT && (parts[i].voice < 0 || parts[i].voice > 127))
+                return -3;
+            continue;
+        }
         if (parts[i].voice < 0 || parts[i].voice >= e->voiceCount)
             return -3;
         need(&r, parts[i].voice);
@@ -452,8 +492,6 @@ static int sing(vwseq_engine *engine, const vwseq_part *parts, int count, int ro
                     return -3;
                 need(&r, parts[i].events[k].vol);
             }
-        if (parts[i].max_seconds > max_seconds)
-            max_seconds = parts[i].max_seconds;
     }
     if (settle(map, &r) != 0) {
         rc = -1;
@@ -461,7 +499,7 @@ static int sing(vwseq_engine *engine, const vwseq_part *parts, int count, int ro
     }
     for (i = 0; i < count; i++) {
         sung[i] = parts[i];
-        programs[i] = program_of(&r, parts[i].voice);
+        programs[i] = parts[i].kind == VWSEQ_VOCAL ? program_of(&r, parts[i].voice) : parts[i].voice;
         if (parts[i].event_count == 0)
             continue;
         events[i] = (vwseq_event *)malloc(sizeof(vwseq_event) * (size_t)parts[i].event_count);
@@ -471,10 +509,17 @@ static int sing(vwseq_engine *engine, const vwseq_part *parts, int count, int ro
         }
         for (k = 0; k < parts[i].event_count; k++) {
             events[i][k] = parts[i].events[k];
-            if (events[i][k].status == VWSEQ_SET_VOICE) {
-                events[i][k].status = 3;
-                events[i][k].key = 0;
+            if (events[i][k].status != VWSEQ_SET_VOICE)
+                continue;
+            events[i][k].status = 3;
+            events[i][k].key = 0;
+            if (parts[i].kind == VWSEQ_VOCAL) {
                 events[i][k].vol = program_of(&r, parts[i].events[k].vol);
+            } else if (parts[i].kind == VWSEQ_DRUMS || parts[i].events[k].vol < 0 ||
+                       parts[i].events[k].vol > 127) {
+                /* a whole track is drums or not, so the change is dropped:
+                   status 0 is nothing */
+                events[i][k].status = 0;
             }
         }
         sung[i].events = events[i];
@@ -488,6 +533,8 @@ static int sing(vwseq_engine *engine, const vwseq_part *parts, int count, int ro
     /* the speech channels before the levels: a level reaches only a voice */
     Synth_MakeAllTrackskNotSpeech(svv);
     for (i = 0; i < count; i++) {
+        if (parts[i].kind != VWSEQ_VOCAL)
+            continue;
         serr = Synth_MakeTrackSpeech(svv, (int16_t)(1 + i));
         if (serr != 0) {
             rc = serr;
@@ -501,7 +548,7 @@ static int sing(vwseq_engine *engine, const vwseq_part *parts, int count, int ro
         Synth_SetTrackLevel(svv, (int16_t)i, s.trackLevels[i]);
     }
     for (i = 0; i < count; i++)
-        if ((rc = make_speech(e, &s, 1 + i, parts[i].consonants)) != 0)
+        if (parts[i].kind == VWSEQ_VOCAL && (rc = make_speech(e, &s, 1 + i, parts[i].consonants)) != 0)
             goto done;
     Synth_SetKbdFlags(svv, 0);
     /* the reverb, as SendReverbParams sends it */
@@ -510,6 +557,8 @@ static int sing(vwseq_engine *engine, const vwseq_part *parts, int count, int ro
     else
         Synth_SetReverb(svv, 0.0f, 0.0f, 0.0f);
     Synth_StartMusic(svv);
+    /* the song's start tempo, which Play to Disk sets before it starts */
+    Synth_SetTempo(svv, (int16_t)clamp(parts[0].bpm, 10, 250));
 
     memset(&pr, 0, sizeof pr);
     pr.PbufStart = (Ptr)s.image;
@@ -525,12 +574,16 @@ static int sing(vwseq_engine *engine, const vwseq_part *parts, int count, int ro
            top of the cycle and every other one from half way. A part sung
            here without the parts before it in its song is set as its own
            channel would be. */
-        for (i = 0; i < count; i++)
-            if ((parts[i].channel > 0) != (i > 0)) {
+        for (i = k = 0; i < count; i++) {
+            if (parts[i].kind != VWSEQ_VOCAL)
+                continue;
+            if ((parts[i].channel > 0) != (k > 0)) {
                 formantVarPtr zz = (formantVarPtr)xx->speechVars[xx->SpeechMap[1 + i]];
                 zz->vibrato_Phase1 = parts[i].channel > 0 ? 128 << 16 : 0;
                 zz->vibrato_Phase2 = zz->vibrato_Phase1;
             }
+            k++;
+        }
         int stop = 0;
         while (!g_done && !stop) {
             Ptr buf;
@@ -569,7 +622,7 @@ restore:
 
 int vwseq_sing(vwseq_engine *engine, const vwseq_part *part, vwseq_sink sink, void *user)
 {
-    return sing(engine, part, 1, 0, 0, 1, sink, user);
+    return sing(engine, part, 1, 0, 0, part->kind == VWSEQ_VOCAL ? 1 : 2, sink, user);
 }
 
 int vwseq_sing_song(vwseq_engine *engine, const vwseq_song *song, vwseq_sink sink, void *user)

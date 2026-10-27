@@ -16,6 +16,7 @@
 #include "core/paths.h"
 #include "core/phonology.h"
 #include "voices/controls.h"
+#include "voices/family.h"
 
 namespace svs {
 
@@ -41,6 +42,8 @@ const NoteControl kNoteControls[] = {
     {"bend_range", "Bend range", 1, 12, "semitones a full bend reaches; VocalWriter starts at 2"},
     {"lead_pitch", "Lead-in pitch", 0, 127,
      "on a rest, the MIDI pitch the next note's first consonants are sung at, when not the next note's"},
+    {"sustain", "Sustain pedal", 0, 127,
+     "the GM Soundbank's instruments only: 64 and up holds every note on until it is let up"},
 };
 const size_t kNoteControlCount = sizeof kNoteControls / sizeof kNoteControls[0];
 
@@ -287,7 +290,8 @@ static std::vector<BendPoint> gather(const std::vector<Note> &notes, Bend Note::
     std::vector<BendPoint> out;
     double at = 0.0, held = 0.0;
     for (const Note &n : notes) {
-        if (n.controller) continue;
+        // a note taking no time, as a chord's, carries no curve
+        if (n.controller || n.beats <= 0) continue;
         const Bend &c = n.*field;
         if (c.empty()) {
             if (std::fabs(held) >= epsilon) {
@@ -419,6 +423,8 @@ json note_doc(const Note &n) {
         for (const auto &p : n.mod) m.push_back({round_to(p.first, 4), round_to(p.second, 4)});
         d["mod"] = m;
     }
+    // only when it differs from its beats
+    if (n.hold > 0) d["hold"] = round_to(n.hold, 6);
     // VocalWriter's own, again only when there are any
     if (n.velocity) d["velocity"] = n.velocity;
     if (!n.controls.empty()) {
@@ -546,6 +552,8 @@ std::vector<Note> read_notes(const json &entries) {
                                      std::max(0.0, std::min(127.0, pt.at(1).get<double>()))});
             auto vel = e.find("velocity");
             if (vel != e.end()) n.velocity = std::max(0, std::min(127, as_int(*vel, 0)));
+            auto hold = e.find("hold");
+            if (hold != e.end()) n.hold = std::max(0.0, as_double(*hold, 0));
             auto ctl = e.find("controls");
             if (ctl != e.end() && ctl->is_object())
                 for (auto it = ctl->begin(); it != ctl->end(); ++it) {
@@ -588,7 +596,7 @@ Track read_track(const json &doc, size_t index) {
         if (c >= 0) t.consonants = c;
     }
     t.program = get("program") ? as_int(*get("program"), 0) : 0;
-    t.volume = std::max(0, std::min(100, get("volume") ? as_int(*get("volume"), 100) : 100));
+    t.volume = std::max(0, std::min(kMaxVolume, get("volume") ? as_int(*get("volume"), 100) : 100));
     t.pan = std::max(-100, std::min(100, get("pan") ? as_int(*get("pan"), 0) : 0));
     int velocity = get("velocity") ? as_int(*get("velocity"), kDefaultVelocity) : kDefaultVelocity;
     t.velocity = std::max(1, std::min(127, velocity));
@@ -789,14 +797,20 @@ Song fresh_song() {
 
 namespace {
 
+int program_at_start(const MidiTrack &track);
+bool drum_track(const MidiTrack &track);
+
 //: Every track with notes, each with a name of its own: MIDI files routinely
-//: leave every track unnamed, so a repeated name is numbered.
+//: leave every track unnamed, so an unnamed one is named after its
+//: instrument, and a repeated name is numbered.
 std::vector<std::pair<std::string, const MidiTrack *>> named_tracks(const MidiFile &midi) {
     std::vector<std::pair<std::string, const MidiTrack *>> out;
     std::map<std::string, int> seen;
     for (const MidiTrack &t : midi.tracks) {
         if (t.notes.empty()) continue;
-        std::string base = t.name.empty() ? "untitled" : t.name;
+        std::string base = !t.name.empty() ? t.name
+                           : drum_track(t) ? std::string("Drums")
+                                           : std::string(gm_program_name(std::max(0, program_at_start(t))));
         int k = ++seen[base];
         out.push_back({k == 1 ? base : base + " " + std::to_string(k), &t});
     }
@@ -1051,7 +1065,258 @@ ImportedPart from_midi(const MidiFile &midi, const MidiTrack &track, const std::
     return part;
 }
 
+//: An instrument's notes are kept to VocalWriter's 240 ticks a beat, as its
+//: MIDI import kept them, rather than to a grid.
+const double kPlayedTicks = 240.0;
+//: the shortest note that import made, in ticks
+const double kShortestPlayed = 10.0;
+
+//: The program in force at the track's first note, or -1.
+int program_at_start(const MidiTrack &track) {
+    long first = track.notes.empty() ? 0 : track.notes.front().tick;
+    for (const MidiNote &n : track.notes) first = std::min(first, n.tick);
+    auto programs = track.programs;
+    std::stable_sort(programs.begin(), programs.end(),
+                     [](const std::pair<long, int> &a, const std::pair<long, int> &b) { return a.first < b.first; });
+    int program = -1;
+    for (const auto &p : programs)
+        if (p.first <= first) program = p.second;
+    return program;
+}
+
+bool drum_track(const MidiTrack &track) { return track.channel == 9; }
+
+//: A track as an instrument plays it, as VocalWriter's import took it in:
+//: the notes and chords, the volume (CC 7 by CC 11), the pedal, the bend and
+//: its range, and the program changes.
+ImportedPart from_midi_played(const MidiFile &midi, const MidiTrack &track, const std::string &name) {
+    double div = midi.division ? midi.division : 480;
+    // as ConvertSMF rescales: times cut to a whole tick, no note under ten
+    float scale = float(kPlayedTicks) / float(div);
+    auto ticks = [&](long t) { return std::floor(double(float(t) * scale)); };
+    auto beat = [&](long tick) { return ticks(tick) / kPlayedTicks; };
+    bool drums = drum_track(track);
+    std::vector<PlayedNote> notes;
+    for (const MidiNote &n : track.notes) {
+        PlayedNote p;
+        p.start = beat(n.tick);
+        p.length = std::max(kShortestPlayed, ticks(n.duration)) / kPlayedTicks;
+        p.pitch = n.pitch;
+        p.velocity = std::max(1, std::min(127, n.velocity));
+        notes.push_back(p);
+    }
+    std::stable_sort(notes.begin(), notes.end(), [](const PlayedNote &a, const PlayedNote &b) {
+        return a.start != b.start ? a.start < b.start : a.pitch < b.pitch;
+    });
+    std::vector<PlayedChange> changes;
+    // the volume, CC 7 by CC 11
+    {
+        std::vector<std::tuple<long, int, int>> ev;   // (tick, which, value)
+        for (const auto &v : track.volumes) ev.push_back({v.first, 0, v.second});
+        for (const auto &v : track.expressions) ev.push_back({v.first, 1, v.second});
+        std::stable_sort(ev.begin(), ev.end(), [](const auto &a, const auto &b) { return std::get<0>(a) < std::get<0>(b); });
+        // in single precision, as VocalWriter has it: CC 7 at 100 is 99
+        float vol = 1.0f, expr = 1.0f;
+        for (const auto &e : ev) {
+            (std::get<1>(e) ? expr : vol) = float(std::get<2>(e)) / 127.0f;
+            float both = vol * expr;
+            changes.push_back({beat(std::get<0>(e)), "volume", double(int(double(both) * 127.0))});
+        }
+    }
+    for (const auto &v : track.sustains) changes.push_back({beat(v.first), "sustain", v.second <= 63 ? 0.0 : 127.0});
+    for (const auto &r : track.bend_range) changes.push_back({beat(r.first), "bend_range", double(std::max(1, std::min(12, r.second)))});
+    for (const auto &b : bend_curve(track)) changes.push_back({beat(b.first), "", round_to(b.second, 4)});
+    int program = std::max(0, program_at_start(track));
+    if (!drums) {
+        long first = track.notes.empty() ? 0 : track.notes.front().tick;
+        for (const MidiNote &n : track.notes) first = std::min(first, n.tick);
+        for (const auto &p : track.programs)
+            if (p.first > first) changes.push_back({beat(p.first), "voice", double(kGmBase + p.second)});
+    }
+    std::stable_sort(changes.begin(), changes.end(),
+                     [](const PlayedChange &a, const PlayedChange &b) { return a.beat < b.beat; });
+    ImportedPart part;
+    part.name = name;
+    part.played = true;
+    part.notes = lay_out_played(notes, changes);
+    part.velocity = common_velocity(part.notes);
+    part.voice_id = drums ? kGmDrums : kGmBase + program;
+    // the pan before the first note, which VocalWriter left out
+    if (!track.pans.empty()) {
+        long first = track.notes.empty() ? 0 : track.notes.front().tick;
+        for (const MidiNote &n : track.notes) first = std::min(first, n.tick);
+        auto pans = track.pans;
+        std::stable_sort(pans.begin(), pans.end(),
+                         [](const std::pair<long, int> &a, const std::pair<long, int> &b) { return a.first < b.first; });
+        int pan = pans.front().second;       // or the first, if all come later
+        for (const auto &p : pans)
+            if (p.first <= first) pan = p.second;
+        part.pan = std::max(-100, std::min(100, int(std::lrint((pan - 64) * 100.0 / 63.0))));
+    }
+    return part;
+}
+
 }  // namespace
+
+int MidiPart::voice() const { return drums ? kGmDrums : kGmBase + std::max(0, program); }
+
+std::vector<MidiPart> midi_parts(const std::string &path) {
+    MidiFile midi = read_midi(path);
+    std::vector<MidiPart> out;
+    for (const auto &nt : named_tracks(midi)) {
+        MidiPart p;
+        p.name = nt.first;
+        p.notes = int(nt.second->notes.size());
+        for (const MidiNote &n : nt.second->notes) p.words = p.words || !n.text.empty() || !n.phonemes.empty();
+        p.drums = drum_track(*nt.second);
+        p.program = std::max(0, program_at_start(*nt.second));
+        out.push_back(p);
+    }
+    return out;
+}
+
+std::vector<std::string> parts_to_play(const std::vector<MidiPart> &parts) {
+    std::vector<std::string> out;
+    for (const MidiPart &p : parts)
+        if (!p.words) out.push_back(p.name);
+    return out;
+}
+
+Track imported_track(const ImportedPart &part) {
+    Track t;
+    t.name = part.name;
+    t.notes = part.notes;
+    if (part.played) {
+        t.voice_id = part.voice_id;
+        t.velocity = part.velocity;
+        t.pan = part.pan;
+    }
+    return t;
+}
+
+int common_velocity(std::vector<Note> &notes) {
+    std::map<int, int> counts;
+    for (const Note &n : notes)
+        if (!n.controller && !n.is_rest() && n.velocity > 0) ++counts[n.velocity];
+    if (counts.empty()) return kDefaultVelocity;
+    int most = counts.begin()->first;
+    for (const auto &c : counts)
+        if (c.second > counts[most]) most = c.first;
+    for (Note &n : notes)
+        if (n.velocity == most || n.controller || n.is_rest()) n.velocity = 0;
+    return most;
+}
+
+std::vector<Note> lay_out_played(std::vector<PlayedNote> notes, std::vector<PlayedChange> changes, double rest_gap) {
+    const double eps = 1e-9;
+    std::stable_sort(notes.begin(), notes.end(), [](const PlayedNote &a, const PlayedNote &b) { return a.start < b.start; });
+    std::stable_sort(changes.begin(), changes.end(),
+                     [](const PlayedChange &a, const PlayedChange &b) { return a.beat < b.beat; });
+    std::vector<Note> rows;
+    std::vector<double> starts;      // where each row starts
+    auto rest = [&](double from, double beats, int pitch) {
+        rows.push_back(Note({kRest}, pitch, beats));
+        starts.push_back(from);
+    };
+    double at = 0.0, free = 0.0;     // where the rows end; when the last note stops
+    for (size_t i = 0; i < notes.size();) {
+        double b = notes[i].start;
+        size_t j = i;
+        while (j < notes.size() && notes[j].start - b < eps) ++j;
+        if (b > at + eps) rest(at, b - at, notes[i].pitch);
+        for (size_t k = i; k < j; ++k) free = std::max(free, b + notes[k].length);
+        bool more = j < notes.size();
+        double next = more ? notes[j].start : free;
+        double step = std::max(0.0, next - b);
+        // a silence of `rest_gap` or more is a rest
+        if (more && next - free >= rest_gap - eps && free > b + eps) step = free - b;
+        for (size_t k = i; k < j; ++k) {
+            // a chord's notes but the last take no time
+            Note n({kDefaultPhoneme}, notes[k].pitch, k + 1 < j ? 0.0 : step);
+            n.velocity = notes[k].velocity;
+            if (std::fabs(notes[k].length - n.beats) > eps) n.hold = std::max(notes[k].length, eps);
+            rows.push_back(n);
+            starts.push_back(b);
+        }
+        at = std::max(at, b + step);
+        i = j;
+    }
+    if (rows.empty()) return rows;
+    // a rest reaching any controls after the last note
+    double last = at;
+    for (const PlayedChange &c : changes)
+        if (c.name != "voice") last = std::max(last, c.beat);
+    if (last > at + eps) rest(at, last - at, rows.back().pitch);
+
+    // the controls and the bend go on the rows that take time
+    std::vector<size_t> spans;
+    std::vector<double> span_starts;
+    for (size_t k = 0; k < rows.size(); ++k)
+        if (rows[k].beats > eps) {
+            spans.push_back(k);
+            span_starts.push_back(starts[k]);
+        }
+    auto span_of = [&](double beat) -> size_t {
+        auto it = std::upper_bound(span_starts.begin(), span_starts.end(), beat + eps);
+        return it == span_starts.begin() ? 0 : size_t(it - span_starts.begin()) - 1;
+    };
+    auto position = [&](size_t k, double beat) {
+        return std::max(0.0, std::min(1.0, (beat - starts[k]) / rows[k].beats));
+    };
+    if (!spans.empty()) {
+        for (const PlayedChange &c : changes) {
+            if (c.name.empty() || c.name == "voice") continue;
+            size_t k = spans[span_of(c.beat)];
+            // every one, even a repeat, as VocalWriter sends it
+            rows[k].controls[c.name].push_back({position(k, c.beat), c.value});
+        }
+        // the bend, held across the rows and moving in steps
+        std::vector<std::pair<double, double>> bends;
+        for (const PlayedChange &c : changes)
+            if (c.name.empty()) bends.push_back({c.beat, c.value});
+        double held = 0.0;
+        size_t bi = 0;
+        for (size_t m = 0; m < spans.size(); ++m) {
+            size_t k = spans[m];
+            double a = starts[k], b = a + rows[k].beats;
+            bool final_span = m + 1 == spans.size();
+            while (bi < bends.size() && bends[bi].first <= a + eps) held = bends[bi++].second;
+            Bend inside;
+            while (bi < bends.size() && (bends[bi].first < b - eps || final_span)) {
+                inside.push_back({position(k, bends[bi].first), bends[bi].second});
+                ++bi;
+            }
+            if (inside.empty() && std::fabs(held) < kBendEpsilon) continue;
+            Bend steps;
+            if (inside.empty() || inside[0].first > 0.0) steps.push_back({0.0, held});
+            double was = held;
+            for (const auto &p : inside) {
+                if (p.second != was && !steps.empty()) steps.push_back({p.first, was});
+                steps.push_back(p);
+                was = p.second;
+            }
+            if (steps.size() == 1 && std::fabs(held) < kBendEpsilon) continue;
+            rows[k].bend = steps;
+            held = was;
+        }
+    }
+    // each change of instrument a controller before its notes
+    std::vector<std::vector<Note>> before(rows.size() + 1);
+    for (const PlayedChange &c : changes) {
+        if (c.name != "voice") continue;
+        size_t k = 0;
+        while (k < rows.size() && starts[k] < c.beat - eps) ++k;
+        Note change = Note::tempo_change(0);
+        change.voice_id = int(c.value);
+        before[k].push_back(change);
+    }
+    std::vector<Note> all;
+    for (size_t k = 0; k <= rows.size(); ++k) {
+        all.insert(all.end(), before[k].begin(), before[k].end());
+        if (k < rows.size()) all.push_back(rows[k]);
+    }
+    return all;
+}
 
 std::vector<std::pair<std::string, int>> midi_tracks(const std::string &path) {
     MidiFile midi = read_midi(path);
@@ -1060,7 +1325,8 @@ std::vector<std::pair<std::string, int>> midi_tracks(const std::string &path) {
     return out;
 }
 
-Imported import_midi(const std::string &path, const std::vector<std::string> &names, double close_rests) {
+Imported import_midi(const std::string &path, const std::vector<std::string> &names, double close_rests,
+                     const std::vector<std::string> &played) {
     MidiFile midi = read_midi(path);
     auto named = named_tracks(midi);
     if (named.empty()) throw std::runtime_error("this file has no notes in it");
@@ -1074,7 +1340,11 @@ Imported import_midi(const std::string &path, const std::vector<std::string> &na
         for (const auto &nt : named)
             if (nt.first == want) track = nt.second;
         if (!track) throw std::runtime_error("no track named " + want);
-        out.parts.push_back(from_midi(midi, *track, want, grid, close_rests, &out.closed_rests));
+        if (std::find(played.begin(), played.end(), want) == played.end()) {
+            out.parts.push_back(from_midi(midi, *track, want, grid, close_rests, &out.closed_rests));
+            continue;
+        }
+        out.parts.push_back(from_midi_played(midi, *track, want));
     }
     return out;
 }

@@ -11,6 +11,7 @@
 
 #include "core/paths.h"
 #include "core/phonology.h"
+#include "core/project.h"
 #include "voices/controls.h"
 
 extern "C" {
@@ -199,7 +200,7 @@ int control_status(const std::string &key) {
         {"volume", VWSEQ_VOLUME},         {"color", VWSEQ_COLOR},     {"noise", VWSEQ_NOISE},
         {"breath", VWSEQ_BREATH},         {"vibrato", VWSEQ_VIB_DEPTH}, {"vibrato_rate", VWSEQ_VIB_FREQ},
         {"portamento", VWSEQ_PORTAMENTO}, {"chorus", VWSEQ_CHORUS},   {"detune", VWSEQ_DETUNE},
-        {"bend_range", VWSEQ_PB_RANGE},
+        {"bend_range", VWSEQ_PB_RANGE},   {"sustain", VWSEQ_SUSTAIN},
     };
     auto it = statuses.find(key);
     return it == statuses.end() ? 0 : it->second;
@@ -229,9 +230,14 @@ struct SeqPart {
     double residual = 1.0;
 };
 
-//: False if the part sings nothing.
-bool to_seq(const Part &part, int voice, SeqPart *sp) {
+//: False if the part sings nothing. A GM Soundbank voice plays it as an
+//: instrument track.
+bool to_seq(const Part &part, int voice_id, SeqPart *sp) {
     if (part.notes.empty()) return false;
+    const bool played = is_gm_voice(voice_id);
+    const int kind = !played ? VWSEQ_VOCAL : voice_id == kGmDrums ? VWSEQ_DRUMS : VWSEQ_INSTRUMENT;
+    const int base = played ? kGmBase : kVocalWriterBase;
+    const int voice = voice_id - base;
     // The sequencer's tempo is a whole number; a tempo between two is
     // kept by counting ticks at the whole one. Tempo changes are whole, and
     // go in as the song's own.
@@ -293,6 +299,21 @@ bool to_seq(const Part &part, int voice, SeqPart *sp) {
                 }
             }
         }
+        if (played) {
+            // an instrument plays each note for as long as it sounds; a rest
+            // is only time going by
+            if (is_rest_note(n)) continue;
+            int32_t c = n.hold > 0 ? ticks(beat - n.beats + n.hold) : b;
+            vwseq_note v{};
+            v.start = a;
+            v.duration = std::max(1, c - a);
+            v.key = n.midi;
+            v.velocity = n.velocity;
+            notes.push_back(v);
+            if (first_sung < 0) first_sung = a;
+            end = std::max(end, a + v.duration);
+            continue;
+        }
         if (b <= a) continue;
         vwseq_note v{};
         v.start = a;
@@ -334,7 +355,7 @@ bool to_seq(const Part &part, int voice, SeqPart *sp) {
     }
     if (notes.empty()) return false;
     // the sequencer finishes a track once its voice has sung a rest
-    if (!notes.back().rest) {
+    if (!played && !notes.back().rest) {
         vwseq_note r{};
         r.start = end;
         r.duration = kTicksPerBeat;
@@ -361,7 +382,8 @@ bool to_seq(const Part &part, int voice, SeqPart *sp) {
     size_t count;
     const VoiceControl *c = svs::voice_controls(&count);
     VoiceStyle style = clean_voice(part.style);
-    for (size_t i = 0; i < count; ++i) {
+    // the voice controls are a singer's; an instrument has its own sound
+    for (size_t i = 0; i < count && !played; ++i) {
         int value = style.*(c[i].field);
         std::string call = c[i].call;
         if (value == (call == "Speech_Portamento" ? kEnginePortamento : c[i].def)) continue;
@@ -399,7 +421,8 @@ bool to_seq(const Part &part, int voice, SeqPart *sp) {
         for (const BendEvent &b : part.bends)
             control14(ev, at_second(b.seconds), VWSEQ_PITCH_BEND, bend_raw(b.semitones, range));
     }
-    if (!part.mods.empty()) {
+    // the wheel is a singer's vibrato; the instruments have their own
+    if (!part.mods.empty() && !played) {
         int last = -1;
         for (const BendEvent &m : part.mods) {
             int v = int(std::lrint(effective_vibrato(style.vibrato, m.semitones)));
@@ -412,7 +435,7 @@ bool to_seq(const Part &part, int voice, SeqPart *sp) {
     // there, which VocalWriter sings the same as after it
     int32_t first_voice_tick = -1;
     for (const auto &v : part.voices) {
-        ev.push_back({ticks(v.first), VWSEQ_SET_VOICE, 0, v.second - kVocalWriterBase, 0});
+        ev.push_back({ticks(v.first), VWSEQ_SET_VOICE, 0, v.second - base, 0});
         if (first_voice_tick < 0) first_voice_tick = ev.back().time;
     }
     std::stable_sort(ev.begin(), ev.end(),
@@ -434,22 +457,25 @@ bool to_seq(const Part &part, int voice, SeqPart *sp) {
     p.tempos = sp->tempos.data();
     p.tempo_count = int(sp->tempos.size());
     p.max_seconds = second_of(end) + 10.0;
+    p.kind = kind;
 
     // the level as VocalWriter's track level, in whole percent, and what is
     // finer than that on the samples; a voice VocalWriter sang past full
-    // scale is left as it sang it
+    // scale is left as it sang it. Up to twice as loud is the engine's own.
     p.track_level = 100;
     sp->residual = part.level;
-    if (part.level > 0 && part.level <= 1.0) {
+    if (part.level > 0 && part.level <= kMaxVolume / 100.0) {
         p.track_level = std::max(1, int(std::lround(part.level * 100)));
         sp->residual = part.level / (p.track_level / 100.0);
     }
     return true;
 }
 
+//: A voice of VocalWriter's, or an instrument of its General MIDI bank:
+//: the same sequencer plays both.
 class VwSinger : public Singer {
 public:
-    VwSinger(int voice_id) : voice_id_(voice_id) {}
+    explicit VwSinger(int voice_id) : voice_id_(voice_id) {}
 
     //: A phrase is a part that begins `room` beats before it, so that its
     //: first consonants are sung before the beat as in the whole track.
@@ -493,6 +519,11 @@ public:
             out.error = s.error;
             return out;
         }
+        if (sp.p.kind != VWSEQ_VOCAL && !vwseq_has_bank(s.e)) {
+            out.error = "the instrument bank, GMBank.rsrc, would not load";
+            return out;
+        }
+        out.channels = sp.p.kind == VWSEQ_VOCAL ? 1 : 2;
         int rc = vwseq_sing(s.e, &sp.p, collect, &out.samples);
         if (rc != 0) {
             out.error = "VocalWriter's sequencer stopped (" + std::to_string(rc) + ")";
@@ -551,7 +582,7 @@ public:
             if (err) *err = "there is no voice " + std::to_string(index) + " in the bank";
             return nullptr;
         }
-        return std::make_unique<VwSinger>(index);
+        return std::make_unique<VwSinger>(voice_id);
     }
 
 private:
@@ -582,7 +613,104 @@ private:
     std::vector<std::string> names_;
 };
 
+
+//: VocalWriter's General MIDI bank, GMBank, as an engine of its own,
+//: played through the same sequencer that sings its voices.
+class GmFamily : public Family {
+public:
+    std::string name() const override { return "GM Soundbank"; }
+    bool sings_parts() const override { return true; }
+    bool plays() const override { return true; }
+
+    std::vector<VoiceEntry> voices() override {
+        std::vector<VoiceEntry> out;
+        for (int p = 0; p < 128; ++p) out.push_back({kGmBase + p, std::string("GM ") + gm_program_name(p)});
+        out.push_back({kGmDrums, "GM Drum Kit"});
+        return out;
+    }
+
+    bool available(std::string *why) override {
+        VwAssets &a = VwAssets::get();
+        if (a.ok() && a.has_bank()) return true;
+        if (why) {
+            if (!a.ok()) {
+                std::string list;
+                for (const std::string &m : a.missing()) list += (list.empty() ? "" : ", ") + m;
+                *why = "it plays through VocalWriter 2.0's own files, which are not here: " + list;
+            } else {
+                *why = "VocalWriter's instrument bank, GMBank.rsrc, is not in assets";
+            }
+        }
+        return false;
+    }
+
+    std::unique_ptr<Singer> singer(int voice_id, std::string *err) override {
+        if (!available(err)) return nullptr;
+        if (voice_id < kGmBase || voice_id > kGmDrums) {
+            if (err) *err = "there is no GM instrument " + std::to_string(voice_id - kGmBase);
+            return nullptr;
+        }
+        return std::make_unique<VwSinger>(voice_id);
+    }
+};
+
 }  // namespace
+
+std::unique_ptr<Family> make_gm_family() { return std::make_unique<GmFamily>(); }
+
+const char *gm_program_name(int program) {
+    static const char *const names[128] = {
+        "Acoustic Grand Piano", "Bright Acoustic Piano", "Electric Grand Piano", "Honky-tonk Piano",
+        "Electric Piano 1", "Electric Piano 2", "Harpsichord", "Clavinet",
+        "Celesta", "Glockenspiel", "Music Box", "Vibraphone",
+        "Marimba", "Xylophone", "Tubular Bells", "Dulcimer",
+        "Drawbar Organ", "Percussive Organ", "Rock Organ", "Church Organ",
+        "Reed Organ", "Accordion", "Harmonica", "Tango Accordion",
+        "Acoustic Guitar (nylon)", "Acoustic Guitar (steel)", "Electric Guitar (jazz)", "Electric Guitar (clean)",
+        "Electric Guitar (muted)", "Overdriven Guitar", "Distortion Guitar", "Guitar Harmonics",
+        "Acoustic Bass", "Electric Bass (finger)", "Electric Bass (pick)", "Fretless Bass",
+        "Slap Bass 1", "Slap Bass 2", "Synth Bass 1", "Synth Bass 2",
+        "Violin", "Viola", "Cello", "Contrabass",
+        "Tremolo Strings", "Pizzicato Strings", "Orchestral Harp", "Timpani",
+        "String Ensemble 1", "String Ensemble 2", "Synth Strings 1", "Synth Strings 2",
+        "Choir Aahs", "Voice Oohs", "Synth Voice", "Orchestra Hit",
+        "Trumpet", "Trombone", "Tuba", "Muted Trumpet",
+        "French Horn", "Brass Section", "Synth Brass 1", "Synth Brass 2",
+        "Soprano Sax", "Alto Sax", "Tenor Sax", "Baritone Sax",
+        "Oboe", "English Horn", "Bassoon", "Clarinet",
+        "Piccolo", "Flute", "Recorder", "Pan Flute",
+        "Blown Bottle", "Shakuhachi", "Whistle", "Ocarina",
+        "Lead 1 (square)", "Lead 2 (sawtooth)", "Lead 3 (calliope)", "Lead 4 (chiff)",
+        "Lead 5 (charang)", "Lead 6 (voice)", "Lead 7 (fifths)", "Lead 8 (bass and lead)",
+        "Pad 1 (new age)", "Pad 2 (warm)", "Pad 3 (polysynth)", "Pad 4 (choir)",
+        "Pad 5 (bowed)", "Pad 6 (metallic)", "Pad 7 (halo)", "Pad 8 (sweep)",
+        "FX 1 (rain)", "FX 2 (soundtrack)", "FX 3 (crystal)", "FX 4 (atmosphere)",
+        "FX 5 (brightness)", "FX 6 (goblins)", "FX 7 (echoes)", "FX 8 (sci-fi)",
+        "Sitar", "Banjo", "Shamisen", "Koto",
+        "Kalimba", "Bagpipe", "Fiddle", "Shanai",
+        "Tinkle Bell", "Agogo", "Steel Drums", "Woodblock",
+        "Taiko Drum", "Melodic Tom", "Synth Drum", "Reverse Cymbal",
+        "Guitar Fret Noise", "Breath Noise", "Seashore", "Bird Tweet",
+        "Telephone Ring", "Helicopter", "Applause", "Gunshot",
+    };
+    return program >= 0 && program < 128 ? names[program] : "";
+}
+
+const char *gm_drum_name(int key) {
+    static const char *const names[] = {
+        "Acoustic Bass Drum", "Bass Drum 1", "Side Stick", "Acoustic Snare", "Hand Clap",
+        "Electric Snare", "Low Floor Tom", "Closed Hi-hat", "High Floor Tom", "Pedal Hi-hat",
+        "Low Tom", "Open Hi-hat", "Low-Mid Tom", "Hi-Mid Tom", "Crash Cymbal 1",
+        "High Tom", "Ride Cymbal 1", "Chinese Cymbal", "Ride Bell", "Tambourine",
+        "Splash Cymbal", "Cowbell", "Crash Cymbal 2", "Vibraslap", "Ride Cymbal 2",
+        "Hi Bongo", "Low Bongo", "Mute Hi Conga", "Open Hi Conga", "Low Conga",
+        "High Timbale", "Low Timbale", "High Agogo", "Low Agogo", "Cabasa",
+        "Maracas", "Short Whistle", "Long Whistle", "Short Guiro", "Long Guiro",
+        "Claves", "Hi Wood Block", "Low Wood Block", "Mute Cuica", "Open Cuica",
+        "Mute Triangle", "Open Triangle",
+    };
+    return key >= 35 && key <= 81 ? names[key - 35] : nullptr;
+}
 
 std::unique_ptr<Family> make_vocalwriter_family() { return std::make_unique<VocalWriterFamily>(); }
 
@@ -599,7 +727,7 @@ bool vocalwriter_song(const std::vector<std::pair<int, Part>> &parts, int room, 
     std::vector<SeqPart> seq(parts.size());
     std::vector<vwseq_part> sung;
     for (size_t i = 0; i < parts.size(); ++i) {
-        if (!to_seq(parts[i].second, parts[i].first - kVocalWriterBase, &seq[i])) continue;
+        if (!to_seq(parts[i].second, parts[i].first, &seq[i])) continue;
         // a level between VocalWriter's whole percents is put on the samples,
         // which one mix cannot do part by part
         if (seq[i].residual != 1.0) return false;

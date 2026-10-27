@@ -11,6 +11,8 @@
 //   3000 - 3999   Microsoft Sam, Mike and Mary, and the SAPI 4 voice modes
 //   4000 - 4999   MacinTalk: Apple's voices from Mac OS X 10.4 to 10.7, a
 //                 hundred numbers to each generation
+//   5000 - 5999   the GM Soundbank: VocalWriter's own General MIDI instruments
+//                 (GMBank), 5000 + the GM program, and 5128 the drum kit
 //
 // The number is not the only thing a song keeps: a voice outside
 // VocalWriter's bank is saved with its name as well (see Track::voice_name),
@@ -31,12 +33,25 @@ enum : int {
     kSsi263Base = 2000,
     kMicrosoftBase = 3000,
     kMacinTalkBase = 4000,
+    kGmBase = 5000,
     kFamilySpan = 1000,
 };
+
+//: The GM Soundbank's drum kit: General MIDI's channel 10, each key a drum.
+constexpr int kGmDrums = kGmBase + 128;
 
 //: Whether a voice is one of VocalWriter's: the only engine a velocity means
 //: more than loudness to, which every engine has as the part's volume.
 inline bool is_vocalwriter_voice(int id) { return id >= kVocalWriterBase && id < kVocalWriterBase + kFamilySpan; }
+//: Whether a voice is one of the GM Soundbank's instruments, which play the
+//: notes, chords and all, rather than sing them.
+inline bool is_gm_voice(int id) { return id >= kGmBase && id < kGmBase + kFamilySpan; }
+//: Whether a voice hears velocity as more than loudness: VocalWriter's do.
+inline bool uses_velocity(int id) { return is_vocalwriter_voice(id) || is_gm_voice(id); }
+//: The General MIDI name of a program, 0-127: "Acoustic Grand Piano".
+const char *gm_program_name(int program);
+//: The General MIDI name of the drum on a key, 35 to 81, or null.
+const char *gm_drum_name(int key);
 
 struct VoiceEntry {
     int id = 0;
@@ -74,6 +89,9 @@ public:
     //: places the consonants before the beat itself, and an export is sung
     //: as whole parts rather than phrases.
     virtual bool sings_parts() const { return false; }
+    //: Whether it plays rather than sings, as the GM Soundbank does: chords
+    //: and all, and always the whole part.
+    virtual bool plays() const { return false; }
 };
 
 std::unique_ptr<Family> make_vocalwriter_family();
@@ -81,6 +99,7 @@ std::unique_ptr<Family> make_dectalk_family();
 std::unique_ptr<Family> make_ssi263_family();
 std::unique_ptr<Family> make_microsoft_family();
 std::unique_ptr<Family> make_macintalk_family();
+std::unique_ptr<Family> make_gm_family();
 
 //: Where Panthera is, as the user has named it in the settings: NVDA's
 //: configuration folder (with Panthera's add-on and its macintalk folder in
