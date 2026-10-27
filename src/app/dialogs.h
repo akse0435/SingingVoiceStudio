@@ -127,9 +127,10 @@ private:
 };
 
 //: A note's VocalWriter controls, one row each; Enter edits one as a curve.
+//: Only those `voice` sings are listed, and any the note already carries.
 class ControlsDialog : public wxDialog, Alive {
 public:
-    ControlsDialog(wxWindow *parent, Studio *studio, const Note &note);
+    ControlsDialog(wxWindow *parent, Studio *studio, const Note &note, int voice);
     NoteControls result() const { return note_.controls; }
 
 private:
@@ -140,6 +141,8 @@ private:
 
     Studio *studio_;
     Note note_;
+    //: the list's rows, as indices into kNoteControls
+    std::vector<size_t> rows_;
     ReportList *list_;
 };
 
@@ -199,7 +202,7 @@ private:
 //: A controller: one change from where it stands in the track on, chosen
 //: first. The voice is the track's from there, any engine's; the tempo is
 //: the whole song's, whichever track it is on; or one of VocalWriter's
-//: controls, as a note carries them.
+//: controls, as a note carries them, of those the voice in force sings.
 class ControllerDialog : public wxDialog {
 public:
     //: `voice_before`: the voice the track sings with up to the controller

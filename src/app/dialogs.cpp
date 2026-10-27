@@ -492,8 +492,10 @@ Bend CurveDialog::result() const {
 
 // -- ControlsDialog --------------------------------------------------------------------
 
-ControlsDialog::ControlsDialog(wxWindow *parent, Studio *studio, const Note &note)
+ControlsDialog::ControlsDialog(wxWindow *parent, Studio *studio, const Note &note, int voice)
     : wxDialog(parent, wxID_ANY, "VocalWriter controls"), studio_(studio), note_(note) {
+    for (size_t i = 0; i < kNoteControlCount; ++i)
+        if (control_reaches(kNoteControls[i].key, voice) || note.controls.count(kNoteControls[i].key)) rows_.push_back(i);
     wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
     list_ = new ReportList(this, wxLC_REPORT | wxLC_SINGLE_SEL, wxSize(380, 250));
     list_->InsertColumn(0, "Control", wxLIST_FORMAT_LEFT, 130);
@@ -520,18 +522,19 @@ ControlsDialog::ControlsDialog(wxWindow *parent, Studio *studio, const Note &not
 
 void ControlsDialog::sync(int select) {
     list_->DeleteAllItems();
-    for (size_t i = 0; i < kNoteControlCount; ++i) {
-        const CurveKind &k = control_curve(kNoteControls[i].key);
+    for (size_t r = 0; r < rows_.size(); ++r) {
+        const CurveKind &k = control_curve(kNoteControls[rows_[r]].key);
         Bend pts = curve_in(note_, k);
         std::string text;
         for (const auto &p : pts)
             text += (text.empty() ? "" : "; ") + value_text(k, p.second) + " at " +
                     fmt_g(std::nearbyint(p.first * 100 * 1000) / 1000) + " per cent";
-        list_->InsertItem(long(i), W(k.title));
-        list_->SetItem(long(i), 1, W(text.empty() ? std::string("none") : text));
+        list_->InsertItem(long(r), W(k.title));
+        list_->SetItem(long(r), 1, W(text.empty() ? std::string("none") : text));
     }
-    list_->SelectRow(std::min(std::max(select, 0), int(kNoteControlCount) - 1));
-    list_->FocusRow(std::min(std::max(select, 0), int(kNoteControlCount) - 1));
+    if (rows_.empty()) return;
+    list_->SelectRow(std::min(std::max(select, 0), int(rows_.size()) - 1));
+    list_->FocusRow(std::min(std::max(select, 0), int(rows_.size()) - 1));
 }
 
 void ControlsDialog::on_key(wxKeyEvent &evt) {
@@ -544,8 +547,8 @@ void ControlsDialog::on_key(wxKeyEvent &evt) {
 
 void ControlsDialog::on_edit(wxCommandEvent &) {
     int i = list_->FirstSelected();
-    if (i < 0) return;
-    const CurveKind &k = control_curve(kNoteControls[i].key);
+    if (i < 0 || size_t(i) >= rows_.size()) return;
+    const CurveKind &k = control_curve(kNoteControls[rows_[size_t(i)]].key);
     CurveDialog dlg(this, studio_, note_, k);
     if (dlg.ShowModal() != wxID_OK) return;
     Bend pts = dlg.result();
@@ -556,10 +559,11 @@ void ControlsDialog::on_edit(wxCommandEvent &) {
 
 void ControlsDialog::on_clear(wxCommandEvent &) {
     int i = list_->FirstSelected();
-    if (i < 0) return;
-    note_.controls.erase(kNoteControls[i].key);
+    if (i < 0 || size_t(i) >= rows_.size()) return;
+    const NoteControl &c = kNoteControls[rows_[size_t(i)]];
+    note_.controls.erase(c.key);
     sync(i);
-    studio_->say(W(std::string(kNoteControls[i].label) + " cleared"));
+    studio_->say(W(std::string(c.label) + " cleared"));
 }
 
 // -- NoteDialog ------------------------------------------------------------------------
@@ -722,7 +726,7 @@ void NoteDialog::on_points(const CurveKind &kind) {
 }
 
 void NoteDialog::on_controls(wxCommandEvent &) {
-    ControlsDialog dlg(this, studio_, result());
+    ControlsDialog dlg(this, studio_, result(), studio_->current_voice());
     if (dlg.ShowModal() != wxID_OK) return;
     note_.controls = dlg.result();
     std::string said = describe_controls(note_);
@@ -980,9 +984,11 @@ ControllerDialog::ControllerDialog(wxWindow *parent, Studio *studio, const Note 
         // a rest's own: the pitch its next note's consonants are sung at
         if (std::string(k.key) == "lead_pitch") continue;
         auto it = controller.controls.find(k.key);
-        wxString shown = it != controller.controls.end() && !it->second.empty()
-                             ? W(fmt_g(it->second.front().second))
-                             : wxString();
+        bool has = it != controller.controls.end() && !it->second.empty();
+        // only what the voice in force here sings; one a controller holds
+        // already stays, to be changed or taken away
+        if (!control_reaches(k.key, voice_before) && !has) continue;
+        wxString shown = has ? W(fmt_g(it->second.front().second)) : wxString();
         wxBoxSizer *group = new wxBoxSizer(wxVERTICAL);
         wxTextCtrl *field = new wxTextCtrl(this, wxID_ANY, shown, wxDefaultPosition, wxSize(80, -1));
         std::string key = k.key, reach;
@@ -990,7 +996,6 @@ ControllerDialog::ControllerDialog(wxWindow *parent, Studio *studio, const Note 
         else if (key != "sustain")
             reach = std::string("; VocalWriter's voices only") + (control_reaches(key, kGmBase) ? ", and its instruments" : "");
         labelled(this, group, k.label, field, 0, W(std::string(k.hint) + reach));
-        enable_labelled(field, control_reaches(k.key, voice_before));
         outer_->Add(group, 0, wxEXPAND);
         groups_.push_back(group);
         controls_.push_back({&k, field});
