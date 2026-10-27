@@ -359,9 +359,21 @@ void put_words(std::vector<MidiNote> &notes, const std::vector<std::pair<long, i
         note.phonemes = l != lyric_at.end() ? l->second : "";
         spoken.insert(note.tick);
     }
+    // A word in brackets with no note of its own is a cue, as a karaoke file
+    // names the instrument of an interlude, "(Harp)", and is not sung.
+    auto cue = [&](const std::pair<long, std::string> &e) {
+        std::string w = e.second;
+        w.erase(0, w.find_first_not_of(" \t\r\n"));
+        w.erase(w.find_last_not_of(" \t\r\n") + 1);
+        if (w.size() < 2 || !((w.front() == '(' && w.back() == ')') || (w.front() == '[' && w.back() == ']')))
+            return false;
+        for (const MidiNote &n : notes)
+            if (std::labs(n.tick - e.first) <= std::lround(div / 16)) return false;
+        return true;
+    };
     std::vector<std::pair<long, std::string>> rest;
     for (const auto &e : trk.lyrics)
-        if (!spoken.count(e.first)) rest.push_back(e);
+        if (!spoken.count(e.first) && !cue(e)) rest.push_back(e);
     auto syls = syllables(rest);
     int exact;
     std::vector<int> at = pair_up(notes, syls, div, &exact);
