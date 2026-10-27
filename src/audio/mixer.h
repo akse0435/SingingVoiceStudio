@@ -61,6 +61,7 @@ struct BackingRequest {
 struct RenderRequest {
     double bpm = 120;
     std::vector<TempoChange> tempo_changes;
+    double end = 0;              // beats, as Song::end
     double consonants = 1.0;
     double start = 0.0;          // beats
     Reverb reverb{0, 0};
@@ -114,7 +115,7 @@ private:
     //: `whole`: an export, which an engine that keeps its own time sings
     //: part by part rather than phrase by phrase
     Mixed mix_locked(const RenderRequest &req, bool whole = false);
-    std::vector<float> track(const PartRequest &t, const Clock &clock, double consonants, double start,
+    std::vector<float> track(const PartRequest &t, const Clock &clock, double end, double consonants, double start,
                              bool early, bool whole, bool *stopped_short, std::string *error);
     void keep(const std::string &key, std::shared_ptr<const std::vector<float>> sung,
               bool stopped_short, double starts_before);

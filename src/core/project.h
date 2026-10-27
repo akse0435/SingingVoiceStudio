@@ -19,7 +19,7 @@ namespace svs {
 
 extern const char *const kProjectSuffix;      // ".vws"
 extern const char *const kProjectWildcard;
-extern const char *const kMidiWildcard;
+extern const char *const kImportWildcard;  // MIDI files and VocalWriter songs
 //: What a note sings when the file says nothing: "AA", the open vowel of
 //: "father" -- something to sing the line on, and the obvious thing to replace.
 extern const char *const kDefaultPhoneme;
@@ -165,6 +165,9 @@ std::vector<TempoChange> clean_tempo_changes(std::vector<TempoChange> changes);
 struct Song {
     //: the tempo it starts at; the tempo changes are controllers on its tracks
     double bpm = 120;
+    //: where the song ends, in beats, as a VocalWriter song keeps it; 0, or
+    //: anywhere before the last note's end, is a beat after the last note
+    double end = 0;
     Sig sig = kDefaultSig;
     double consonants = 1.0;          // a fraction
     VoiceStyle voice;                 // the song's voice controls
@@ -172,7 +175,7 @@ struct Song {
     bool anticipate = true;
     std::vector<Track> tracks;
     bool operator==(const Song &o) const {
-        return bpm == o.bpm && sig == o.sig && consonants == o.consonants &&
+        return bpm == o.bpm && end == o.end && sig == o.sig && consonants == o.consonants &&
                voice == o.voice && reverb == o.reverb && anticipate == o.anticipate &&
                tracks == o.tracks;
     }

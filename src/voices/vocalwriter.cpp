@@ -190,7 +190,7 @@ bool is_rest_note(const SungNote &n) {
 }
 
 void control(std::vector<vwseq_event> &ev, int32_t t, int status, int value) {
-    ev.push_back({t, status, 0, std::max(0, std::min(127, value))});
+    ev.push_back({t, status, 0, std::max(0, std::min(127, value)), 0});
 }
 
 //: the sequencer's status for one of a note's controls (NoteControls), or 0
@@ -199,6 +199,7 @@ int control_status(const std::string &key) {
         {"volume", VWSEQ_VOLUME},         {"color", VWSEQ_COLOR},     {"noise", VWSEQ_NOISE},
         {"breath", VWSEQ_BREATH},         {"vibrato", VWSEQ_VIB_DEPTH}, {"vibrato_rate", VWSEQ_VIB_FREQ},
         {"portamento", VWSEQ_PORTAMENTO}, {"chorus", VWSEQ_CHORUS},   {"detune", VWSEQ_DETUNE},
+        {"bend_range", VWSEQ_PB_RANGE},
     };
     auto it = statuses.find(key);
     return it == statuses.end() ? 0 : it->second;
@@ -207,7 +208,7 @@ int control_status(const std::string &key) {
 //: a 14-bit control about 8192: pitch bend, detune and chorus
 void control14(std::vector<vwseq_event> &ev, int32_t t, int status, int value) {
     int v = std::max(0, std::min(16383, value + 8192));
-    ev.push_back({t, status, v & 127, v >> 7});
+    ev.push_back({t, status, v & 127, v >> 7, 0});
 }
 
 //: Over 32767, as the WAV writer multiplies back, so an export of a
@@ -268,7 +269,8 @@ bool to_seq(const Part &part, int voice, SeqPart *sp) {
     std::vector<vwseq_note> &notes = sp->notes;
     double beat = 0.0;
     int32_t end = 0;
-    std::vector<vwseq_event> note_ev;
+    std::vector<vwseq_event> note_ev, ranges;
+    int32_t first_sung = -1;
     for (size_t i = 0; i < part.notes.size(); ++i) {
         const SungNote &n = part.notes[i];
         int32_t a = ticks(beat), b = ticks(beat + n.beats);
@@ -279,8 +281,16 @@ bool to_seq(const Part &part, int voice, SeqPart *sp) {
             for (const auto &pt : ctl.second) {
                 int32_t t = a + int32_t(std::llround(pt.first * std::max(0, b - a)));
                 int value = int(std::lrint(pt.second));
-                if (status == VWSEQ_CHORUS || status == VWSEQ_DETUNE) control14(note_ev, t, status, value);
+                size_t from = note_ev.size(), from_r = ranges.size();
+                if (status == VWSEQ_PB_RANGE) control(ranges, t, status, value);
+                else if (status == VWSEQ_CHORUS || status == VWSEQ_DETUNE) control14(note_ev, t, status, value);
                 else if (status) control(note_ev, t, status, value);
+                // one at the very start of the note comes after it, where
+                // VocalWriter writes what a note carries
+                if (pt.first <= 0.0 && b > a) {
+                    for (size_t k = from; k < note_ev.size(); ++k) note_ev[k].after_note = 1;
+                    for (size_t k = from_r; k < ranges.size(); ++k) ranges[k].after_note = 1;
+                }
             }
         }
         if (b <= a) continue;
@@ -298,6 +308,10 @@ bool to_seq(const Part &part, int voice, SeqPart *sp) {
                     v.key = part.notes[k].midi;
                     break;
                 }
+            // unless the song says otherwise, as one from VocalWriter can
+            auto lead = n.controls.find("lead_pitch");
+            if (lead != n.controls.end() && !lead->second.empty())
+                v.key = std::max(0, std::min(127, int(std::lrint(lead->second.front().second))));
             if (!notes.empty() && notes.back().rest && notes.back().start + notes.back().duration == a) {
                 notes.back().duration += v.duration;
                 end = b;
@@ -313,6 +327,7 @@ bool to_seq(const Part &part, int voice, SeqPart *sp) {
                 v.phonemes[1 + count++] = (unsigned char)code;
             }
             v.phonemes[0] = (unsigned char)count;
+            if (first_sung < 0) first_sung = a;
         }
         notes.push_back(v);
         end = b;
@@ -334,7 +349,8 @@ bool to_seq(const Part &part, int voice, SeqPart *sp) {
     for (const ControlAt &c : part.controls) {
         int status = control_status(c.name);
         int value = int(std::lrint(c.value));
-        if (status == VWSEQ_CHORUS || status == VWSEQ_DETUNE) control14(note_ev, ticks(c.beat), status, value);
+        if (status == VWSEQ_PB_RANGE) control(ranges, ticks(c.beat), status, value);
+        else if (status == VWSEQ_CHORUS || status == VWSEQ_DETUNE) control14(note_ev, ticks(c.beat), status, value);
         else if (status) control(note_ev, ticks(c.beat), status, value);
     }
 
@@ -357,7 +373,23 @@ bool to_seq(const Part &part, int voice, SeqPart *sp) {
         else if (call == "Speech_Detune") control14(ev, 0, VWSEQ_DETUNE, value);
         else if (call == "Speech_Portamento") control(ev, 0, VWSEQ_PORTAMENTO, value);
     }
-    if (part.any_bends) {
+    if (!ranges.empty()) {
+        // the bend range the notes set, each bend at the one in force, as a
+        // song from VocalWriter has them
+        std::stable_sort(ranges.begin(), ranges.end(),
+                         [](const vwseq_event &a, const vwseq_event &b) { return a.time < b.time; });
+        ev.insert(ev.end(), ranges.begin(), ranges.end());
+        for (const BendEvent &b : part.bends) {
+            int32_t t = at_second(b.seconds);
+            int range = 2;
+            for (const vwseq_event &r : ranges)
+                if (r.time <= t) range = std::max(1, r.vol);
+            control14(ev, t, VWSEQ_PITCH_BEND, bend_raw(b.semitones, range));
+            // at a note's start the bend is the note's own, written after it
+            for (const vwseq_note &n : notes)
+                if (n.start == t) ev.back().after_note = 1;
+        }
+    } else if (part.any_bends) {
         // VocalWriter's own range of two semitones if the bends fit it,
         // else the narrowest that holds them
         double widest = 0;
@@ -378,8 +410,11 @@ bool to_seq(const Part &part, int voice, SeqPart *sp) {
     ev.insert(ev.end(), note_ev.begin(), note_ev.end());
     // the voice changes, each where it stands: before a note that starts
     // there, which VocalWriter sings the same as after it
-    for (const auto &v : part.voices)
-        ev.push_back({ticks(v.first), VWSEQ_SET_VOICE, 0, v.second - kVocalWriterBase});
+    int32_t first_voice_tick = -1;
+    for (const auto &v : part.voices) {
+        ev.push_back({ticks(v.first), VWSEQ_SET_VOICE, 0, v.second - kVocalWriterBase, 0});
+        if (first_voice_tick < 0) first_voice_tick = ev.back().time;
+    }
     std::stable_sort(ev.begin(), ev.end(),
                      [](const vwseq_event &a, const vwseq_event &b) { return a.time < b.time; });
 
@@ -393,6 +428,9 @@ bool to_seq(const Part &part, int voice, SeqPart *sp) {
     p.event_count = int(ev.size());
     p.channel = part.channel;
     p.consonants = part.consonants;
+    // a voice chosen before the first note is the part's own choosing
+    p.voice_later = first_voice_tick >= 0 && first_sung >= 0 && first_voice_tick <= first_sung;
+    if (part.end > 0) p.end = ticks(part.end);
     p.tempos = sp->tempos.data();
     p.tempo_count = int(sp->tempos.size());
     p.max_seconds = second_of(end) + 10.0;

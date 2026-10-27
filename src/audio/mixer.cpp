@@ -39,24 +39,27 @@ struct Pt {
 };
 
 //: Fill in between the written points so a bend moves rather than jumps --
-//: only where the point says it slides into the next one.
-std::vector<std::pair<double, double>> glide(const std::vector<Pt> &pts) {
-    std::vector<std::pair<double, double>> out;
-    if (pts.size() < 2) {
-        for (const Pt &p : pts) out.push_back({p.t, p.v});
-        return out;
-    }
-    for (size_t i = 0; i + 1 < pts.size(); ++i) {
-        const Pt &a = pts[i], &b = pts[i + 1];
-        out.push_back({a.t, a.v});
+//: only where the point says it slides into the next one. Each value says
+//: whether it was written (and is not the first half of a step).
+struct Glided {
+    double t, v;
+    bool written;
+};
+std::vector<Glided> glide(const std::vector<Pt> &pts) {
+    std::vector<Glided> out;
+    for (size_t i = 0; i < pts.size(); ++i) {
+        const Pt &a = pts[i];
+        bool step = i + 1 < pts.size() && pts[i + 1].t == a.t;
+        out.push_back({a.t, a.v, !step});
+        if (i + 1 == pts.size()) break;
+        const Pt &b = pts[i + 1];
         if (!a.slides || b.v == a.v || b.t - a.t <= kBendStep) continue;
         int n = int((b.t - a.t) / kBendStep);
         for (int k = 1; k < n; ++k) {
             double f = k * kBendStep / (b.t - a.t);
-            out.push_back({a.t + k * kBendStep, a.v + (b.v - a.v) * f});
+            out.push_back({a.t + k * kBendStep, a.v + (b.v - a.v) * f, false});
         }
     }
-    out.push_back({pts.back().t, pts.back().v});
     return out;
 }
 
@@ -85,11 +88,13 @@ std::vector<BendEvent> bend_events(const std::vector<Pt> &points, double t0, dou
     if (have_before) ev.push_back({-1.0, before});
     bool have_last = false;
     int last = 0;
-    for (const auto &tv : glide(points)) {
-        if (t0 <= tv.first && tv.first <= t1) {
-            int raw = step(tv.second);
-            if (!have_last || raw != last) {    // the same value twice is work
-                ev.push_back({tv.first - t0, tv.second});
+    for (const Glided &g : glide(points)) {
+        if (t0 <= g.t && g.t <= t1) {
+            int raw = step(g.v);
+            // a value filled in that the engine would not hear is work; a
+            // written one is sent, as VocalWriter sends each of its own
+            if (!have_last || raw != last || g.written) {
+                ev.push_back({g.t - t0, g.v});
                 last = raw;
                 have_last = true;
             }
@@ -173,6 +178,7 @@ std::string request_key(const RenderRequest &r) {
         k += buf;
     };
     num(r.bpm);
+    num(r.end);
     for (const TempoChange &c : r.tempo_changes) {
         k += "T";
         num(c.beat);
@@ -318,6 +324,7 @@ RenderRequest make_request(const Song &song, const std::vector<const Track *> &p
     Clock clock = song.clock();
     r.bpm = clock.bpm;
     r.tempo_changes = clock.changes;
+    r.end = song.end;
     r.consonants = song.consonants;
     r.start = std::nearbyint(start * 1e6) / 1e6;
     r.reverb = song.reverb;
@@ -464,7 +471,9 @@ std::string part_key(int voice_id, const Part &p) {
         std::snprintf(buf, sizeof buf, "V%.17g,%d,", v.first, v.second);
         voices += buf;
     }
-    return "part:" + phrase_key(voice_id, as_phrase) + voices;
+    char end[32];
+    std::snprintf(end, sizeof end, "E%.17g", p.end);
+    return "part:" + phrase_key(voice_id, as_phrase) + voices + end;
 }
 
 //: A part as a whole, rests and all, for an engine that sings it so.
@@ -547,8 +556,8 @@ void Mixer::keep(const std::string &key, std::shared_ptr<const std::vector<float
     }
 }
 
-std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double consonants, double start,
-                                bool early, bool whole, bool *stopped_short, std::string *error) {
+std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double end, double consonants,
+                                double start, bool early, bool whole, bool *stopped_short, std::string *error) {
     if (t.consonants) consonants = *t.consonants;
     // the bends and the wheel on the clock: a tempo change moves them too
     std::vector<Pt> bends;
@@ -603,6 +612,7 @@ std::vector<float> Mixer::track(const PartRequest &t, const Clock &clock, double
     for (const auto &c : t.voices) own_time = own_time && Registry::get().family_of(c.second) == family;
     if (own_time && whole) {
         Part part = whole_part(t, clock, consonants);
+        part.end = end;
         std::string key = part_key(t.voice_id, part);
         std::shared_ptr<const std::vector<float>> sung;
         auto kept = phrases_.find(key);
@@ -851,7 +861,7 @@ Mixed Mixer::mix_locked(const RenderRequest &req, bool whole) {
     for (size_t k = 0; k < req.tracks.size(); ++k) {
         const PartRequest &t = req.tracks[k];
         std::string err;
-        ys[k] = track(t, req.clock(), req.consonants, req.start, req.anticipate, whole, &stopped, &err);
+        ys[k] = track(t, req.clock(), req.end, req.consonants, req.start, req.anticipate, whole, &stopped, &err);
         if (!err.empty()) {
             res.error = err;
             return res;
@@ -951,6 +961,7 @@ bool Mixer::sung_together(const RenderRequest &req, std::vector<float> *out, int
         for (const auto &v : t.voices)
             if (Registry::get().family_of(v.second) != f) return false;
         parts.push_back({t.voice_id, whole_part(t, req.clock(), req.consonants)});
+        parts.back().second.end = req.end;
         key += part_key(t.voice_id, parts.back().second) + ";";
     }
     key += std::to_string(rev.first) + "," + std::to_string(rev.second);

@@ -173,9 +173,11 @@ public:
 
 private:
     wxSpinCtrl *tempo_, *consonants_, *room_, *wet_;
-    wxTextCtrl *sig_;
+    wxTextCtrl *sig_, *end_;
     wxCheckBox *anticipate_;
     Sig was_sig_;
+    double was_end_;
+    wxString end_shown_;
     std::vector<std::pair<const VoiceControl *, wxSpinCtrl *>> voice_ctrls_;
 };
 

@@ -32,6 +32,9 @@ typedef struct vwseq_event {
     int status;
     int key;
     int vol;
+    /* at a note's tick, nonzero puts it after the note rather than before,
+       as a control a note itself carries from its start */
+    int after_note;
 } vwseq_event;
 
 enum {
@@ -67,6 +70,12 @@ typedef struct vwseq_part {
     const vwseq_event *events;      /* in time order */
     int event_count;
     int track_level;                /* 0-100 */
+    /* nonzero: no program change at the first tick, the events choosing
+       the voice, as a song whose first program change comes later */
+    int voice_later;
+    /* the tick the song ends at; 0, or one before the last sung note's end,
+       is a beat after it. A song takes its first part's. */
+    int32_t end;
     /* the speech channel the song would give the track: a song's first
        vocal track starts its vibrato half a cycle from the others' */
     int channel;

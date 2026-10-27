@@ -220,6 +220,7 @@ private:
     void write_project(const std::string &path);
     void on_song_settings(wxCommandEvent &);
     void on_import(wxCommandEvent &);
+    void import_vocalwriter(const std::string &path);
     void imported_words(std::vector<ImportedPart> parts,
                         const std::map<std::string, std::vector<std::string>> &found, size_t pending);
     void on_close(wxCloseEvent &evt);
@@ -232,6 +233,8 @@ private:
     std::vector<std::string> bars_shown_;
     std::vector<std::string> status_lines_;   // what each engine said at the start
     std::map<int, int> program_map_;
+    bool programs_known_ = false;
+    std::string vw_waiting_;   // a VocalWriter song to import once they are
     Player player_;
     bool rendering_ = false;
     std::string path_;

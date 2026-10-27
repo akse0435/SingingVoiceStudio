@@ -23,7 +23,9 @@ using json = nlohmann::ordered_json;
 
 const char *const kProjectSuffix = ".vws";
 const char *const kProjectWildcard = "Singing Voice Studio project (*.vws)|*.vws";
-const char *const kMidiWildcard = "MIDI files (*.mid;*.midi)|*.mid;*.midi";
+const char *const kImportWildcard =
+    "MIDI files and VocalWriter songs (*.mid;*.midi;*.trk)|*.mid;*.midi;*.trk|"
+    "MIDI files (*.mid;*.midi)|*.mid;*.midi|VocalWriter songs (*.trk)|*.trk";
 const char *const kDefaultPhoneme = "AA";
 
 const NoteControl kNoteControls[] = {
@@ -36,6 +38,9 @@ const NoteControl kNoteControls[] = {
     {"portamento", "Portamento", 0, 127, "0 to 127, the glide between notes"},
     {"chorus", "Chorus", -8192, 8191, "-8192 to 8191"},
     {"detune", "Detune", -8192, 8191, "-8192 to 8191"},
+    {"bend_range", "Bend range", 1, 12, "semitones a full bend reaches; VocalWriter starts at 2"},
+    {"lead_pitch", "Lead-in pitch", 0, 127,
+     "on a rest, the MIDI pitch the next note's first consonants are sung at, when not the next note's"},
 };
 const size_t kNoteControlCount = sizeof kNoteControls / sizeof kNoteControls[0];
 
@@ -616,6 +621,8 @@ json song_doc(const Song &song) {
     doc["format"] = kFormat;
     doc["version"] = kVersion;
     doc["bpm"] = double(song.bpm);
+    // only a song that keeps its end says so, so every other file stays as it was
+    if (song.end > 0) doc["end"] = song.end;
     doc["time_signature"] = {song.sig.first, song.sig.second};
     doc["consonants"] = double(song.consonants);
     json tracks = json::array();
@@ -695,6 +702,7 @@ Song load_project(const std::string &path) {
     }
     song.consonants = doc.contains("consonants") ? as_double(doc["consonants"], 1.0) : 1.0;
     song.bpm = doc.contains("bpm") ? as_double(doc["bpm"], 120) : 120;
+    song.end = doc.contains("end") ? std::max(0.0, as_double(doc["end"], 0)) : 0;
     song.voice = doc.contains("voice") ? read_voice(doc["voice"]) : VoiceStyle();
     song.reverb = doc.contains("reverb") ? read_reverb(doc["reverb"]) : Reverb{0, 0};
     song.anticipate = doc.contains("anticipate") ? truthy(doc["anticipate"]) : true;

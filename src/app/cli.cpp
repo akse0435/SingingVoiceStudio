@@ -13,6 +13,7 @@
 #include "core/paths.h"
 #include "core/project.h"
 #include "core/settings.h"
+#include "core/vwsong.h"
 #include "voices/registry.h"
 #include "voices/vocalwriter.h"
 
@@ -119,8 +120,14 @@ bool is_midi(const std::string &path) {
     return e == ".mid" || e == ".midi";
 }
 
-//: A project or a MIDI file, the MIDI imported exactly as the window does it.
+//: A project, a VocalWriter song or a MIDI file, the MIDI imported exactly as
+//: the window does it.
 Song open_song(const std::string &path) {
+    if (is_vocalwriter_song(path)) {
+        VwSongImport got = import_vocalwriter_song(path, vocalwriter_program_voices());
+        for (const std::string &n : got.notes) say(n);
+        return got.song;
+    }
     if (!is_midi(path)) return load_project(path);
     std::vector<std::string> names;
     for (const auto &p : midi_tracks(path)) names.push_back(p.first);
@@ -195,7 +202,7 @@ std::string usage() {
            "           [--anticipate | --no-anticipate] [--from BEATS]\n"
            "           [--list-voices] [--list-tracks] [--pronounce WORD...] [--version] [-q]\n"
            "\n"
-           "Sing a Singing Voice Studio project or a MIDI file.\n"
+           "Sing a Singing Voice Studio project, a VocalWriter song (.trk) or a MIDI file.\n"
            "\n"
            "what to write:\n"
            "  -o, --output FILE     render the whole song to this WAV file\n"
@@ -222,6 +229,7 @@ std::string usage() {
            "examples:\n"
            "  svs song.vws -o song.wav           render a song\n"
            "  svs tune.mid -o tune.wav           import a MIDI file and render it\n"
+           "  svs Daisy.trk -o daisy.wav         a VocalWriter song, as VocalWriter sang it\n"
            "  svs song.vws --tracks stems        one WAV per track, into stems\n"
            "  svs tune.mid --save tune.vws       import, save, open it later\n"
            "  svs song.vws -o q.wav --voice \"DECtalk Betty\"\n"
@@ -306,7 +314,7 @@ int run_cli(const CliArgs &args) {
     }
     if (!args.file.empty() && !file_exists(args.file)) return fail("there is no file called " + args.file);
     if (args.file.empty() && (!args.output.empty() || !args.tracks.empty() || !args.save.empty() || args.list_tracks))
-        return fail("which file? Give a project or a MIDI file to work on");
+        return fail("which file? Give a project, a VocalWriter song or a MIDI file to work on");
 
     if (!args.pronounce.empty()) {
         if (!Lexicon::get().ok()) return fail("VocalWriter's dictionary is not here, so words cannot be looked up");

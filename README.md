@@ -69,8 +69,9 @@ controllers beside its notes, so a song without any is the same file as
 before.
 
 **VocalWriter's controls** are kept on the notes as its songs keep them: a
-velocity, and the volume, colour, noise, breath, vibrato, portamento, chorus
-and detune from a point in a note on, each holding until the next (Edit
+velocity, and the volume, colour, noise, breath, vibrato, portamento, chorus,
+detune and bend range from a point in a note on, each holding until the next,
+and on a rest the pitch the next note's first consonants are sung at (Edit
 note, VocalWriter controls). Only VocalWriter's voices sing them, the
 velocity too -- to another engine a velocity would only be loudness, which a
 track's volume is -- so they are greyed for a note another engine sings.
@@ -82,6 +83,16 @@ being its program change; one that goes from engine to engine is sung phrase
 by phrase, each phrase cut where the voice changes and sung by the voice in
 force. A controller sets VocalWriter's controls as well, from where it stands
 on, as a note sets them from a point inside it.
+
+**VocalWriter's own songs** (.trk) open with File > Import (Ctrl+I) or on the
+command line. Each vocal track comes in as a part with everything VocalWriter
+sang it with: the syllables, phonemes and lyrics, the velocities, the
+controls above, the pitch bends and a voice change wherever the track has
+one. The song's tempo changes come in on a Tempo track at the top, as a MIDI
+file's do, with its reverb and its end (File > Song settings, Song end).
+Instrument and karaoke tracks are left out, and a note says so. A song
+opened this way and exported to WAV is, sample for sample, VocalWriter
+singing its vocal tracks, and so is the project it is saved as.
 
 Notes are written in VocalWriter's phoneme symbols whichever engine sings
 them; each engine translates (the tables are at the top of
@@ -281,7 +292,7 @@ Ctrl and Option for Alt, and Option+H to hear a note.
 | Space | play from the cursor, or stop |
 | Ctrl+P / Ctrl+H / Ctrl+M / Ctrl+. | play from the start / hear one note / metronome / stop |
 | Ctrl+O / Ctrl+S | open and save a project |
-| Ctrl+I | import a MIDI file |
+| Ctrl+I | import a MIDI file or a VocalWriter song |
 | Ctrl+Shift+S / Ctrl+Shift+T | export one WAV / one WAV per track |
 
 ## From the command line

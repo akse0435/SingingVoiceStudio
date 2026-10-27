@@ -706,6 +706,28 @@ wxSpinCtrl *spin(wxWindow *parent, int lo, int hi, int value, int width) {
     return new wxSpinCtrl(parent, wxID_ANY, "", wxDefaultPosition, wxSize(width, -1), wxSP_ARROW_KEYS, lo,
                           hi, value);
 }
+
+//: the song's end as bar and beat, "12 1"; empty when it has none
+std::string end_text(double end, Sig sig) {
+    if (end <= 0) return "";
+    auto bb = bar_and_beat(end, sig);
+    return std::to_string(bb.first) + " " + fmt_g(std::nearbyint(bb.second * 1000) / 1000);
+}
+
+//: "12 1", "12:1" or "12" back to beats from the start; 0 for empty
+double parse_end(const wxString &text, Sig sig) {
+    wxString t = text;
+    t.Replace(":", " ");
+    t.Trim(true).Trim(false);
+    if (t.empty()) return 0;
+    wxString rest;
+    double bar = 0, beat = 1;
+    if (!read_number(t.BeforeFirst(' ', &rest), &bar) || bar < 1) return 0;
+    rest.Trim(false);
+    if (!rest.empty() && !read_number(rest, &beat)) beat = 1;
+    beat = std::max(1.0, beat);
+    return (std::floor(bar) - 1) * bar_beats(sig) + (beat - 1) * 4.0 / std::max(sig.second, 1);
+}
 }  // namespace
 
 // -- PantheraDialog --------------------------------------------------------------
@@ -743,12 +765,16 @@ std::string PantheraDialog::folder() const {
 }
 
 SongSettingsDialog::SongSettingsDialog(wxWindow *parent, const Song &song, bool own_time)
-    : wxDialog(parent, wxID_ANY, "Song settings"), was_sig_(song.sig) {
+    : wxDialog(parent, wxID_ANY, "Song settings"), was_sig_(song.sig), was_end_(song.end),
+      end_shown_(W(end_text(song.end, song.sig))) {
     wxBoxSizer *outer = new wxBoxSizer(wxVERTICAL);
     tempo_ = spin(this, 30, 250, int(song.bpm), 80);
     labelled(this, outer, "Tempo", tempo_, 0, "beats per minute at the start; a controller changes it");
     sig_ = new wxTextCtrl(this, wxID_ANY, W(format_sig(song.sig)), wxDefaultPosition, wxSize(60, -1));
     labelled(this, outer, "Time signature", sig_, 0, "as 4/4; it sets where the bars fall");
+    end_ = new wxTextCtrl(this, wxID_ANY, end_shown_, wxDefaultPosition, wxSize(80, -1));
+    labelled(this, outer, "Song end", end_, 0,
+             "bar and beat, as 12 1, where an export stops; empty is a beat after the last note");
     consonants_ = spin(this, 10, 100, int(std::lrint(song.consonants * 100)), 80);
     labelled(this, outer, "Consonant length", consonants_, 0,
              "100 is natural, 40 clips them hard against the vowels");
@@ -789,6 +815,9 @@ SongSettingsDialog::SongSettingsDialog(wxWindow *parent, const Song &song, bool 
 void SongSettingsDialog::apply(Song &song) const {
     song.bpm = tempo_->GetValue();
     song.sig = parse_sig(U(sig_->GetValue()), was_sig_);
+    // left as shown, it keeps the end it had, which may lie between the
+    // thousandths of a beat it is shown in
+    song.end = end_->GetValue() == end_shown_ ? was_end_ : parse_end(end_->GetValue(), song.sig);
     song.consonants = consonants_->GetValue() / 100.0;
     for (const auto &vc : voice_ctrls_) song.voice.*(vc.first->field) = vc.second->GetValue();
     song.voice = clean_voice(song.voice);
@@ -844,6 +873,8 @@ ControllerDialog::ControllerDialog(wxWindow *parent, Studio *studio, const Note 
     // where the track is sung by another engine
     for (size_t i = 0; i < kNoteControlCount; ++i) {
         const NoteControl &k = kNoteControls[i];
+        // a rest's own: the pitch its next note's consonants are sung at
+        if (std::string(k.key) == "lead_pitch") continue;
         auto it = controller.controls.find(k.key);
         wxString shown = it != controller.controls.end() && !it->second.empty()
                              ? W(fmt_g(it->second.front().second))

@@ -17,6 +17,7 @@
 #include "app/dialogs.h"
 #include "audio/decode.h"
 #include "core/paths.h"
+#include "core/vwsong.h"
 #include "voices/controls.h"
 #include "voices/registry.h"
 #include "voices/vocalwriter.h"
@@ -289,7 +290,8 @@ void Studio::build_menu() {
     f->Append(wxID_SAVE, K("&Save project\tCtrl+S"), "Save the song");
     f->Append(wxID_SAVEAS, K("Save project &as..."), "Save the song under a new name");
     f->AppendSeparator();
-    f->Append(ID_IMPORT, K("&Import MIDI...\tCtrl+I"), "Take the notes from a MIDI file");
+    f->Append(ID_IMPORT, K("&Import MIDI or VocalWriter song...\tCtrl+I"),
+              "Take the notes from a MIDI file, or a whole song from VocalWriter");
     f->Append(ID_EXPORT, K("&Export WAV...\tCtrl+Shift+S"), "Write the whole song to one file");
     f->Append(ID_EXPORT_TRACKS, K("Export &tracks...\tCtrl+Shift+T"), "Write every track to a file of its own");
     f->AppendSeparator();
@@ -416,7 +418,7 @@ void Studio::on_song_settings(wxCommandEvent &) {
         song_.bpm = std::max(30.0, std::min(250.0, song_.bpm));
         bool changed = song_.bpm != was.bpm || song_.sig != was.sig || song_.consonants != was.consonants ||
                        song_.voice != was.voice || song_.reverb != was.reverb ||
-                       song_.anticipate != was.anticipate;
+                       song_.anticipate != was.anticipate || song_.end != was.end;
         if (changed) touch();
         // which bar a note falls in is read off the signature
         if (song_.sig != was.sig) sync(selection());
@@ -430,6 +432,12 @@ void Studio::on_song_settings(wxCommandEvent &) {
                                     : wxString("reverb off"));
         if (song_.anticipate != was.anticipate)
             say(wxString("consonants ") + (song_.anticipate ? "before" : "after") + " the beat");
+        if (song_.end != was.end) {
+            auto bb = bar_and_beat(song_.end, song_.sig);
+            say(song_.end > 0 ? W("the song ends at bar " + std::to_string(bb.first) + " beat " +
+                                  fmt_g(std::nearbyint(bb.second * 1000) / 1000))
+                              : wxString("the song ends a beat after its last note"));
+        }
     });
 }
 
@@ -525,7 +533,7 @@ void Studio::on_keys(wxCommandEvent &) {
         "Ctrl+M  metronome on or off, for playing only",
         "Ctrl+. stop",
         "Ctrl+O open a project, Ctrl+S save it",
-        "Ctrl+I  import a MIDI file",
+        "Ctrl+I  import a MIDI file or a VocalWriter song",
         "Ctrl+Shift+S  export the whole song as one WAV",
         "Ctrl+Shift+T  export every track to its own WAV",
         "Enter on a note edits it",
@@ -591,7 +599,13 @@ void Studio::set_program_map(const std::vector<int> &picks) {
     program_map_.clear();
     for (size_t p = 0; p < picks.size(); ++p)
         if (picks[p] >= 0) program_map_[int(p)] = picks[p];
+    programs_known_ = true;
     sync_tracks(current_);
+    if (!vw_waiting_.empty()) {
+        std::string path;
+        path.swap(vw_waiting_);
+        import_vocalwriter(path);
+    }
 }
 
 void Studio::set_voices(std::vector<VoiceListing> v) {
@@ -1899,6 +1913,10 @@ void Studio::on_open(wxCommandEvent &) {
 
 //: Open a project by name: the file dialog, and the command line.
 void Studio::open_project(const std::string &path) {
+    if (is_vocalwriter_song(path)) {
+        import_vocalwriter(path);
+        return;
+    }
     Song song;
     try {
         song = load_project(path);
@@ -1948,9 +1966,13 @@ void Studio::write_project(const std::string &path) {
 
 void Studio::on_import(wxCommandEvent &) {
     if (!may_discard("Import over it")) return;
-    wxFileDialog dlg(this, "Import MIDI", "", "", kMidiWildcard, wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+    wxFileDialog dlg(this, "Import", "", "", kImportWildcard, wxFD_OPEN | wxFD_FILE_MUST_EXIST);
     if (dlg.ShowModal() != wxID_OK) return;
     std::string path = U(dlg.GetPath());
+    if (is_vocalwriter_song(path)) {
+        import_vocalwriter(path);
+        return;
+    }
     std::vector<std::pair<std::string, int>> parts;
     try {
         parts = midi_tracks(path);
@@ -2039,6 +2061,43 @@ void Studio::on_import(wxCommandEvent &) {
             },
             true);
     }
+}
+
+//: A VocalWriter song comes in whole: its tempo changes, voices, controls,
+//: reverb and end, so that it sings as VocalWriter sang it.
+void Studio::import_vocalwriter(const std::string &path) {
+    // its voice changes are read through the program map, which is still
+    // being loaded when a song is opened from the command line
+    if (!programs_known_) {
+        vw_waiting_ = path;
+        return;
+    }
+    std::vector<int> programs(128, -1);
+    for (const auto &pv : program_map_)
+        if (pv.first >= 0 && pv.first < 128) programs[size_t(pv.first)] = pv.second;
+    VwSongImport got;
+    try {
+        got = import_vocalwriter_song(path, programs);
+    } catch (const std::exception &e) {
+        say(W("cannot import " + base_name(path) + ": " + e.what()));
+        return;
+    }
+    Clock clock = got.song.clock();
+    take(got.song, "");
+    int n = 0, parts = 0;
+    for (const Track &t : song_.tracks) {
+        parts += sings(t);
+        for (const Note &x : t.notes) n += !x.controller;
+    }
+    say(W("imported " + base_name(path) + ": " + plural(size_t(parts), "track") + ", " + std::to_string(n) +
+          " notes, " + fmt_g(clock.bpm) + " bpm, " + format_sig(song_.sig)));
+    // the tempo changes are on a track at the top; the first part is shown
+    if (!clock.changes.empty()) {
+        sync_tracks(1);
+        sync(0);
+        say(W(plural(clock.changes.size(), "tempo change") + " on the Tempo track at the top"));
+    }
+    for (const std::string &note : got.notes) say(W(note));
 }
 
 //: Fill in the pronunciations for a MIDI that carried only lyrics.

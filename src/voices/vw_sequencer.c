@@ -98,10 +98,12 @@ static int32_t write_part(const vwseq_part *part, int track, int program, buf *v
     int32_t last_sung = 0;
     int i, ei = 0, lyric = 0;
 
-    event(vocal, track, 0, 3, 0, program, 0, 0);
+    if (!part->voice_later)
+        event(vocal, track, 0, 3, 0, program, 0, 0);
     for (i = 0; i < part->note_count; i++) {
         const vwseq_note *n = &part->notes[i];
-        while (ei < part->event_count && part->events[ei].time <= n->start) {
+        while (ei < part->event_count && (part->events[ei].time < n->start ||
+                                          (part->events[ei].time == n->start && !part->events[ei].after_note))) {
             const vwseq_event *e = &part->events[ei++];
             event(vocal, track, e->time, e->status, e->key, e->vol, 0, 0);
         }
@@ -160,7 +162,8 @@ static unsigned char *write_song(const vwseq_part *parts, int count, const int *
         int t = clamp(parts[0].tempos[i].bpm, 10, 250);
         event(&tempo, 0, parts[0].tempos[i].time, 4, t >> 8, t & 0xff, 0, 0);
     }
-    event(&tempo, 0, last_sung + TICKS_PER_BEAT, 9, 0, 0, 0, 0);
+    event(&tempo, 0, parts[0].end >= last_sung && parts[0].end > 0 ? parts[0].end : last_sung + TICKS_PER_BEAT, 9,
+          0, 0, 0, 0);
     put(&tempo, kEnd, 4);
 
     memset(header, 0, sizeof header);

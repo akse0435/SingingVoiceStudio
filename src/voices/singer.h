@@ -23,10 +23,11 @@ constexpr int kSampleRate = 44100;
 inline const char *const kRest = "%";
 
 //: VocalWriter's own controls on a note, by name ("volume", "color", "noise",
-//: "breath", "vibrato", "vibrato_rate", "portamento", "chorus", "detune"),
-//: each [(where in the note 0..1, value)]. A value holds, as a control does
-//: in VocalWriter, until the next one. Only VocalWriter's voices sing them;
-//: see kNoteControls in core/project.h for the ranges.
+//: "breath", "vibrato", "vibrato_rate", "portamento", "chorus", "detune",
+//: "bend_range", "lead_pitch"), each [(where in the note 0..1, value)]. A
+//: value holds, as a control does in VocalWriter, until the next one. Only
+//: VocalWriter's voices sing them; see kNoteControls in core/project.h for
+//: the ranges.
 using NoteControls = std::map<std::string, std::vector<std::pair<double, double>>>;
 
 //: One of those controls set where a controller stands, between two notes:
@@ -135,6 +136,7 @@ struct Part {
     //: goes on to, each from its beat on
     std::vector<std::pair<double, int>> voices;
     std::vector<ControlAt> controls;                 // beats from the start
+    double end = 0;                                  // beats; 0 for a beat after the last note
 };
 
 //: The rendered phrase. `stopped_short` says the engine ran out of room or
