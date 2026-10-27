@@ -13,6 +13,10 @@
 #include <wx/filedlg.h>
 #include <wx/textdlg.h>
 
+#ifdef __WXMSW__
+#include <windows.h>
+#endif
+
 #include "app/announce.h"
 #include "app/crash.h"
 #include "app/dialogs.h"
@@ -54,6 +58,15 @@ const int kPreviewWait = 180;
 const int kFollowStep = 40;
 
 const int kMaxUndo = 100;
+
+//: The system's exclamation, so that a question is heard as well as read.
+void exclaim() {
+#ifdef __WXMSW__
+    ::MessageBeep(MB_ICONEXCLAMATION);
+#else
+    wxBell();
+#endif
+}
 
 std::string plural(size_t n, const char *one, const char *many = nullptr) {
     return std::to_string(n) + " " + (n == 1 ? one : (many ? many : (std::string(one) + "s").c_str()));
@@ -1033,6 +1046,7 @@ void Studio::on_track_remove(wxCommandEvent &) {
         if (notes_in) {
             std::string ask = rows.size() == 1 ? "Remove " + what + " and the " + plural(notes_in, "note") + " in it?"
                                                : "Remove the " + what + " and the " + plural(notes_in, "note") + " in them?";
+            exclaim();
             int answer = wxMessageBox(W(ask), kAppName, wxYES_NO | wxICON_QUESTION, this);
             if (answer != wxYES) {
                 say(W("kept " + (rows.size() == 1 ? what : "the " + what)));
@@ -2095,6 +2109,7 @@ void Studio::offer_recovery() {
     auto left = recovery_waiting();
     if (!left) return;
     std::string from = left->was_path.empty() ? "" : ", from " + base_name(left->was_path);
+    exclaim();
     int answer = wxMessageBox(
         W(std::string(kAppName) + " did not close properly last time, and the song you were working on "
                                    "was kept.\n\n" +
@@ -2123,6 +2138,7 @@ void Studio::offer_recovery() {
 //: Ask before throwing away unsaved work. True to go ahead.
 bool Studio::may_discard(const wxString &what) {
     if (!dirty_) return true;
+    exclaim();
     int answer = wxMessageBox("This song has changes that have not been saved. " + what + " anyway?", kAppName,
                               wxYES_NO | wxCANCEL | wxICON_QUESTION, this);
     return answer == wxYES;
@@ -2145,8 +2161,10 @@ void Studio::take(const Song &song, const std::string &path) {
     path_ = path;
     sync_tracks(0);
     sync(0);
-    reset_history(!path.empty());
-    touch(path.empty());
+    // as it came in, nothing changed yet: an imported song is still in the
+    // file it came from, so only an edit makes it worth asking about
+    reset_history(true);
+    touch(false);
 }
 
 void Studio::on_new(wxCommandEvent &) {
@@ -2456,6 +2474,8 @@ void Studio::import_vocalwriter(const std::string &path) {
 //: Fill in the pronunciations for a MIDI that carried only lyrics.
 void Studio::imported_words(std::vector<ImportedPart> parts,
                             const std::map<std::string, std::vector<std::string>> &found, size_t pending) {
+    // straight after an import it is part of the import, not an edit of its own
+    bool as_imported = !dirty_ && undo_.empty();
     undoable("pronounce imported words", [&] {
         int got = pronounce(parts, found, settings_.plain_held_vowels);
         // the parts are the last tracks: a Tempo track may come first
@@ -2470,6 +2490,10 @@ void Studio::imported_words(std::vector<ImportedPart> parts,
                              kDefaultPhoneme + " until you say otherwise"
                        : "")));
     });
+    if (as_imported) {
+        reset_history(true);
+        touch(false);
+    }
 }
 
 void Studio::on_close(wxCloseEvent &evt) {
