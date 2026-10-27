@@ -66,6 +66,8 @@ public:
 #endif
     std::vector<int> SelectedRows() const;
     int FirstSelected() const;
+    //: the row the keyboard is on, or -1
+    int FocusedRow() const;
     void SelectRow(int index, bool on = true);
     void FocusRow(int index);
 
@@ -77,12 +79,26 @@ public:
     void OnSelected(std::function<void()> fn);
     void OnKey(std::function<void(wxKeyEvent &)> fn);
 
+    //: A box to tick on every row, ticked and unticked with Space. Called
+    //: before the columns are added.
+    void EnableChecks();
+    bool IsChecked(int index) const;
+    //: ticks a row without OnChecked hearing of it
+    void SetChecked(int index, bool on);
+    //: what the window does when a row is ticked or unticked from the keyboard
+    //: or the mouse
+    void OnChecked(std::function<void(int)> fn);
+
     //: the caption above it, and the name a screen reader reads, together
     wxStaticText *caption_text = nullptr;
     class Named *caption_named = nullptr;
 
-#if !SVS_NATIVE_LISTCTRL
 private:
+    std::function<void(int)> checked_;
+    bool setting_ = false;
+#if !SVS_NATIVE_LISTCTRL
+    void on_space(wxKeyEvent &evt);
+    bool checks_ = false;
     //: Keys the native table claims for itself as well: Option and Command
     //: with the arrows mean "go to the end of the list" to an NSTableView,
     //: and the editor uses those same combinations to transpose a note and
@@ -117,6 +133,13 @@ public:
 //: A caption beside a control, and the same words to a screen reader.
 wxWindow *labelled(wxWindow *parent, wxSizer *sizer, const wxString &label, wxWindow *ctrl,
                    int proportion = 0, const wxString &hint = "");
+//: Grey a captioned control and its caption together: a screen reader reads
+//: the caption of a greyed control as text of the window's own.
+void enable_labelled(wxWindow *ctrl, bool on);
+//: A field's text selected whenever the keyboard is put on it, so that what
+//: is typed replaces it; not on a click, which places the caret. A spin
+//: control given a caption (labelled) is one already.
+void select_on_focus(wxWindow *field);
 //: A caption above a control that fills the window, such as a list.
 ReportList *caption(wxWindow *parent, wxSizer *sizer, const wxString &label, ReportList *ctrl,
                     int proportion = 1);

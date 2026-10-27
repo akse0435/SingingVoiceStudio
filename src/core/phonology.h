@@ -21,6 +21,10 @@ struct PhonemeInfo {
     int min_ms;
 };
 
+//: Put between syllables in a looked-up pronunciation, where the dictionary
+//: divides the word (Lexicon::phonemes); never sung.
+inline const char *const kSyllableBreak = ".";
+
 //: Every phoneme, in VocalWriter's internal order (its phoneme codes).
 const std::vector<PhonemeInfo> &phonemes();
 const PhonemeInfo *phoneme(const std::string &symbol);
@@ -40,6 +44,17 @@ std::string palette_alias(const std::string &symbol);
 
 bool is_nucleus(const std::string &symbol);
 bool is_vowel(const std::string &symbol);
+
+//: The vowel a note holding on to `vowel` sings when the vowel's whole sound
+//: is left to the last note: a diphthong's first part, an r-coloured vowel's
+//: plain one. The vowel itself if it is neither.
+std::string first_sound(const std::string &vowel);
+
+//: The vowel the notes after the first sing when `vowel` opens on a glide
+//: that is sung once, on the first note: YU's y, so UW is held after it.
+//: The vowel itself if it has none.
+std::string after_glide(const std::string &vowel);
+
 bool legal_onset(const std::vector<std::string> &syms);
 std::vector<std::vector<std::string>> syllabify(const std::vector<std::string> &phonemes);
 std::vector<std::vector<std::string>> regroup(const std::vector<std::string> &phonemes, int count);

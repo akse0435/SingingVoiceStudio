@@ -11,6 +11,7 @@
 // conveyed by colour or position alone.
 #pragma once
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <optional>
@@ -18,6 +19,8 @@
 #include <vector>
 
 #include <wx/wx.h>
+
+class wxProgressDialog;
 
 #include "app/widgets.h"
 #include "app/worker.h"
@@ -53,17 +56,28 @@ public:
     std::vector<PaletteRow> singable() const;
     Sig signature() const { return song_.sig; }
     const std::vector<VoiceListing> &voice_list() const { return voices_; }
+    //: a voice as the window names it, "VocalWriter Robert" or "Acoustic Grand Piano"
     std::string voice_name(int id) const;
     int track_voice_of(const Track &t) const { return track_voice(t, program_map_); }
     int consonant_pct() const { return int(std::lround(song_.consonants * 100)); }
     const VoiceStyle &song_voice() const { return song_.voice; }
     Reverb song_reverb() const { return song_.reverb; }
-    //: the voice of the track being worked on, for previews
-    int current_voice() const { return track_voice_of(track()); }
+    //: the voice of the track being worked on where the cursor is, for
+    //: previews: a controller before it may have changed it
+    int current_voice() const {
+        int i = list_ ? list_->FirstSelected() : -1;
+        return voice_at(i < 0 ? int(track().notes.size()) : i + 1);
+    }
+    int voice_at(int upto) const;
+    std::string label_of(const Note &n) const;
+    //: a vowel held over several notes sings its first sound until the last
+    bool plain_held() const { return settings_.plain_held_vowels; }
     //: render notes on the current track's voice and play them
     void preview(const std::vector<Note> &notes, std::function<void()> done);
+    //: `marked`: with the dictionary's syllables marked (Lexicon::phonemes)
     void lookup(const std::vector<std::string> &words,
-                std::function<void(std::map<std::string, std::vector<std::string>>)> done);
+                std::function<void(std::map<std::string, std::vector<std::string>>)> done,
+                bool marked = false);
     void play_audio(const Mixed &res, bool quiet = false);
 
 private:
@@ -102,6 +116,12 @@ private:
     void on_track_remove(wxCommandEvent &);
     void move_tracks(int delta);
     void on_panes(wxCommandEvent &);
+    void on_app_activate(wxActivateEvent &evt);
+    void come_back();
+    bool returning();
+    void give_back_focus();
+    void to_tracks();
+    void show_title();
 
     // -- notes ------------------------------------------------------------
     int selection() const;
@@ -114,7 +134,10 @@ private:
     std::vector<std::string> bars();
     void sync(int select = 0);
     void on_key(wxKeyEvent &evt);
-    void refresh_row(int i);
+    //: `voice`: the voice in force at the row, if the caller knows it
+    void refresh_row(int i, int voice = -1);
+    //: whether an instrument plays the current track's row `i`
+    bool played_at(int i) const { return is_gm_voice(voice_at(i)); }
     void refresh_bars();
     void nudge_pitch(int by);
     void nudge_length(bool up);
@@ -131,8 +154,14 @@ private:
     int insertion_point();
     const Note *insertion_neighbour();
     void on_add_word(wxCommandEvent &);
+    void on_add_word_existing(wxCommandEvent &);
+    void on_add_text(wxCommandEvent &);
     void on_add_note(wxCommandEvent &);
     void on_add_rest(wxCommandEvent &);
+    void on_add_controller(wxCommandEvent &);
+    std::string controller_said(int i);
+    std::vector<int> selected_notes();
+    const Note *note_before(int at);
     void on_edit(wxCommandEvent &);
     void on_remove(wxCommandEvent &);
 
@@ -149,9 +178,14 @@ private:
     void start_playing(double start, bool quiet = false);
     void played(const Mixed &res, bool quiet);
     void stop_audio();
+    void drop_playback();
     void on_stop(wxCommandEvent &);
+    std::string song_name() const;
     void on_export(wxCommandEvent &);
+    void export_progress(double done);
+    void exported(const RenderResult &res, const std::string &path);
     void on_export_tracks(wxCommandEvent &);
+    void on_export_midi(wxCommandEvent &);
     void export_track(std::shared_ptr<std::vector<std::pair<Track, std::string>>> jobs, size_t i,
                       int written);
     void mix(const RenderRequest &req, std::function<void(Mixed)> done);
@@ -159,6 +193,15 @@ private:
                 std::function<void(RenderResult)> done);
     void on_auto_preview(wxCommandEvent &);
     void on_panthera(wxCommandEvent &);
+    void on_close_rests(wxCommandEvent &);
+    double rests_to_close() const;
+    void on_remove_velocities(wxCommandEvent &);
+    void on_remove_volumes(wxCommandEvent &);
+    void on_own_path(wxCommandEvent &);
+    void on_plain_held(wxCommandEvent &);
+    void on_octave_instruments(wxCommandEvent &);
+    void on_follow(wxCommandEvent &);
+    void follow();
     void preview_note(int i);
     void preview_now(int i);
 
@@ -208,6 +251,9 @@ private:
     void write_project(const std::string &path);
     void on_song_settings(wxCommandEvent &);
     void on_import(wxCommandEvent &);
+    void on_append(wxCommandEvent &);
+    void take_midi(const std::string &path, bool append);
+    void import_vocalwriter(const std::string &path);
     void imported_words(std::vector<ImportedPart> parts,
                         const std::map<std::string, std::vector<std::string>> &found, size_t pending);
     void on_close(wxCloseEvent &evt);
@@ -220,12 +266,31 @@ private:
     std::vector<std::string> bars_shown_;
     std::vector<std::string> status_lines_;   // what each engine said at the start
     std::map<int, int> program_map_;
+    bool programs_known_ = false;
+    std::string vw_waiting_;   // a VocalWriter song to import once they are
+    std::string midi_waiting_;   // a MIDI file to import once the voices are known
     Player player_;
     bool rendering_ = false;
+    bool discard_render_ = false;   // a new song came in while it rendered
     std::string path_;
     bool dirty_ = false;
     Settings settings_;
-    wxTimer preview_timer_, recovery_timer_;
+    wxTimer preview_timer_, recovery_timer_, follow_timer_, export_timer_;
+    //: an export's progress window, while there is one, and its Cancel
+    wxProgressDialog *exporting_ = nullptr;
+    std::shared_ptr<std::atomic<bool>> export_cancel_;
+    int export_shown_ = 0;       // thousandths
+    //: the name of the file the song was imported from, for a song not yet saved
+    std::string import_name_;
+    //: what is playing, for the cursors to follow: the song from a beat, on its clock
+    bool following_ = false;
+    double play_from_ = 0;
+    double play_lead_ = 0;      // seconds the sound began before play_from_
+    //: the song playing, without the metronome, which is put in or taken out
+    //: of it as Ctrl+M asks (ticked); empty when it is not the song
+    Mixed play_mix_;
+    std::shared_ptr<const std::vector<float>> ticked(const Mixed &res) const;
+    Clock play_clock_;
     int preview_row_ = -1;
     std::unique_ptr<Worker> worker_;
     std::shared_ptr<Mixer> mixer_;
@@ -234,11 +299,23 @@ private:
 
     ReportList *tracks_list_ = nullptr;
     ReportList *list_ = nullptr;
+    wxWindow *last_list_ = nullptr;     // the list the keyboard was last in
+    wxWindow *left_list_ = nullptr;     // the one it was in when the program was left
+    //: the list the keyboard is being given back to, and since when
+    wxWindow *return_to_ = nullptr;
+    wxLongLong returned_at_;
+    static constexpr int kReturnMs = 1500;
     wxTextCtrl *messages_ = nullptr;
     wxStatusBar *status_ = nullptr;
     wxMenuItem *mi_play_ = nullptr;
     wxMenuItem *mi_metronome_ = nullptr;
     wxMenuItem *mi_auto_preview_ = nullptr;
+    wxMenuItem *mi_remove_velocities_ = nullptr;
+    wxMenuItem *mi_remove_volumes_ = nullptr;
+    wxMenuItem *mi_own_path_ = nullptr;
+    wxMenuItem *mi_plain_held_ = nullptr;
+    wxMenuItem *mi_octave_instruments_ = nullptr;
+    wxMenuItem *mi_follow_ = nullptr;
     wxMenuItem *mi_undo_ = nullptr;
     wxMenuItem *mi_redo_ = nullptr;
     bool relabel_pending_ = false;

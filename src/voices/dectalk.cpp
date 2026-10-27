@@ -1,4 +1,4 @@
-// dectalk.cpp -- DECtalk's ten voices, singing.
+// dectalk.cpp -- DECtalk's voices, singing.
 //
 // The synthesiser is DECtalk 5 as published in third_party/dectalk, built
 // with Microsoft's compiler into DECtalk.dll (scripts/build_dectalk.ps1) on
@@ -35,8 +35,7 @@
 //   built (scripts/build_dectalk.ps1 says how; scripts/build_dectalk_mac.sh
 //   does the same on macOS): every note from C2 to C5 comes out within about
 //   a cent of equal temperament at A = 440 Hz, as an average over its
-//   vibrato, but A4 (+4 cents) and B4 (+6), where the pitches DECtalk's
-//   pitch period can make are too far apart. A phrase that
+//   vibrato, and every note keeps its vibrato. A phrase that
 //   goes outside C2 to C5 is sung whole octaves up or down, and what still
 //   does not fit is sung on the nearest end of the scale. The voices make no
 //   difference to the pitch of a note.
@@ -54,10 +53,10 @@
 // scale can: each phoneme takes the semitone nearest the bent pitch at its
 // start (after any portamento has arrived), and a new note number is sent
 // where that changes. A vowel that the bend moves to another semitone is
-// sung as two of itself, the second on the new note, as DECtalk sings a
-// vowel held over two notes. A bend held by whole semitones is sung
-// exactly, with DECtalk's glide into it; one smaller than half a semitone
-// is not heard.
+// sent again on the new note, as a vowel held over two notes is, the first
+// piece on its first sound (Plan::hold_plain). A bend held by whole
+// semitones is sung exactly, with DECtalk's glide into it; one smaller than
+// half a semitone is not heard.
 //
 // VocalWriter's phonemes are DECtalk's nearly one for one (the table below).
 // Every vowel, and syllabic l and n, is stressed, as a sung syllable is: an
@@ -239,9 +238,10 @@ struct DtPhone {
 
 // VocalWriter's fifty-seven phonemes in DECtalk's arpabet, from
 // include\usa_phon.tab: iy ih ey eh ae aa ay aw ah ao ow oy uh uw rr yu ax ix
-// ir er ar or ur, w yx r ll hx rx lx, m n nx el en, f v th dh s z sh zh, p b
-// t d k g dx tx q ch jh. They are written in full (yx, not y; ll, not l):
-// DECtalk reads a one-letter abbreviation it does not know as text. The
+// ir er ar or ur, w yx r l hx rx lx, m n nx el en, f v th dh s z sh zh, p b
+// t d k g dx tx q ch jh. They are written as the table has them (yx, not y):
+// DECtalk reads a one-letter abbreviation it does not know as text, and a
+// doubled letter as two phonemes, the first at DECtalk's own length. The
 // diphthongs (ey ay oy aw ow yu) and the r-coloured vowels (ir er ar or ur,
 // and rr) are DECtalk's own, sung whole, long or short; held long, DECtalk's
 // diphthong reaches its second vowel within about a third of a second and
@@ -252,9 +252,11 @@ struct DtPhone {
 // the vowels VocalWriter has none for (EY, AE + r are er; OW + r is or).
 // VocalWriter's O, bOy's first part, is DECtalk's ow: the start of DECtalk's
 // oy is nearest ow (by its first two formants), and DECtalk's ow, unlike its
-// ay or ey, drifts only a little. QX, a longer glottal stop, is q held
-// longer. DECtalk dips the pitch for a glottal stop (q, and tx), as it does
-// when it speaks.
+// ay or ey, drifts only a little. DECtalk dips the pitch about an octave for
+// its glottal stops (q, and tx), as it does when it speaks, so neither is
+// sent: VocalWriter's Q (QX a longer one), the t of "jitter" in its
+// dictionary, is sung as DECtalk's flap, dx, as DECtalk says the word, and
+// TX, the t of "it", as DECtalk's t.
 const DtPhone kPhones[] = {
     {"IY", "iy", kVowel, true, "ir"},
     {"IH", "ih", kVowel, true, "ir"},
@@ -287,7 +289,7 @@ const DtPhone kPhones[] = {
     {"w", "w", kSonorant, false, nullptr},
     {"y", "yx", kSonorant, false, nullptr},
     {"r", "r", kSonorant, false, nullptr},   // rx after a vowel, see Plan::shape
-    {"l", "ll", kSonorant, false, nullptr},  // DECtalk makes it lx after a vowel
+    {"l", "l", kSonorant, false, nullptr},  // DECtalk makes it lx after a vowel
     {"h", "hx", kUnvoiced, false, nullptr},
     {"m", "m", kSonorant, false, nullptr},
     {"n", "n", kSonorant, false, nullptr},
@@ -308,9 +310,9 @@ const DtPhone kPhones[] = {
     {"g", "g", kStop, false, nullptr},
     {"CH", "ch", kStop, false, nullptr},
     {"JH", "jh", kStop, false, nullptr},
-    {"TX", "tx", kStop, false, nullptr},     // the t of "it"
-    {"Q", "q", kStop, false, nullptr},       // glottal stop
-    {"QX", "q", kStop, false, nullptr},      // a longer one
+    {"TX", "t", kStop, false, nullptr},      // the t of "it", sung as t
+    {"Q", "dx", kVoiced, false, nullptr},    // glottal stop, sung as a flap
+    {"QX", "dx", kVoiced, false, nullptr},   // a longer one
     {"DD", "dx", kVoiced, false, nullptr},   // flap, beTTer
     {"O", "ow", kVowel, true, "or"},         // bOy's first part
 };
@@ -585,22 +587,24 @@ struct Voice {
     double gain;          //: to bring full velocity to peaks of about one half
 };
 
-// Sung, every vowel is stressed and held, and five of the voices (Paul,
-// Harry, Dennis, Rita and Val) then go past full scale inside DECtalk, which
+// Sung, every vowel is stressed and held, and four of the voices (Paul,
+// Harry, Dennis and Rita) then go past full scale inside DECtalk, which
 // clips. Each voice's loudness (g5, the gain into its first formant, in dB)
 // is set so that the loudest vowels on the highest notes peak at about
 // -1.5 dB (0.74 to 0.86 of full scale, nothing clipped): 6 dB under
 // DECtalk's own for Paul, 9 for Harry, a few or none for the others. The
 // gains after it even the voices out: each was sung through ten vowels on
 // notes across its range at full velocity and scaled so that its median
-// peak is 0.5, as the SSI-263's are. Wendy whispers.
-const Voice kVoices[10] = {
+// peak is 0.5, as the SSI-263's are. Wendy whispers. Val is left out: it is
+// where DECtalk keeps a voice of the user's own, and here it is only Paul.
+const Voice kVoices[] = {
     {"Paul", "[:np][:dv g5 80]", 1.24},   {"Betty", "[:nb][:dv g5 78]", 1.21},
     {"Harry", "[:nh][:dv g5 72]", 1.56},  {"Frank", "[:nf][:dv g5 84]", 1.15},
     {"Dennis", "[:nd][:dv g5 80]", 0.92}, {"Kit", "[:nk][:dv g5 70]", 1.10},
     {"Ursula", "[:nu][:dv g5 79]", 1.19}, {"Rita", "[:nr][:dv g5 76]", 1.13},
-    {"Wendy", "[:nw][:dv g5 82]", 1.09},  {"Val", "[:nv][:dv g5 80]", 1.24},
+    {"Wendy", "[:nw][:dv g5 82]", 1.09},
 };
+constexpr int kVoiceCount = int(sizeof kVoices / sizeof kVoices[0]);
 
 // -- turning a phrase into what DECtalk is sent ------------------------------
 
@@ -635,6 +639,7 @@ public:
         shape();
         pitch();
         split();
+        hold_plain();
         choose_octave();
         build();
     }
@@ -757,6 +762,31 @@ private:
             out.push_back(cur);
         }
         placed_.swap(out);
+    }
+
+    // A vowel held over several notes, or cut by a bend, is sent once for
+    // each piece, and DECtalk sings each whole: EY over two as "ey ey"
+    // glides to its second part twice. So every piece but the last holds
+    // the vowel's first sound, "eh ey", and YU is whole on the first alone,
+    // "yu uw" (first_sound, after_glide), whatever the held vowel setting.
+    void hold_plain() {
+        for (size_t k = 0; k < placed_.size();) {
+            size_t j = k + 1;
+            if (placed_[k].ph->kind == kVowel)
+                while (j < placed_.size() && placed_[j].ph == placed_[k].ph) ++j;
+            std::string vw = placed_[k].ph->vw;
+            for (size_t i = k; j - k > 1 && i < j; ++i) {
+                Placed &p = placed_[i];
+                std::string sound = after_glide(vw) != vw ? (i > k ? after_glide(vw) : vw)
+                                                          : (i + 1 < j ? first_sound(vw) : vw);
+                // an r-coloured piece (shape) is left as it is
+                const DtPhone *q = dt_phone(sound);
+                if (sound == vw || !q || p.sym != p.ph->dt) continue;
+                p.ph = q;
+                p.sym = q->dt;
+            }
+            k = j;
+        }
     }
 
     // DECtalk sings from C2 to C5. A phrase that goes outside that is moved
@@ -1146,14 +1176,14 @@ public:
     std::string name() const override { return "DECtalk"; }
     std::vector<VoiceEntry> voices() override {
         std::vector<VoiceEntry> v;
-        for (int i = 0; i < 10; ++i)
+        for (int i = 0; i < kVoiceCount; ++i)
             v.push_back({kDectalkBase + i, std::string("DECtalk ") + kVoices[i].name});
         return v;
     }
     bool available(std::string *why) override { return Engine::get().ready(why); }
     std::unique_ptr<Singer> singer(int voice_id, std::string *err) override {
         int i = voice_id - kDectalkBase;
-        if (i < 0 || i >= 10) {
+        if (i < 0 || i >= kVoiceCount) {
             if (err) *err = "There is no DECtalk voice numbered " + std::to_string(voice_id) + ".";
             return nullptr;
         }

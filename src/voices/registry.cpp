@@ -13,6 +13,7 @@ Registry::Registry() {
     families_.push_back(make_ssi263_family());
     families_.push_back(make_microsoft_family());
     families_.push_back(make_macintalk_family());
+    families_.push_back(make_gm_family());
 }
 
 std::vector<VoiceListing> Registry::voices() {
@@ -36,6 +37,7 @@ Family *Registry::family_of(int voice_id) {
         if (base == kSsi263Base && f->name() == "SSI-263") return f.get();
         if (base == kMicrosoftBase && f->name() == "Microsoft") return f.get();
         if (base == kMacinTalkBase && f->name() == "MacinTalk") return f.get();
+        if (base == kGmBase && f->name() == "GM Soundbank") return f.get();
     }
     return nullptr;
 }
@@ -84,19 +86,39 @@ std::vector<std::string> Registry::status() {
 
 namespace svs {
 
+//: One voice put back by its name; true if it moved.
+static bool by_name(std::optional<int> &id, const std::optional<std::string> &name,
+                    const std::vector<VoiceListing> &voices) {
+    if (!name || name->empty()) return false;
+    for (const VoiceListing &v : voices)
+        if (id && v.id == *id && v.name == *name) return false;
+    for (const VoiceListing &v : voices)
+        if (v.name == *name) {
+            id = v.id;
+            return true;
+        }
+    return false;
+}
+
+//: A voice no longer offered, put on the one it sounded as: DECtalk's Val is
+//: where DECtalk keeps a voice of the user's own, and was only Paul.
+static bool retired(std::optional<int> &id, std::optional<std::string> &name) {
+    if (!(id && *id == kDectalkBase + 9) && !(name && *name == "DECtalk Val")) return false;
+    id = kDectalkBase;
+    name = "DECtalk Paul";
+    return true;
+}
+
 bool resolve_voice_names(Song &song, const std::vector<VoiceListing> &voices) {
     bool moved = false;
     for (Track &t : song.tracks) {
-        if (!t.voice_name || t.voice_name->empty()) continue;
-        bool same = false;
-        for (const VoiceListing &v : voices)
-            if (t.voice_id && v.id == *t.voice_id && v.name == *t.voice_name) same = true;
-        if (same) continue;
-        for (const VoiceListing &v : voices)
-            if (v.name == *t.voice_name) {
-                t.voice_id = v.id;
-                moved = true;
-                break;
+        moved = retired(t.voice_id, t.voice_name) || moved;
+        moved = by_name(t.voice_id, t.voice_name, voices) || moved;
+        // and every voice a controller changes to
+        for (Note &n : t.notes)
+            if (n.controller) {
+                moved = retired(n.voice_id, n.voice_name) || moved;
+                moved = by_name(n.voice_id, n.voice_name, voices) || moved;
             }
     }
     return moved;

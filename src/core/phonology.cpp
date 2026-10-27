@@ -48,8 +48,11 @@ int phoneme_code(const std::string &symbol) {
 }
 
 std::string palette_alias(const std::string &symbol) {
+    // VocalWriter's g_Opcode_To_ASCII table spells phoneme 53, the tap,
+    // "DX", phoneme 23, the rest, "_", and phoneme 55 "DD" as the engine does
     if (symbol == "OH") return "O";
-    if (symbol == "DX") return "DD";
+    if (symbol == "DX") return "Q";
+    if (symbol == "_") return "%";
     return symbol;
 }
 
@@ -115,6 +118,17 @@ bool is_vowel(const std::string &symbol) {
         "OY", "AW", "OW", "UW", "YU", "IR", "XR", "AR", "OR", "UR", "IX", "O", "RX"};
     return v.count(symbol) > 0;
 }
+
+std::string first_sound(const std::string &vowel) {
+    static const std::map<std::string, std::string> first = {
+        {"EY", "EH"}, {"AR", "AA"}, {"AW", "AA"}, {"AY", "AA"}, {"IR", "IY"},
+        {"OR", "O"},  {"OY", "O"},  {"UR", "UH"}, {"XR", "EH"},
+    };
+    auto it = first.find(vowel);
+    return it == first.end() ? vowel : it->second;
+}
+
+std::string after_glide(const std::string &vowel) { return vowel == "YU" ? "UW" : vowel; }
 
 bool legal_onset(const std::vector<std::string> &syms) {
     if (syms.size() <= 1) return true;

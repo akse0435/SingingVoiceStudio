@@ -20,6 +20,28 @@ struct Settings {
     //: where Panthera is, for the MacinTalk voices, when it is not where its
     //: NVDA add-on puts it; empty to look only there (set_macintalk_folder)
     std::string panthera_folder;
+    //: close the short rests between notes when a MIDI file is imported,
+    //: those up to `close_rests_beats` long
+    bool close_rests = false;
+    double close_rests_beats = 0.25;
+    //: and every rest in the middle of a word, however long
+    bool close_word_rests = false;
+    //: remove the notes' own velocities from the sung tracks of an imported
+    //: MIDI file, so they take the track's
+    bool remove_note_velocities = false;
+    //: and the volume changes on their notes, leaving the track's volume
+    bool remove_volume_changes = false;
+    //: sing VocalWriter's voices through VocalWriter 2.0's own play path
+    //: rather than phrase by phrase (set_vocalwriter_own_path)
+    bool vocalwriter_own_path = false;
+    //: a vowel an imported MIDI file holds over several notes sings its
+    //: first sound until the last of them (pronounce, `plain_held`)
+    bool plain_held_vowels = false;
+    //: an imported MIDI file's played parts on the instruments the soundbank
+    //: has an octave off are transposed an octave (import_midi, `octaves`)
+    bool octave_instruments = false;
+    //: while the song plays, every track's cursor moves to the note sung
+    bool follow_playback = false;
 };
 
 Settings load_settings();

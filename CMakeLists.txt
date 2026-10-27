@@ -159,12 +159,15 @@ set(CORE_SOURCES
   src/core/phonology.cpp
   src/core/project.cpp
   src/core/midifile.cpp
+  src/core/midiexport.cpp
+  src/core/vwsong.cpp
   src/core/settings.cpp
   src/audio/wav.cpp
   src/audio/mixer.cpp
   src/voices/pitch.cpp
   src/voices/registry.cpp
   src/voices/vocalwriter.cpp
+  src/voices/vw_sequencer.c
   src/voices/stubs.cpp
 )
 # -- miniaudio --------------------------------------------------------------
@@ -233,6 +236,8 @@ function(svs_executable name console)
     # where every function landed, so that a crash report's module+offset
     # lines can be traced to code (see src/app/crash.h)
     target_link_options(${name} PRIVATE -Wl,-Map=${CMAKE_BINARY_DIR}/${name}.map)
+    # a release keeps no symbols in the executable: the map traces a crash
+    target_link_options(${name} PRIVATE $<$<CONFIG:Release>:-s>)
     if(console)
       target_compile_definitions(${name} PRIVATE SVS_CONSOLE=1)
     else()
@@ -242,6 +247,8 @@ function(svs_executable name console)
     target_compile_options(${name} PRIVATE ${WX_CXXFLAGS})
     target_link_libraries(${name} PRIVATE svs_core ${WX_LIBS})
     target_link_libraries(${name} PRIVATE "-framework AppKit")
+    # a release keeps no debug map or local symbols in the executable
+    target_link_options(${name} PRIVATE $<$<CONFIG:Release>:-Wl,-S> $<$<CONFIG:Release>:-Wl,-x>)
     if(console)
       target_compile_definitions(${name} PRIVATE SVS_CONSOLE=1)
     endif()

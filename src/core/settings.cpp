@@ -1,5 +1,6 @@
 #include "core/settings.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <ctime>
 
@@ -50,6 +51,24 @@ Settings load_settings() {
         s.auto_preview = doc["auto_preview"].get<bool>();
     if (doc.contains("panthera_folder") && doc["panthera_folder"].is_string())
         s.panthera_folder = doc["panthera_folder"].get<std::string>();
+    if (doc.contains("close_rests") && doc["close_rests"].is_boolean())
+        s.close_rests = doc["close_rests"].get<bool>();
+    if (doc.contains("close_rests_beats") && doc["close_rests_beats"].is_number())
+        s.close_rests_beats = std::max(0.0, doc["close_rests_beats"].get<double>());
+    if (doc.contains("remove_note_velocities") && doc["remove_note_velocities"].is_boolean())
+        s.remove_note_velocities = doc["remove_note_velocities"].get<bool>();
+    if (doc.contains("remove_volume_changes") && doc["remove_volume_changes"].is_boolean())
+        s.remove_volume_changes = doc["remove_volume_changes"].get<bool>();
+    if (doc.contains("vocalwriter_own_path") && doc["vocalwriter_own_path"].is_boolean())
+        s.vocalwriter_own_path = doc["vocalwriter_own_path"].get<bool>();
+    if (doc.contains("close_word_rests") && doc["close_word_rests"].is_boolean())
+        s.close_word_rests = doc["close_word_rests"].get<bool>();
+    if (doc.contains("plain_held_vowels") && doc["plain_held_vowels"].is_boolean())
+        s.plain_held_vowels = doc["plain_held_vowels"].get<bool>();
+    if (doc.contains("octave_instruments") && doc["octave_instruments"].is_boolean())
+        s.octave_instruments = doc["octave_instruments"].get<bool>();
+    if (doc.contains("follow_playback") && doc["follow_playback"].is_boolean())
+        s.follow_playback = doc["follow_playback"].get<bool>();
     return s;
 }
 
@@ -58,6 +77,15 @@ bool save_settings(const Settings &s) {
     json doc;
     doc["auto_preview"] = s.auto_preview;
     if (!s.panthera_folder.empty()) doc["panthera_folder"] = s.panthera_folder;
+    doc["close_rests"] = s.close_rests;
+    doc["close_rests_beats"] = s.close_rests_beats;
+    doc["remove_note_velocities"] = s.remove_note_velocities;
+    doc["remove_volume_changes"] = s.remove_volume_changes;
+    doc["vocalwriter_own_path"] = s.vocalwriter_own_path;
+    doc["close_word_rests"] = s.close_word_rests;
+    doc["plain_held_vowels"] = s.plain_held_vowels;
+    doc["octave_instruments"] = s.octave_instruments;
+    doc["follow_playback"] = s.follow_playback;
     return write_text(in_folder("settings.json"), doc.dump(1) + "\n");
 }
 

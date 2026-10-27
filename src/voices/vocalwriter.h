@@ -7,6 +7,7 @@
 // program.
 #pragma once
 
+#include <functional>
 #include <map>
 #include <mutex>
 #include <string>
@@ -47,23 +48,44 @@ class Lexicon {
 public:
     static Lexicon &get();
     bool ok() const { return ed_ != nullptr; }
-    //: empty if there is no pronunciation
-    std::vector<std::string> phonemes(const std::string &word);
+    //: empty if there is no pronunciation; `marked` puts kSyllableBreak
+    //: between the dictionary's syllables. A word the dictionary does not
+    //: know, written in pieces with hyphens, is the pieces' if it knows them.
+    std::vector<std::string> phonemes(const std::string &word, bool marked = false);
 
 private:
     Lexicon();
+    //: one word, with the lock held; `known`: the dictionary knew it
+    std::vector<std::string> look_up(const std::string &clean, bool marked, bool *known);
     vw_editor *ed_ = nullptr;
     std::mutex mu_;
 };
 
+//: Whether VocalWriter's voices are sung through VocalWriter 2.0's own play
+//: path, its parser and sequencer, so that a part comes out sample for sample
+//: as VocalWriter sang it; otherwise they are sung phrase by phrase, as every
+//: other engine is and as VocalWriter Studio sang them. Off to begin with.
+void set_vocalwriter_own_path(bool on);
+bool vocalwriter_own_path();
+
 //: Which voice each old program number picks, for songs written down as
 //: program changes. -1 where there is none.
 std::vector<int> vocalwriter_program_voices();
+
+//: The parts of a song, as (voice, part) and each sung by VocalWriter, sung
+//: together as VocalWriter played a song: one mix through its reverb, into
+//: interleaved stereo. False, with `error` set if the engine failed, when
+//: it could not: then they are sung one by one.
+bool vocalwriter_song(const std::vector<std::pair<int, Part>> &parts, int room, int wet,
+                      std::vector<float> *stereo, std::string *error);
 std::string vocalwriter_engine_name();
 
 //: The application's reverb over interleaved stereo floats, through the
 //: engine's own 16-bit reverberator. Returns false (and leaves `mix` alone)
-//: if the reverb is off or the engine is not available.
-bool vocalwriter_reverb(std::vector<float> &mix, int room, int wet);
+//: if the reverb is off or the engine is not available. `going`, if given,
+//: hears how far it has got, 0 to 1, and returns false to stop it: then it
+//: returns false too, `mix` part done.
+bool vocalwriter_reverb(std::vector<float> &mix, int room, int wet,
+                        const std::function<bool(double)> &going = {});
 
 }  // namespace svs

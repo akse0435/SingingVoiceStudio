@@ -57,6 +57,10 @@ int ReportList::FirstSelected() const {
     return int(GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED));
 }
 
+int ReportList::FocusedRow() const {
+    return int(GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_FOCUSED));
+}
+
 void ReportList::SelectRow(int index, bool on) {
     if (index < 0 || index >= GetItemCount()) return;
     SetItemState(index, on ? wxLIST_STATE_SELECTED : 0, wxLIST_STATE_SELECTED);
@@ -83,6 +87,31 @@ void ReportList::OnKey(std::function<void(wxKeyEvent &)> fn) {
     Bind(wxEVT_KEY_DOWN, [fn](wxKeyEvent &evt) { fn(evt); });
 }
 
+// The list view's own check boxes: Space ticks them, and a screen reader
+// says "checked" and "not checked".
+void ReportList::EnableChecks() {
+    EnableCheckBoxes(true);
+    auto changed = [this](wxListEvent &evt) {
+        evt.Skip();
+        if (!setting_ && checked_) checked_(int(evt.GetIndex()));
+    };
+    Bind(wxEVT_LIST_ITEM_CHECKED, changed);
+    Bind(wxEVT_LIST_ITEM_UNCHECKED, changed);
+}
+
+bool ReportList::IsChecked(int index) const {
+    return index >= 0 && index < GetItemCount() && IsItemChecked(index);
+}
+
+void ReportList::SetChecked(int index, bool on) {
+    if (index < 0 || index >= GetItemCount()) return;
+    setting_ = true;
+    CheckItem(index, on);
+    setting_ = false;
+}
+
+void ReportList::OnChecked(std::function<void(int)> fn) { checked_ = std::move(fn); }
+
 #else
 
 ReportList::ReportList(wxWindow *parent, long style, const wxSize &size)
@@ -97,6 +126,7 @@ long ReportList::InsertColumn(long col, const wxString &heading, int, int width)
 
 long ReportList::InsertItem(long index, const wxString &label) {
     wxVector<wxVariant> row;
+    if (checks_) row.push_back(wxVariant(false));
     row.push_back(wxVariant(label));
     for (int c = 1; c < cols_; ++c) row.push_back(wxVariant(wxString()));
     if (index >= long(GetItemCount()))
@@ -108,8 +138,45 @@ long ReportList::InsertItem(long index, const wxString &label) {
 
 bool ReportList::SetItem(long index, int column, const wxString &label) {
     if (index < 0 || index >= long(GetItemCount()) || column < 0 || column >= cols_) return false;
-    SetTextValue(label, unsigned(index), unsigned(column));
+    SetTextValue(label, unsigned(index), unsigned(column + (checks_ ? 1 : 0)));
     return true;
+}
+
+// The check boxes are a column of their own, ahead of the others.
+void ReportList::EnableChecks() {
+    if (checks_) return;
+    checks_ = true;
+    AppendToggleColumn("", wxDATAVIEW_CELL_ACTIVATABLE);
+    Bind(wxEVT_DATAVIEW_ITEM_VALUE_CHANGED, [this](wxDataViewEvent &evt) {
+        evt.Skip();
+        int row = ItemToRow(evt.GetItem());
+        if (!setting_ && checked_ && evt.GetColumn() == 0 && row != wxNOT_FOUND) checked_(row);
+    });
+    Bind(wxEVT_CHAR_HOOK, &ReportList::on_space, this);
+}
+
+bool ReportList::IsChecked(int index) const {
+    return checks_ && index >= 0 && index < GetItemCount() && GetToggleValue(unsigned(index), 0);
+}
+
+void ReportList::SetChecked(int index, bool on) {
+    if (!checks_ || index < 0 || index >= GetItemCount()) return;
+    setting_ = true;
+    SetToggleValue(on, unsigned(index), 0);
+    setting_ = false;
+}
+
+void ReportList::OnChecked(std::function<void(int)> fn) { checked_ = std::move(fn); }
+
+// The table does not tick a box from the keyboard, so Space does it here.
+void ReportList::on_space(wxKeyEvent &evt) {
+    int row = FocusedRow();
+    if (evt.GetKeyCode() != WXK_SPACE || evt.HasAnyModifiers() || !owns_focus() || row < 0) {
+        evt.Skip();
+        return;
+    }
+    SetChecked(row, !IsChecked(row));
+    if (checked_) checked_(row);
 }
 
 std::vector<int> ReportList::SelectedRows() const {
@@ -127,6 +194,11 @@ std::vector<int> ReportList::SelectedRows() const {
 int ReportList::FirstSelected() const {
     std::vector<int> rows = SelectedRows();
     return rows.empty() ? -1 : rows[0];
+}
+
+int ReportList::FocusedRow() const {
+    wxDataViewItem item = GetCurrentItem();
+    return item.IsOk() ? ItemToRow(item) : -1;
 }
 
 // The editor drives everything from the keyboard, so where the selection is
@@ -254,11 +326,31 @@ wxWindow *labelled(wxWindow *parent, wxSizer *sizer, const wxString &label, wxWi
     ctrl->SetName(label);
     set_accessible(ctrl, label, hint);
     name_spin_buddy(ctrl, text);
+    if (wxDynamicCast(ctrl, wxSpinCtrl)) select_on_focus(ctrl);
     wxBoxSizer *box = new wxBoxSizer(wxHORIZONTAL);
     box->Add(text, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
     box->Add(ctrl, proportion, wxALIGN_CENTER_VERTICAL);
     sizer->Add(box, 0, wxEXPAND | wxALL, 4);
     return ctrl;
+}
+
+// Tabbing into a text box selects its text already. A spin control's edit
+// box, and a box the program puts the focus in, get only the caret at the
+// start, so what was typed went in front of what was there.
+void select_on_focus(wxWindow *field) {
+    field->Bind(wxEVT_SET_FOCUS, [field](wxFocusEvent &evt) {
+        evt.Skip();
+        if (wxGetMouseState().LeftIsDown()) return;
+        field->CallAfter([field] {
+            if (wxSpinCtrl *s = wxDynamicCast(field, wxSpinCtrl)) s->SetSelection(-1, -1);
+            else if (wxTextCtrl *t = wxDynamicCast(field, wxTextCtrl)) t->SelectAll();
+        });
+    });
+}
+
+void enable_labelled(wxWindow *ctrl, bool on) {
+    ctrl->Enable(on);
+    if (wxStaticText *text = wxDynamicCast(ctrl->GetPrevSibling(), wxStaticText)) text->Enable(on);
 }
 
 ReportList *caption(wxWindow *parent, wxSizer *sizer, const wxString &label, ReportList *ctrl,

@@ -13,7 +13,10 @@
 #include <string>
 #include <vector>
 
+#include <memory>
+
 #include <wx/wx.h>
+#include <wx/snglinst.h>
 
 #include "app/cli.h"
 #include "app/crash.h"
@@ -60,10 +63,57 @@ bool attach_console() {
     return true;
 }
 
+//: One copy at a time: a second would take the song the first keeps for
+//: recovery as left by a crash. It says so and gives way.
+const char *const kRunning = "Singing Voice Studio is already running.";
+std::string running_text(const std::string &file) {
+    return file.empty() ? kRunning : std::string(kRunning) + "\n\n" + file +
+                                         " was not opened. Open it from the window that is running.";
+}
+
+#ifdef __WXMSW__
+//: The window of the copy already running, by its title's ending.
+BOOL CALLBACK find_studio(HWND hwnd, LPARAM found) {
+    wchar_t title[512];
+    int n = GetWindowTextW(hwnd, title, 512);
+    const std::wstring tail = L" - Singing Voice Studio";
+    if (n >= int(tail.size()) && std::wstring(title + n - tail.size()) == tail && IsWindowVisible(hwnd)) {
+        *reinterpret_cast<HWND *>(found) = hwnd;
+        return FALSE;
+    }
+    return TRUE;
+}
+
+//: Asked before wx starts, so a second copy shows nothing but the message:
+//: a mutex for this session, held until the copy that made it ends. Windows'
+//: own message box sounds the asterisk with it.
+bool gave_way(const std::string &file) {
+    HANDLE mutex = CreateMutexW(nullptr, FALSE, L"Local\\SingingVoiceStudio");
+    if (!mutex || GetLastError() != ERROR_ALREADY_EXISTS) return false;
+    MessageBoxW(nullptr, svs::widen(running_text(file)).c_str(), L"Singing Voice Studio",
+                MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
+    HWND other = nullptr;
+    EnumWindows(find_studio, reinterpret_cast<LPARAM>(&other));
+    if (other) {
+        if (IsIconic(other)) ShowWindow(other, SW_RESTORE);
+        SetForegroundWindow(other);
+    }
+    return true;
+}
+#endif
+
 class App : public wxApp {
 public:
     explicit App(std::string file) : file_(std::move(file)) {}
     bool OnInit() override {
+#ifndef __WXMSW__
+        running_ = std::make_unique<wxSingleInstanceChecker>();
+        if (running_->Create("SingingVoiceStudio-" + wxGetUserId()) && running_->IsAnotherRunning()) {
+            wxMessageBox(wxString::FromUTF8(running_text(file_).c_str()), "Singing Voice Studio",
+                         wxOK | wxICON_INFORMATION);
+            return false;
+        }
+#endif
         frame_ = new svs::Studio(file_);
         frame_->Show();
         return true;
@@ -80,6 +130,7 @@ public:
 private:
     std::string file_;
     svs::Studio *frame_ = nullptr;
+    std::unique_ptr<wxSingleInstanceChecker> running_;
 };
 
 }  // namespace
@@ -106,6 +157,9 @@ int main(int argc, char **argv) {
         }
         return svs::run_cli(args);
     }
+#ifdef __WXMSW__
+    if (gave_way(args.file)) return 0;
+#endif
     wxApp::SetInstance(new App(args.file));
 #ifdef __WXMSW__
     int none = 0;

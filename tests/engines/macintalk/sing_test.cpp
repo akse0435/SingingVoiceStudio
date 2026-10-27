@@ -336,9 +336,9 @@ int main(int argc, char **argv) {
     bool ok = fam->available(&why);
     std::printf("%s: %s\n", fam->name().c_str(), ok ? "available" : why.c_str());
     std::vector<VoiceEntry> voices = fam->voices();
-    // the list is fixed: 24 voices in each of four generations (Alex is listed in Tiger too, and is not there)
-    if (voices.size() != 96) {
-        std::printf("FAIL: %zu voices listed, not 96\n", voices.size());
+    // the list is fixed: 23 voices in each of four generations, and Alex from Leopard on
+    if (voices.size() != 95) {
+        std::printf("FAIL: %zu voices listed, not 95\n", voices.size());
         ++failures;
     }
     std::string group;

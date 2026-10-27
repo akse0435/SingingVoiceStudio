@@ -492,7 +492,7 @@ std::vector<Direct::Ph> clause_phonemes(const std::string &text) {
 // dark, t before dh or a sonorant can be d or tx, dh after t, d or n is dz or
 // n, and so on. Allowed, and reported.
 bool allophone_of(const std::string &sent, const std::string &sung) {
-    static const char *pairs[][2] = {{"ll", "lx"}, {"t", "d"}, {"t", "tx"}, {"t", "df"}, {"t", "dx"},
+    static const char *pairs[][2] = {{"l", "lx"}, {"t", "d"}, {"t", "tx"}, {"t", "df"}, {"t", "dx"},
                                      {"d", "dx"}, {"dh", "dz"}, {"dh", "n"}, {"t", "ch"}, {"d", "jh"},
                                      {"r", "rx"}};
     for (auto &p : pairs)
@@ -875,7 +875,7 @@ int main(int argc, char **argv) {
                 std::string t = "[:phoneme arpabet speak on][:np][_<128,22>";
                 for (int i = 0; i < 6; ++i) {
                     std::string n = i % 2 ? "29" : "22";
-                    const char *ph[4] = {"s", "t", "ll", "'aa"};
+                    const char *ph[4] = {"s", "t", "l", "'aa"};
                     const int ms[4] = {70, 50, 60, 320};
                     for (int j = 0; j < 4; ++j) {
                         bool num = mode == 0 ? j == 0 : mode == 1 ? true : j == 3;

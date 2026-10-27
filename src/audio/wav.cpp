@@ -46,7 +46,9 @@ bool write_wav(const std::string &path, const std::vector<float> &samples, int c
     put32(b, data);
     b.reserve(b.size() + data);
     for (float s : samples) {
-        float c = std::max(-1.0f, std::min(1.0f, s));
+        // down to -32768, which VocalWriter's own samples can reach (see
+        // vocalwriter.cpp, collect)
+        float c = std::max(-32768.0f / 32767.0f, std::min(1.0f, s));
         // as numpy's astype('<i2') does: truncation toward zero
         int16_t v = int16_t(c * 32767.0f);
         put16(b, uint16_t(v));
