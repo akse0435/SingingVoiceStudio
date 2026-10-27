@@ -35,8 +35,7 @@
 //   built (scripts/build_dectalk.ps1 says how; scripts/build_dectalk_mac.sh
 //   does the same on macOS): every note from C2 to C5 comes out within about
 //   a cent of equal temperament at A = 440 Hz, as an average over its
-//   vibrato, but A4 (+4 cents) and B4 (+6), where the pitches DECtalk's
-//   pitch period can make are too far apart. A phrase that
+//   vibrato, and every note keeps its vibrato. A phrase that
 //   goes outside C2 to C5 is sung whole octaves up or down, and what still
 //   does not fit is sung on the nearest end of the scale. The voices make no
 //   difference to the pitch of a note.
