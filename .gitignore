@@ -1,8 +1,6 @@
 /build/
 /build-tests/
 /dist/
-/assets/
-/voices/
 *.wav
 /build-deps/
 /build-wx/
