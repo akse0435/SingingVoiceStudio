@@ -21,9 +21,9 @@ for %%d in ("build" "build-tests" "dist" "voices\dectalk" "third_party\dectalk\s
     )
 )
 
-rem Install missing MSYS2 packages.
+rem Install missing MSYS2 packages; Python 3 is for Eloquence's build.
 set "LOG=%TEMP%\svs-pacman.log"
-"%MSYS%\usr\bin\bash.exe" -lc "pacman -S --needed --noconfirm mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja git" >"%LOG%" 2>&1
+"%MSYS%\usr\bin\bash.exe" -lc "pacman -S --needed --noconfirm mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-python git" >"%LOG%" 2>&1
 if errorlevel 1 (
     type "%LOG%"
     echo Package install failed.
